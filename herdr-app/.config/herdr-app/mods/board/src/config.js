@@ -2,7 +2,7 @@
 // wrong with them, and the start settings for an item.
 
 import { BoardError, CONFIG_NAME, PAGE, SECTION_TONES, SECTION_TONE_ORDER, foldedName, isObject, isText, textList } from "./shared.js";
-import { viewDefaults, viewKind } from "./kinds/index.js";
+import { viewDefaults } from "./kinds/index.js";
 import { entryByName, mergeSettings, pathText, readSettings, valueAt, withSetting } from "./settings.js";
 
 export const START_DEFAULTS = { agent: null, machine: null, checkout: null, message: "", review: "" };
@@ -15,11 +15,11 @@ const GONE_OPEN = "gibt es nicht mehr: „Öffnen in“ im Startdialog wählt de
 const GONE_STATUS = "„startColumn“ gibt es nicht mehr: den Status setzt der Agent selbst";
 const TOP_KEYS = ["refreshMinutes", "start", "repos", "sources"];
 // What an old views.json, with its views at the top, is told.
-const OLD_SHAPE = "views.json hat noch die alte Form: die Ansichten stehen jetzt unter „sources“, die GitHub-Ansichten in " +
-  "„sources.github.contexts“, Azure in „sources.azure“ mit „org“ und „contexts“ (Kopf von mods/board/src/main.js)";
+const OLD_SHAPE = "views.json hat noch die alte Form: die Einträge von „views“ stehen jetzt unter „sources“, die von GitHub in " +
+  "„sources.github.contexts“, die von Azure in „sources.azure“ mit „org“ und „contexts“ (Kopf von mods/board/src/main.js)";
 // What a views.json from before the contexts is told.
-const BEFORE_CONTEXTS = "views.json hat noch die Form vor den Kontexten: die GitHub-Ansichten stehen jetzt je Besitzer in " +
-  "„sources.github.contexts“ ({ \"owner\", \"projects\": [die Boards, ohne „source“ und „layout“, „number“, „field“ und „priorityField“ statt „project“], " +
+const BEFORE_CONTEXTS = "views.json hat noch die Form vor den Kontexten: die Einträge von „sources.github.views“ stehen jetzt je Besitzer in " +
+  "„sources.github.contexts“ ({ \"owner\", \"projects\": [die Projects als { \"number\" }, ihre Ansichten von GitHub], " +
   "\"prs\": der PR-Tab, ohne „source“, „layout“, „sections“ und „limit“, die für alle PR-Tabs in „sources.github.prs“ stehen }), " +
   "die Azure-Teams je Projekt in „sources.azure.contexts“ ({ \"project\", \"teams\": [{ \"team\", \"views\" }] }; den PR-Tab hat jedes Projekt von selbst) " +
   "(Kopf von mods/board/src/main.js)";
@@ -37,10 +37,8 @@ function startProblems(start, where) {
   return out;
 }
 
-const textProblems = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] !== null && typeof v[k] !== "string").map((k) => `„${k}“ muss Text sein`);
-
-// Keys every GitHub tab may have; each kind adds its own (VIEW_KINDS).
-const COMMON_KEYS = ["id", "name", "hide", "start"];
+// Keys every GitHub entry may have; each entry kind adds its own (ENTRY_KINDS).
+const COMMON_KEYS = ["start"];
 
 // The most items a board reads, and its default limit: ten of GitHub's
 // pages (PAGE).
@@ -73,81 +71,122 @@ function sectionsWithTones(sections) {
   return sections.map((s) => ({ name: s.name, query: s.query, tone: s.tone ?? order[next++ % order.length] }));
 }
 
-// Per GitHub view kind ("github <layout>", viewKind; its entry in KINDS,
-// kinds/index.js, says how it shows): the tab of a context it is (a
-// project's board, or the context's PR list), its own keys, what is wrong
-// with them, and its fields with their defaults filled in (`owner`: the
-// context's; `shared`: the PR sections of sources.github.prs).
-const VIEW_KINDS = {
-  "github board": {
-    keys: ["number", "field", "priorityField", "filter", "limit"],
+// A project's keys of the form before its views came from GitHub, and what
+// such a project is told; it is left out.
+const PROJECT_BEFORE = ["id", "name", "field", "filter", "priorityField", "hide"];
+const PROJECT_SHAPE = "{ \"number\" }, dazu „limit“, „start“ und je Ansicht „views“: { \"<Nummer der Ansicht>\": { \"hide\": [...] } }";
+const projectBefore = (keys) =>
+  `${keys.map((k) => `„${k}“`).join(", ")} ${keys.length > 1 ? "stammen" : "stammt"} aus der Form vor den Ansichten von GitHub: ein Project ist jetzt ${PROJECT_SHAPE}; ` +
+  "Name, Ansichten, Filter, Spalten und Priorität kommen von GitHub (Kopf von mods/board/src/main.js)";
+
+// A project's per-view keys: { "<view number>": { hide } }, its hidden
+// board columns, which GitHub's API does not give.
+const VIEW_NUMBER = /^[1-9][0-9]*$/;
+function projectViewsProblems(views) {
+  if (views === undefined) return [];
+  if (!isObject(views) || !Object.keys(views).every((n) => VIEW_NUMBER.test(n))) {
+    return ["„views“ ist ein Objekt mit den Nummern der Ansichten als Schlüsseln, etwa { \"1\": { \"hide\": [\"Done\"] } }"];
+  }
+  return Object.entries(views).flatMap(([n, v]) => {
+    if (!isObject(v)) return [`„views.${n}“ muss ein Objekt sein`];
+    return [
+      ...Object.keys(v).filter((k) => k !== "hide").map((k) => `„views.${n}.${k}“ gibt es nicht`),
+      ...(v.hide === undefined || textList(v.hide) ? [] : [`„views.${n}.hide“ muss eine Liste von Texten sein`]),
+    ];
+  });
+}
+
+// Per kind of a GitHub context's entry (its `entryKind`: a project, whose
+// views come from GitHub, or the context's PR list, a view of kind "github
+// list"): its own keys, the keys of an older form that leave it out
+// (`before`), what is wrong with its keys, the key that names it (`name`;
+// `named`: whether a value of it names one; `nameIn`: whose entries it is
+// its own among, its context's or all contexts'), its place as an error
+// names it (`at`), its id and its settings' path, whether it needs the PR
+// sections of sources.github.prs (`needsShared`), and its fields with their
+// defaults filled in (`owner`: the context's; `shared`: those sections).
+const ENTRY_KINDS = {
+  project: {
+    keys: ["number", "limit", "views"],
+    before: PROJECT_BEFORE,
     problems(v) {
       const out = limitProblems(v.limit, BOARD_LIMIT);
       if (!(Number.isInteger(v.number) && v.number >= 1)) out.push("„number“ ist die Nummer des Projects, eine ganze Zahl ab 1");
-      out.push(...["field", "priorityField"].filter((k) => v[k] !== undefined && !isText(v[k])).map((k) => `„${k}“ muss Text sein`));
-      return [...out, ...textProblems(v, ["filter"])];
+      return [...out, ...projectViewsProblems(v.views)];
     },
-    defaults: (v, owner) => ({
-      project: {
-        owner, number: v.number, field: v.field ?? "Status", priorityField: v.priorityField ?? "Priority",
-        // A project may lack the default one: only a named one it lacks is told.
-        priorityGiven: v.priorityField !== undefined,
-      },
-      filter: v.filter ?? "",
-      limit: v.limit ?? BOARD_LIMIT,
-    }),
+    name: "number",
+    named: Number.isInteger,
+    nameIn: "context",
+    at: (v, j) => `Project ${j + 1}${Number.isInteger(v?.number) ? ` (${v.number})` : ""}`,
+    id: (v, owner) => projectTabId(owner, v.number),
+    settingsPath: (v, context) => [...context, "projects", String(v.number)],
+    defaults: (v, owner) => ({ owner, number: v.number, limit: v.limit ?? BOARD_LIMIT, start: v.start ?? {}, views: v.views ?? {} }),
   },
-  "github list": {
-    keys: ["hideRepos", ...SHARED_PRS_KEYS],
+  prs: {
+    keys: ["id", "name", "hide", "hideRepos", ...SHARED_PRS_KEYS],
+    before: [],
     problems: (v) => [
+      ...(isText(v.id) ? [] : ["„id“ fehlt"]),
+      ...(v.name === undefined || isText(v.name) ? [] : ["„name“ muss Text sein"]),
+      ...(v.hide === undefined || textList(v.hide) ? [] : ["„hide“ muss eine Liste von Texten sein"]),
       ...SHARED_PRS_KEYS.filter((k) => v[k] !== undefined).map((k) => `„${k}“ ${SHARED_PRS}`),
       ...(v.hideRepos === undefined || (textList(v.hideRepos) && v.hideRepos.every((r) => FULL_REPO.test(r)))
         ? []
         : ["„hideRepos“ ist eine Liste von Repos mit Besitzer, etwa [\"owner/repo\"]"]),
     ],
-    defaults: (v, _owner, shared) => ({ ...shared, hideRepos: v.hideRepos ?? [] }),
+    name: "id",
+    named: isText,
+    nameIn: "all",
+    at: () => "PR-Tab",
+    id: (v) => v.id,
+    settingsPath: (v, context) => [...context, "prs"],
+    needsShared: true,
+    defaults: (v, _owner, shared) => ({
+      ...viewDefaults(), ...(v.hide && { hide: v.hide }), ...(v.start && { start: v.start }),
+      layout: "list", name: v.name ?? PRS_NAME, ...shared, hideRepos: v.hideRepos ?? [],
+    }),
   },
 };
 
 const PRS_NAME = "PRs";
 
-function tabProblems(v, layout) {
+function tabProblems(v, entryKind) {
   if (!isObject(v)) return ["muss ein Objekt sein"];
-  const kind = VIEW_KINDS[viewKind({ source: "github", layout })];
+  const kind = ENTRY_KINDS[entryKind];
+  const before = kind.before.filter((k) => Object.hasOwn(v, k));
+  if (before.length) return [projectBefore(before)];
   const out = [];
-  if (!isText(v.id)) out.push("„id“ fehlt");
-  if (layout === "board" && !isText(v.name)) out.push("„name“ fehlt");
-  else if (v.name !== undefined && !isText(v.name)) out.push("„name“ muss Text sein");
   for (const key of Object.keys(v)) {
     if (key === "startColumn") out.push(GONE_STATUS);
     else if (!COMMON_KEYS.includes(key) && !kind.keys.includes(key)) out.push(`„${key}“ gibt es nicht`);
   }
-  if (v.hide !== undefined && !textList(v.hide)) out.push("„hide“ muss eine Liste von Texten sein");
   return [...out, ...kind.problems(v), ...startProblems(v.start, "start")];
 }
 
-function normalizeView(v, layout, owner, shared) {
-  const context = [...GITHUB_CONTEXTS, owner];
-  const settingsPath = layout === "board" ? [...context, "projects", v.id] : [...context, "prs"];
-  const common = { ...viewDefaults(), id: v.id, name: v.name ?? PRS_NAME, source: "github", layout, settingsPath };
-  if (v.hide !== undefined) common.hide = v.hide;
-  if (v.start !== undefined) common.start = v.start;
-  return { ...common, ...VIEW_KINDS[viewKind(common)].defaults(v, owner, shared) };
+// A project's tab id: its owner's and its number, which name it on GitHub.
+export const projectTabId = (owner, number) => `github:project:${owner}/${number}`;
+
+function normalizeTab(v, entryKind, owner, shared) {
+  const kind = ENTRY_KINDS[entryKind];
+  const common = { entryKind, id: kind.id(v, owner), source: "github", settingsPath: kind.settingsPath(v, [...GITHUB_CONTEXTS, owner]) };
+  return { ...common, ...kind.defaults(v, owner, shared) };
 }
 
 const GITHUB_CONTEXT_KEYS = ["owner", "projects", "prs"];
 const GITHUB_CONTEXTS = ["sources", "github", "contexts"];
 const AZURE_CONTEXTS = ["sources", "azure", "contexts"];
 
-const LIST_NAMES = [[GITHUB_CONTEXTS, "owner"], [AZURE_CONTEXTS, "project"], [[...GITHUB_CONTEXTS, "*", "projects"], "id"]];
+const LIST_NAMES = [[GITHUB_CONTEXTS, "owner"], [AZURE_CONTEXTS, "project"], [[...GITHUB_CONTEXTS, "*", "projects"], "number"]];
 export const nameKeyAt = (path) => LIST_NAMES.find(([at]) => at.length === path.length && at.every((k, i) => k === "*" || k === path[i]))?.[1] ?? null;
 
-// sources.github → { github: { contexts: [{ owner, views }] } or null,
-// errors }. A context or a tab with problems is left out and each problem is
-// listed; a tab's id is the first tab's of all contexts that has it. Each
-// view carries `owners` (repoOwnership, kinds/list.js), folded. The PR tabs
-// all take the sections of sources.github.prs (readSharedPrs); without
-// valid ones there are none.
+// sources.github → { github: { contexts: [{ owner, tabs }] } or null,
+// errors }: tabs are the context's projects (entryKind "project", whose
+// views GitHub names: contexts.js) and its PR list (entryKind "prs", layout
+// "list"). A context or a tab with problems is left out and each problem is
+// listed; a project's number is the first of its context's that has it, a
+// PR tab's id the first of all contexts' PR tabs. Each tab carries `owners`
+// (repoOwnership, kinds/list.js), folded. The PR tabs all take the sections
+// of sources.github.prs (readSharedPrs); without valid ones there are none.
 function readGithub(raw) {
   if (!isObject(raw)) return { github: null, errors: ["„sources.github“ muss ein Objekt sein"] };
   const errors = Object.keys(raw).filter((k) => !["contexts", "views", "prs"].includes(k)).map((k) => `„sources.github.${k}“ gibt es nicht`);
@@ -158,7 +197,7 @@ function readGithub(raw) {
   const wanted = raw.prs !== undefined || list.some((a) => isObject(a) && a.prs !== undefined);
   const { shared, errors: sharedErrors } = wanted ? readSharedPrs(raw.prs) : { shared: null, errors: [] };
   errors.push(...sharedErrors);
-  const ids = new Set();
+  const names = { all: new Set() };
   const contexts = [];
   list.forEach((a, i) => {
     const where = `GitHub-Kontext ${i + 1}${isText(a?.owner) ? ` („${a.owner}“)` : ""}`;
@@ -170,25 +209,29 @@ function readGithub(raw) {
     if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
     if (a.projects !== undefined && !Array.isArray(a.projects)) errors.push(`${where}: „projects“ ist eine Liste von Projects`);
     if (a.prs === undefined) errors.push(`${where}: „prs“ fehlt: der PR-Tab, der letzte Tab des Kontexts, mit „id“`);
-    const tabs = [
-      ...(Array.isArray(a.projects) ? a.projects : []).map((p, j) => ({ v: p, layout: "board", at: `Project ${j + 1}${isText(p?.name) ? ` („${p.name}“)` : ""}` })),
-      ...(a.prs === undefined ? [] : [{ v: a.prs, layout: "list", at: "PR-Tab" }]),
+    const entries = [
+      ...(Array.isArray(a.projects) ? a.projects : []).map((v) => ({ v, entryKind: "project" })),
+      ...(a.prs === undefined ? [] : [{ v: a.prs, entryKind: "prs" }]),
     ];
-    const views = [];
-    for (const { v, layout, at } of tabs) {
-      const tab = tabProblems(v, layout);
-      if (!tab.length && ids.has(v.id)) tab.push(`„id“ ${v.id} gibt es schon`);
-      if (isObject(v) && isText(v.id)) ids.add(v.id);
-      if (tab.length) errors.push(...tab.map((p) => `${where}, ${at}: ${p}`));
-      else if (layout === "board" || shared) views.push(normalizeView(v, layout, a.owner, shared));
-    }
-    if (views.length) contexts.push({ owner: a.owner, views });
+    const tabs = [];
+    names.context = new Set();
+    entries.forEach(({ v, entryKind }, j) => {
+      const kind = ENTRY_KINDS[entryKind];
+      const problems = tabProblems(v, entryKind);
+      const seen = names[kind.nameIn];
+      const name = v?.[kind.name];
+      if (!problems.length && seen.has(name)) problems.push(`„${kind.name}“ ${name} gibt es schon`);
+      if (kind.named(name)) seen.add(name);
+      if (problems.length) errors.push(...problems.map((p) => `${where}, ${kind.at(v, j)}: ${p}`));
+      else if (!kind.needsShared || shared) tabs.push(normalizeTab(v, entryKind, a.owner, shared));
+    });
+    if (tabs.length) contexts.push({ owner: a.owner, tabs });
   });
-  const withPrs = contexts.filter((c) => c.views.some((v) => v.layout === "list")).map((c) => foldedName(c.owner));
+  const withPrs = contexts.filter((c) => c.tabs.some((t) => t.entryKind === "prs")).map((c) => foldedName(c.owner));
   for (const c of contexts) {
     const tabOwner = foldedName(c.owner);
     const owners = { tabOwner, otherOwners: withPrs.filter((o) => o !== tabOwner) };
-    c.views = c.views.map((v) => ({ ...v, owners }));
+    c.tabs = c.tabs.map((t) => ({ ...t, owners }));
   }
   return { github: contexts.length ? { contexts } : null, errors };
 }
@@ -341,11 +384,41 @@ export function readConfig(text, settingsRead = null) {
   const moving = settingsForContexts(raw, settings);
   if (moving?.problems) return unused(named(moving.problems));
   if (moving) return { ...unused([`${name} hat noch die Form vor den Kontexten und ist nicht umgestellt; ${MOVE_AGAIN}`]), moving };
-  const { merged, errors: unmatched, origin } = mergeSettings(raw, settings, nameKeyAt);
+  const { settings: applied, errors: before } = withoutProjectsBefore(settings);
+  const { merged, errors: unmatched, origin } = mergeSettings(raw, applied, nameKeyAt);
   const read = validateConfig(merged);
   const added = read.errors.filter((e) => !alone.errors.includes(e));
-  if (added.length) return unused(named([...unmatched, ...added]));
-  return { ...read, errors: [...read.errors, ...named(unmatched)], settings, origin };
+  if (added.length) return unused(named([...before, ...unmatched, ...added]));
+  return { ...read, errors: [...read.errors, ...named([...before, ...unmatched])], settings: applied, origin };
+}
+
+// This machine's settings of a project in the form before its views came
+// from GitHub: an entry named by its id, or one by its number with keys of
+// that form. Each is named and left out of what applies; it stays in the
+// file. Lists set whole are left to the check of views.json.
+const VIEW_HIDE_PATH = "„sources.github.contexts.<owner>.projects.<Nummer>.views.<Nummer der Ansicht>.hide“";
+const BEFORE_VIEWS = `gilt nicht, aus der Form vor den Ansichten von GitHub: ein Project heißt jetzt nach seiner Nummer, die ausgeblendeten Spalten stehen je Ansicht in ${VIEW_HIDE_PATH}; bitte von Hand übertragen`;
+// What a GitHub view's settings from before the contexts are told where no
+// PR tab has their id.
+const PROJECT_NO_ID = `ein Project hat keine „id“ mehr, seine ausgeblendeten Spalten stehen je Ansicht in ${VIEW_HIDE_PATH}; bitte von Hand übertragen`;
+function withoutProjectsBefore(settings) {
+  const contexts = settings.sources?.github?.contexts;
+  if (!isObject(contexts)) return { settings, errors: [] };
+  const errors = [];
+  let next = settings;
+  for (const [owner, context] of Object.entries(contexts)) {
+    const projects = isObject(context) ? context.projects : undefined;
+    if (!isObject(projects)) continue;
+    const at = [...GITHUB_CONTEXTS, owner, "projects"];
+    for (const [name, project] of Object.entries(projects)) {
+      const keys = VIEW_NUMBER.test(name) ? (isObject(project) ? PROJECT_BEFORE.filter((k) => Object.hasOwn(project, k)) : []).map((k) => [name, k]) : [[name]];
+      for (const path of keys) {
+        errors.push(`${pathText([...at, ...path])} ${BEFORE_VIEWS}`);
+        next = withSetting(next, [...at, ...path], undefined, () => null);
+      }
+    }
+  }
+  return { settings: next, errors };
 }
 
 export const MOVE_AGAIN = "das nächste Lesen (r) versucht es noch einmal";
@@ -395,33 +468,25 @@ export function validateConfig(raw) {
   return { config: azure || github ? { refreshMinutes, start, repos, azure, github } : null, errors };
 }
 
-export const githubViews = (config) => (config?.github?.contexts ?? []).flatMap((c) => c.views);
-
 export const hidePath = (view) => [...view.settingsPath, "hide"];
 export const repoHidePath = (view) => [...view.settingsPath, "hideRepos"];
 
 const viewPath = (...id) => ["sources", "github", "views", ...id];
 const SHARED_PRS_PATH = ["sources", "github", "prs"];
 
-// The keys of a GitHub view of the form before the contexts that its tab
+// The keys of a GitHub PR view of the form before the contexts that its tab
 // holds as they were (value), those that are the PR tabs' together now
-// (shared: a list's sections and limit), and those it says through its
-// context: its source, its layout and its project's owner.
-function tabSettings(value, layout, owner) {
+// (shared: its sections and limit), and those it says through its context:
+// its source and its layout.
+function tabSettings(value, owner) {
   if (!isObject(value)) return { problem: "ist kein Objekt" };
-  const kind = VIEW_KINDS[viewKind({ source: "github", layout })];
+  const kind = ENTRY_KINDS.prs;
   const out = {};
   const shared = {};
   for (const [key, v] of Object.entries(value)) {
-    if ((key === "source" && v === "github") || (key === "layout" && v === layout)) continue;
-    if (layout === "list" && SHARED_PRS_KEYS.includes(key)) shared[key] = v;
-    else if (key === "project" && layout === "board" && isObject(v)) {
-      for (const [inner, w] of Object.entries(v)) {
-        if (inner === "owner" && w === owner) continue;
-        if (!kind.keys.includes(inner) || inner === "filter") return { problem: `„project.${inner}“ hat im Kontext ${owner} keinen Platz` };
-        out[inner] = w;
-      }
-    } else if (COMMON_KEYS.includes(key) || kind.keys.includes(key)) out[key] = v;
+    if ((key === "source" && v === "github") || (key === "layout" && v === "list")) continue;
+    if (SHARED_PRS_KEYS.includes(key)) shared[key] = v;
+    else if (COMMON_KEYS.includes(key) || kind.keys.includes(key)) out[key] = v;
     else return { problem: `„${key}“ hat im Kontext ${owner} keinen Platz` };
   }
   return { value: out, shared };
@@ -450,23 +515,24 @@ export function settingsForContexts(raw, settings) {
   if (teams) problems.push(cannot(AZURE_CONTEXTS, "die Teams stehen jetzt je Projekt in „sources.azure.contexts“ ({ \"project\", \"teams\" }); bitte von Hand übertragen"));
   if (views !== undefined && !isObject(views)) problems.push(cannot(viewPath(), "hier eine ganze Liste; bitte von Hand nach „sources.github.contexts“ übertragen"));
   if (sources.github?.contexts !== undefined && !isObject(sources.github.contexts)) problems.push(cannot(GITHUB_CONTEXTS, "hier eine ganze Liste"));
-  const tabs = new Map((config.github?.contexts ?? []).flatMap((c) => c.views.map((v) => [v.id, { view: v, owner: c.owner }])));
+  // Only a PR tab's id stands in views.json, so only a PR tab takes a view's settings.
+  const tabs = new Map((config.github?.contexts ?? []).flatMap((c) => c.tabs.filter((t) => t.entryKind === "prs").map((t) => [t.id, { entry: t, owner: c.owner }])));
   let next = isObject(views) ? withSetting(settings, viewPath(), undefined, nameKeyAt) : settings;
   const moved = [];
   for (const [id, value] of Object.entries(isObject(views) ? views : {})) {
     const from = viewPath(id);
     const tab = tabs.get(id);
     if (!tab) {
-      problems.push(cannot(from, `${CONFIG_NAME}.json hat keinen Tab mit „id“ „${id}“`));
+      problems.push(cannot(from, `${CONFIG_NAME}.json hat keinen PR-Tab mit „id“ „${id}“; ${PROJECT_NO_ID}`));
       continue;
     }
-    const kept = tabSettings(value, tab.view.layout, tab.owner);
+    const kept = tabSettings(value, tab.owner);
     if (kept.problem) {
       problems.push(cannot(from, kept.problem));
       continue;
     }
     const moves = Object.entries(kept.shared).map(([key, v]) => ({ at: [...from, key], to: [...SHARED_PRS_PATH, key], v, shared: true }));
-    if (Object.keys(kept.value).length || !moves.length) moves.unshift({ at: from, to: tab.view.settingsPath, v: kept.value, shared: false });
+    if (Object.keys(kept.value).length || !moves.length) moves.unshift({ at: from, to: tab.entry.settingsPath, v: kept.value, shared: false });
     for (const { at, to, v, shared } of moves) {
       const there = valueAt(next, to, nameKeyAt);
       if (there !== undefined && !(shared && JSON.stringify(there) === JSON.stringify(v))) {

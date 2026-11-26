@@ -1,7 +1,7 @@
 // The status menu: the columns a card may go to, or the states an item may
-// take, picked with j/k and Enter, a digit, or a click. A shape with columns
-// or states opens it (openStatusMenu) as b.modal = { kind: "status", view,
-// key, targets, at }.
+// take, picked with j/k and Enter, a digit, or a click; named after what it
+// sets (Board.statusField). A shape with columns or states opens it
+// (openStatusMenu) as b.modal = { kind: "status", view, key, targets, at }.
 
 import { div } from "gpui-kit";
 import { columnColor, menu, menuKey } from "../helpers.js";
@@ -22,7 +22,7 @@ export const statusModal = {
       id: "status",
       rowId: "status",
       width: 280,
-      title: "Status ändern",
+      title: `${b.statusField(m.view)} ändern`,
       at: m.at,
       pick: (i, cx) => pickTarget(b, m, i, cx),
       rows: m.targets.map((c) => [

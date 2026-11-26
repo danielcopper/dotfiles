@@ -11,7 +11,9 @@ import { stateColor } from "../kinds/states.js";
 
 // What lasts across reloads beside this machine's settings (settings.js):
 // the shown context ("context"), each context's tab ("tab:<context>"),
-// each team's view ("teamView:<tab>"), "nur meine" ("mine"), a Sprint's
+// each team's view ("teamView:<tab>"), each GitHub project's view
+// ("projectView:<tab>") and what the board knows of the project
+// ("project:<tab>", Board.learnProject), "nur meine" ("mine"), a Sprint's
 // folded stories ("folded:<view>", readStoredFolds), the repo a
 // view's work item last started in ("repo:<view>", ui/modals/start.js) and
 // each view's last good data ("board:data:<view>", loading.js). A full or

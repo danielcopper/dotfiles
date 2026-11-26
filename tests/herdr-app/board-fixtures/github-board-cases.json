@@ -1,44 +1,10 @@
 {
  "data": {
-  "viewer": {
-   "login": "sample-user"
-  },
   "repositoryOwner": {
    "projectV2": {
     "id": "PVT_sample",
     "title": "Sample",
     "url": "https://github.com/users/sample-user/projects/7",
-    "field": {
-     "id": "PVTSSF_sample",
-     "name": "Status",
-     "options": [
-      {
-       "id": "opt-backlog",
-       "name": "Backlog",
-       "color": "GREEN"
-      },
-      {
-       "id": "opt-ready",
-       "name": "Ready",
-       "color": "BLUE"
-      },
-      {
-       "id": "opt-in-progress",
-       "name": "In progress",
-       "color": "YELLOW"
-      },
-      {
-       "id": "opt-in-review",
-       "name": "In review",
-       "color": "PURPLE"
-      },
-      {
-       "id": "opt-done",
-       "name": "Done",
-       "color": "ORANGE"
-      }
-     ]
-    },
     "items": {
      "totalCount": 4,
      "pageInfo": {

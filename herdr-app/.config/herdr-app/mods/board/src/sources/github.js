@@ -1,6 +1,7 @@
-// GitHub: the queries for a Projects v2 board and a pull request list, their
-// parsing, the status mutation, what gh's answers and failures mean, and the
-// source as the board uses it (makeGithub).
+// GitHub: the queries for a Projects v2 project (its views and fields) and
+// a view's items, a pull request list, their parsing, the column mutation,
+// what gh's answers and failures mean, and the source as the board uses it
+// (makeGithub).
 
 import { CONFIG_NAME, BoardError, DRAFT_REVIEW, NOTIFIED, PAGE, STATE_LOOKS, errorText, failure, firstLine, foldedName, otherLook, personName, readMemo, SECTION_TONES } from "../shared.js";
 import { NO_LIVE } from "../loading.js";
@@ -12,17 +13,184 @@ import { repoOwnership } from "../kinds/list.js";
 const GITHUB_COLORS = {
   GRAY: "muted", BLUE: "ansi4", GREEN: "ansi2", YELLOW: "ansi3", ORANGE: "ansi11", RED: "ansi1", PINK: "ansi13", PURPLE: "ansi5",
 };
-export const NO_STATUS = "none";
+// The id of the column and of the swimlane of the cards without a value,
+// outside the ids of the others (a lane's is `v:` and its value's key).
+export const NO_VALUE = "none";
 
-// A filter term on the project field: GitHub's filters take the field's name
-// in lower case, spaces as dashes, and values in quotes.
+// A filter term on a project's field: GitHub's filters take the field's name
+// in lower case, spaces as dashes, and values in quotes (measured for
+// Status only).
 const fieldKey = (field) => field.toLowerCase().replace(/\s+/g, "-");
 const quoted = (value) => `"${value.replace(/"/g, "")}"`;
 
-const ITEM_FIELDS = `
-  id
-  fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { optionId name } }
-  priority: fieldValueByName(name: $priority) { ... on ProjectV2ItemFieldSingleSelectValue { name color } }
+// GitHub's layouts of a project's view, as the board names them (viewKind).
+const LAYOUTS = { BOARD_LAYOUT: "board", TABLE_LAYOUT: "table", ROADMAP_LAYOUT: "roadmap" };
+
+// How many of a project's fields and views a read takes (GitHub keeps at
+// most 50 fields a project), and of a view's sort keys; a view groups by
+// one field at most, for its columns and for its swimlanes.
+export const PROJECT_FIELDS = 50;
+export const PROJECT_VIEWS = 50;
+export const SORT_KEYS = 5;
+
+const FIELD_REF = "... on ProjectV2FieldCommon { id name }";
+
+// One GraphQL request for a project as its views show it: its fields (with
+// their options and iterations) and its views in GitHub's order, each with
+// its layout, filter, column field, swimlane field and sort keys; and the
+// login gh runs as. The header of main.js says what it costs.
+export const PROJECT_QUERY = `query($login: String!, $number: Int!) {
+  viewer { login }
+  repositoryOwner(login: $login) {
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        id title url
+        fields(first: ${PROJECT_FIELDS}) { nodes {
+          ... on ProjectV2FieldCommon { id name dataType }
+          ... on ProjectV2SingleSelectField { options { id name color } }
+          ... on ProjectV2IterationField { configuration { iterations { id title startDate } completedIterations { id title startDate } } }
+        } }
+        views(first: ${PROJECT_VIEWS}, orderBy: { field: POSITION, direction: ASC }) { nodes {
+          number name layout filter
+          verticalGroupByFields(first: 1) { nodes { ${FIELD_REF} } }
+          groupByFields(first: 1) { nodes { ${FIELD_REF} } }
+          sortByFields(first: ${SORT_KEYS}) { nodes { direction field { ${FIELD_REF} } } }
+        } }
+      }
+    }
+  }
+}`;
+
+export const githubProjectArgs = (view) => ["api", "graphql", "-f", `query=${PROJECT_QUERY}`, "-f", `login=${view.address.owner}`, "-F", `number=${view.address.number}`];
+
+const PROJECT_PATH = ["repositoryOwner", "projectV2"];
+
+// A field's iterations in their order, the completed ones first, each with
+// whether it is completed.
+function iterationsOf(config) {
+  const of = (list, completed) => (Array.isArray(list) ? list : []).filter((i) => typeof i?.id === "string").map((i) => ({ id: i.id, title: i.title ?? i.id, startDate: i.startDate ?? "", completed }));
+  return [...of(config?.completedIterations, true), ...of(config?.iterations, false)].sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
+}
+
+function projectField(node) {
+  const field = { id: node.id, name: node.name, type: node.dataType ?? null };
+  if (Array.isArray(node.options)) field.options = node.options.map((o) => ({ id: o.id, name: o.name, color: o.color ?? null }));
+  if (node.configuration) field.iterations = iterationsOf(node.configuration);
+  return field;
+}
+
+const fieldIdsOf = (conn) => (Array.isArray(conn?.nodes) ? conn.nodes : []).map((n) => n?.id).filter(Boolean);
+
+function parseViewNode(node) {
+  return {
+    number: node.number,
+    name: node.name ?? `Ansicht ${node.number}`,
+    layout: LAYOUTS[node.layout] ?? "table",
+    filter: typeof node.filter === "string" ? node.filter : "",
+    column: fieldIdsOf(node.verticalGroupByFields)[0] ?? null,
+    lane: fieldIdsOf(node.groupByFields)[0] ?? null,
+    sorts: (Array.isArray(node.sortByFields?.nodes) ? node.sortByFields.nodes : [])
+      .filter((s) => s?.field?.id)
+      .map((s) => ({ field: s.field.id, direction: s.direction === "DESC" ? "DESC" : "ASC" })),
+  };
+}
+
+// gh's answer for githubProjectArgs (and its GraphQL errors) → the project
+// as its views show it: { id, title, url, viewer, fields: [{ id, name, type
+// (GitHub's dataType), options? (a single-select field's), iterations? (an
+// iteration field's, in their order) }], views: [{ number, name, layout
+// ("board", "table" or "roadmap"), filter, column, lane (a field's id, or
+// null), sorts: [{ field, direction }] }] }. A project that is not there is
+// explained by the error at its path.
+export function parseGithubProject(json, view, errors = []) {
+  const { owner, number } = view.address;
+  const ownerNode = json?.data?.repositoryOwner;
+  const why = (e) => firstLine(e.message);
+  if (!ownerNode) {
+    const e = errorAt(errors, ["repositoryOwner"]);
+    throw new BoardError(e && e.type !== "NOT_FOUND" ? `GitHub: ${why(e)}` : `GitHub kennt „${owner}“ nicht`);
+  }
+  const project = ownerNode.projectV2;
+  if (!project) {
+    const e = errorAt(errors, PROJECT_PATH);
+    if (e?.type === "NOT_FOUND") throw new BoardError(`Projekt ${number} von ${owner} nicht gefunden – „number“ in ${CONFIG_NAME}.json prüfen`);
+    throw new BoardError(e ? `Projekt ${number} von ${owner}: ${why(e)}` : `Projekt ${number} von ${owner} nicht gefunden oder kein Zugriff`);
+  }
+  for (const part of ["fields", "views"]) {
+    if (Array.isArray(project[part]?.nodes)) continue;
+    const e = errorAt(errors, [...PROJECT_PATH, part]);
+    throw new BoardError(e ? `Projekt „${project.title}“: ${why(e)}` : `Projekt „${project.title}“ lieferte seine ${part === "fields" ? "Felder" : "Ansichten"} nicht`);
+  }
+  return {
+    id: project.id,
+    title: project.title,
+    url: project.url,
+    viewer: json.data.viewer?.login ?? null,
+    fields: project.fields.nodes.filter((n) => n?.id && typeof n.name === "string").map(projectField),
+    views: project.views.nodes.filter((n) => Number.isInteger(n?.number)).map(parseViewNode),
+  };
+}
+
+// What the board keeps of a project between reads (Board.learnProject): its
+// title, address and views, in GitHub's order, as the switch shows them;
+// and what the store holds of it read back so (null for anything else, as
+// for none).
+const metaView = (v) => ({ number: v.number, name: v.name, layout: v.layout, filter: v.filter });
+export const projectMeta = (project) => ({ title: project.title, url: project.url, views: project.views.map(metaView) });
+export function readProjectMeta(value) {
+  const views = value?.views;
+  if (typeof value?.title !== "string" || !Array.isArray(views)) return null;
+  const layouts = Object.values(LAYOUTS);
+  const valid = views.every((v) => Number.isInteger(v?.number) && typeof v.name === "string" && layouts.includes(v.layout) && typeof v.filter === "string");
+  return valid ? { title: value.title, url: typeof value.url === "string" ? value.url : null, views: views.map(metaView) } : null;
+}
+
+// The fields a board's columns can stand on, which a move sets.
+const COLUMN_TYPES = ["SINGLE_SELECT", "ITERATION"];
+
+// The field a board view without its own column field takes, as GitHub
+// does.
+const STATUS_FIELD = "Status";
+
+// The single-select field a card's priority comes from, where the project
+// has one by that name (GitHub's template field).
+export const PRIORITY_FIELD = "Priority";
+
+// How the board reads and draws the project view `shown` (one of
+// project.views) as a board: its column field (the view's, else "Status",
+// `ownColumn` false then), its swimlane field and sort keys where the board
+// can read them (`unreadable`: the names of those it cannot, a field of a
+// kind it does not read), the priority field, and the fields read by name
+// besides the column's and the priority's (`values`, each as the alias v<i>
+// of the items' query).
+export function boardPlan(project, shown) {
+  const byId = new Map(project.fields.map((f) => [f.id, f]));
+  const own = byId.get(shown.column);
+  const ownColumn = Boolean(own && COLUMN_TYPES.includes(own.type));
+  const column = ownColumn ? own : project.fields.find((f) => f.name === STATUS_FIELD && f.type === "SINGLE_SELECT") ?? null;
+  if (!column) throw new BoardError(`Ansicht „${shown.name}“ von „${project.title}“ hat kein Feld für ihre Spalten (ein Auswahl- oder Iterationsfeld)`);
+  const unreadable = [];
+  const usable = (field) => {
+    if (!field) return null;
+    if (readable(field)) return field;
+    unreadable.push(field.name);
+    return null;
+  };
+  const lane = usable(byId.get(shown.lane));
+  const sorts = shown.sorts.map((s) => ({ field: usable(byId.get(s.field)), direction: s.direction })).filter((s) => s.field);
+  const priority = project.fields.find((f) => f.name === PRIORITY_FIELD && f.type === "SINGLE_SELECT") ?? null;
+  const values = [...new Set([lane, ...sorts.map((s) => s.field)].filter((f) => f && readByName(f) && f !== column && f !== priority))];
+  return { project, shown, column, ownColumn, lane, sorts, priority, values, unreadable };
+}
+
+const VALUE_FIELDS = `
+    ... on ProjectV2ItemFieldSingleSelectValue { optionId name color }
+    ... on ProjectV2ItemFieldIterationValue { iterationId title startDate }
+    ... on ProjectV2ItemFieldNumberValue { number }
+    ... on ProjectV2ItemFieldDateValue { date }
+    ... on ProjectV2ItemFieldTextValue { text }`;
+
+const CONTENT_FIELDS = `
   content {
     __typename
     ... on Issue { id number title url issueType { name color } repository { nameWithOwner } author { login }
@@ -34,29 +202,41 @@ const ITEM_FIELDS = `
     ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login name } } }
   }`;
 
-// The view's filter with `term` added.
-const filterWith = (view, term) => [view.filter, term].filter(Boolean).join(" ");
-
-// The filter of a board's shown items: the view's, without the hidden
-// columns.
-function boardFilter(view, hidden) {
-  const names = [...hidden];
-  return filterWith(view, names.length ? `-${fieldKey(view.project.field)}:${names.map(quoted).join(",")}` : "");
+// An item's fields as the board's query reads them: the column field's
+// value (fieldValueByName), the priority's, the other fields' by name
+// (v<i>) and the content.
+function itemFields(plan) {
+  const priority = plan.priority ? "\n  priority: fieldValueByName(name: $priority) { ... on ProjectV2ItemFieldSingleSelectValue { optionId name color } }" : "";
+  const values = plan.values.map((_, i) => `\n  v${i}: fieldValueByName(name: $v${i}) {${VALUE_FIELDS} }`).join("");
+  return `
+  id
+  fieldValueByName(name: $column) {${VALUE_FIELDS} }${priority}${values}${CONTENT_FIELDS}`;
 }
 
-// The items a board's query reads: the page after `read` items, from the
-// cursor $after where `paged` (a page after the first; `read` may be 0
+const filterWith = (plan, term) => [plan.shown.filter, term].filter(Boolean).join(" ");
+
+// The filter of a board's shown items: the view's, with its hidden columns
+// left out.
+function boardFilter(plan, hidden) {
+  const names = [...hidden];
+  return filterWith(plan, names.length ? `-${fieldKey(plan.column.name)}:${names.map(quoted).join(",")}` : "");
+}
+
+// The items a board's query reads: the page after `count` items, from the
+// cursor $after where `paged` (a page after the first; `count` may be 0
 // there, after an empty first page), PAGE at most and no more than the
 // view's limit leaves, with whether more follow and where they start.
-function itemsSelection(view, read, paged) {
+function itemsSelection(view, plan, count, paged) {
   const after = paged ? ", after: $after" : "";
-  return `items(first: ${Math.min(PAGE, view.limit - read)}${after}, query: $filter) { totalCount pageInfo { hasNextPage endCursor } nodes { ${ITEM_FIELDS} } }`;
+  return `items(first: ${Math.min(PAGE, view.limit - count)}${after}, query: $filter) { totalCount pageInfo { hasNextPage endCursor } nodes {${itemFields(plan)} } }`;
 }
 
-// A board's query: its variables after the ones every page has, what it
-// reads besides the project (`head`), and what it reads of the project.
-const boardQuery = (vars, head, project) => `query($login: String!, $number: Int!, $field: String!, $priority: String!, $filter: String!${vars}) {
-${head}  repositoryOwner(login: $login) {
+// A board's query: its variables after the ones every page has, and what it
+// reads of the project.
+function boardQuery(plan, vars, project) {
+  const own = [...(plan.priority ? [", $priority: String!"] : []), ...plan.values.map((_, i) => `, $v${i}: String!`)].join("");
+  return `query($login: String!, $number: Int!, $column: String!, $filter: String!${own}${vars}) {
+  repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
         ${project}
@@ -64,38 +244,38 @@ ${head}  repositoryOwner(login: $login) {
     }
   }
 }`;
+}
 
-function boardArgs(view, hidden, doc) {
-  const { owner, number, field, priorityField } = view.project;
+function boardArgs(view, plan, hidden, doc) {
   return [
-    "api", "graphql", "-f", `query=${doc}`, "-f", `login=${owner}`, "-F", `number=${number}`, "-f", `field=${field}`, "-f", `priority=${priorityField}`,
-    "-f", `filter=${boardFilter(view, hidden)}`,
+    "api", "graphql", "-f", `query=${doc}`, "-f", `login=${view.address.owner}`, "-F", `number=${view.address.number}`, "-f", `column=${plan.column.name}`,
+    "-f", `filter=${boardFilter(plan, hidden)}`,
+    ...(plan.priority ? ["-f", `priority=${plan.priority.name}`] : []),
+    ...plan.values.flatMap((f, i) => ["-f", `v${i}=${f.name}`]),
   ];
 }
 
-// The hidden columns' counts (first: 0) are for the column menu.
-export function githubBoardArgs(view, hidden) {
+// The first page of a board's items, as boardPlan says to read them, and
+// the counts of its hidden columns (first: 0), for the column menu.
+export function githubBoardArgs(view, plan, hidden) {
   const names = [...hidden];
-  const key = fieldKey(view.project.field);
+  const key = fieldKey(plan.column.name);
   const counts = names.map((_, i) => `\n        h${i}: items(first: 0, query: $h${i}) { totalCount }`).join("");
   const vars = names.map((_, i) => `, $h${i}: String!`).join("");
-  const doc = boardQuery(vars, "  viewer { login }\n", `id title url
-        field(name: $field) { ... on ProjectV2SingleSelectField { id name options { id name color } } }
-        priorityField: field(name: $priority) { ... on ProjectV2SingleSelectField { id } }
-        ${itemsSelection(view, 0, false)}${counts}`);
-  return [...boardArgs(view, hidden, doc), ...names.flatMap((n, i) => ["-f", `h${i}=${filterWith(view, `${key}:${quoted(n)}`)}`])];
+  const doc = boardQuery(plan, vars, `id title url
+        ${itemsSelection(view, plan, 0, false)}${counts}`);
+  return [...boardArgs(view, plan, hidden, doc), ...names.flatMap((n, i) => ["-f", `h${i}=${filterWith(plan, `${key}:${quoted(n)}`)}`])];
 }
 
 // One GraphQL request for the page of a board's items after the cursor
-// `after`, `read` items read before it: the same items as the first page's
-// query, nothing else.
-export function githubBoardPageArgs(view, hidden, after, read) {
-  return [...boardArgs(view, hidden, boardQuery(", $after: String!", "", itemsSelection(view, read, true))), "-f", `after=${after}`];
+// `after`, `count` items read before it: the same items as the first page's
+// query, and the project's title.
+export function githubBoardPageArgs(view, plan, hidden, after, count) {
+  return [...boardArgs(view, plan, hidden, boardQuery(plan, ", $after: String!", `title ${itemsSelection(view, plan, count, true)}`)), "-f", `after=${after}`];
 }
 
 // Where a board's items stand in its answers.
-const ITEMS_PATH = ["repositoryOwner", "projectV2", "items"];
-const PRIORITY_FIELD_PATH = ["repositoryOwner", "projectV2", "priorityField"];
+const ITEMS_PATH = [...PROJECT_PATH, "items"];
 
 // The error that explains a page without its items: the deepest one on the
 // way to them (the owner's, the project's, the items' own), else the
@@ -130,7 +310,7 @@ export function addBoardPage(json, page, errors = []) {
   return json;
 }
 
-// The page after the board answer `json`, { after, read } (its cursor and
+// The page after the board answer `json`, { after, count } (its cursor and
 // how many items came before it), where GitHub says one follows and the
 // view's limit leaves room for it; else null. One that follows without a
 // cursor to start from fails.
@@ -140,7 +320,7 @@ export function nextBoardPage(json, view) {
   if (!Array.isArray(items?.nodes) || !items.pageInfo?.hasNextPage || items.nodes.length >= view.limit) return null;
   const after = items.pageInfo.endCursor;
   if (typeof after !== "string") throw new BoardError(`Projekt „${project.title}“: GitHub nannte nach ${items.nodes.length} Einträgen nicht, wo die nächsten beginnen`);
-  return { after, read: items.nodes.length };
+  return { after, count: items.nodes.length };
 }
 
 export function boardPages(json, view, calls) {
@@ -178,7 +358,7 @@ function githubPriority(value) {
 
 const foreignMark = (owners, repo, flag = "foreign") => (repoOwnership(repo, owners) === "foreign" ? { [flag]: true } : {});
 
-function githubCard(node, owners) {
+function githubCard(node, owners, plan) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
   return {
@@ -207,10 +387,9 @@ function githubCard(node, owners) {
     parentRepo: c.parent?.repository?.nameWithOwner ?? null,
     ...(c.parent ? foreignMark(owners, c.parent.repository?.nameWithOwner ?? repo, "parentForeign") : {}),
     milestone: c.milestone?.title ?? null,
-    priority: githubPriority(node.priority),
+    priority: plan.priority ? githubPriority(node.priority) : null,
     sub: c.subIssuesSummary?.total ? { total: c.subIssuesSummary.total, done: c.subIssuesSummary.completed } : null,
     branch: c.headRefName ?? null,
-    column: node.fieldValueByName?.optionId ?? NO_STATUS,
   };
 }
 
@@ -222,81 +401,187 @@ export function errorAt(errors, path) {
 // Every GraphQL error whose path starts with `path`.
 export const errorsAt = (errors, path) => (errors ?? []).filter((e) => Array.isArray(e.path) && path.every((p, i) => e.path[i] === p));
 
-export function parseGithubBoard(json, view, hidden, errors = []) {
-  const { owner, number, field: fieldName } = view.project;
-  const ownerNode = json?.data?.repositoryOwner;
-  const why = (e) => firstLine(e.message);
-  if (!ownerNode) {
-    const e = errorAt(errors, ["repositoryOwner"]);
-    throw new BoardError(e && e.type !== "NOT_FOUND" ? `GitHub: ${why(e)}` : `GitHub kennt „${owner}“ nicht`);
-  }
-  const project = ownerNode.projectV2;
-  if (!project) {
-    const e = errorAt(errors, ["repositoryOwner", "projectV2"]);
-    if (e?.type === "NOT_FOUND") throw new BoardError(`Projekt ${number} von ${owner} nicht gefunden – project.number in ${CONFIG_NAME}.json prüfen`);
-    throw new BoardError(e ? `Projekt ${number} von ${owner}: ${why(e)}` : `Projekt ${number} von ${owner} nicht gefunden oder kein Zugriff`);
-  }
-  const field = project.field;
-  if (!field?.options) {
-    const e = errorAt(errors, ["repositoryOwner", "projectV2", "field"]);
-    throw new BoardError(e ? `Projekt „${project.title}“: ${why(e)}` : `Projekt „${project.title}“ hat kein Auswahlfeld „${fieldName}“`);
-  }
-  if (!Array.isArray(project.items?.nodes)) {
-    const e = errorAt(errors, ITEMS_PATH);
-    throw new BoardError(e ? `Projekt „${project.title}“: ${why(e)}` : `Projekt „${project.title}“ lieferte keine Einträge`);
-  }
+const lower = (text) => String(text ?? "").toLowerCase();
+const textValue = (name) => (name ? { key: name, name, rank: lower(name) } : null);
+
+// Per type of a project's field, an item's value of it as the board groups
+// and sorts by it: { key (the value's own), name (as a column or swimlane
+// names it), rank (its place: a number, else a text compared as such) }, or
+// null for no value. `byName`: the items' query reads it by name
+// (fieldValueByName, `value`); of the others an item's card holds it. A
+// field of a type not here is one the board does not read.
+const VALUES = {
+  SINGLE_SELECT: {
+    byName: true,
+    of(field, value) {
+      const at = (field.options ?? []).findIndex((o) => (value?.optionId ? o.id === value.optionId : o.name === value?.name));
+      return at < 0 ? null : { key: field.options[at].id, name: field.options[at].name, rank: at };
+    },
+  },
+  ITERATION: {
+    byName: true,
+    of(field, value) {
+      const at = (field.iterations ?? []).findIndex((i) => i.id === value?.iterationId);
+      if (at >= 0) return { key: value.iterationId, name: field.iterations[at].title, rank: at };
+      return value?.iterationId ? { key: value.iterationId, name: value.title ?? value.iterationId, rank: -1 } : null;
+    },
+  },
+  NUMBER: { byName: true, of: (_f, value) => (typeof value?.number === "number" ? { key: String(value.number), name: String(value.number), rank: value.number } : null) },
+  DATE: { byName: true, of: (_f, value) => (typeof value?.date === "string" && value.date ? { key: value.date, name: value.date, rank: value.date } : null) },
+  TEXT: { byName: true, of: (_f, value) => textValue(typeof value?.text === "string" ? value.text : null) },
+  TITLE: { of: (_f, _v, card) => textValue(card.title) },
+  ASSIGNEES: { of: (_f, _v, card) => textValue(card.assignees.join(", ")) },
+  LABELS: { of: (_f, _v, card) => textValue(card.labels.join(", ")) },
+  MILESTONE: { of: (_f, _v, card) => textValue(card.milestone) },
+  REPOSITORY: { of: (_f, _v, card) => textValue(card.repo) },
+  PARENT_ISSUE: { of: (_f, _v, card) => (card.parent === null ? null : textValue(card.parentTitle ?? `#${card.parent}`)) },
+  ISSUE_TYPE: { of: (_f, _v, card) => textValue(card.type) },
+  SUB_ISSUES_PROGRESS: {
+    of: (_f, _v, card) => (card.sub ? { key: `${card.sub.done}/${card.sub.total}`, name: `${card.sub.done}/${card.sub.total}`, rank: card.sub.done / card.sub.total } : null),
+  },
+};
+const readable = (field) => Object.hasOwn(VALUES, field.type);
+const readByName = (field) => VALUES[field.type]?.byName === true;
+const valueOf = (field, value, card) => VALUES[field.type]?.of(field, value, card) ?? null;
+
+const byRank = (a, b) => (typeof a === "number" && typeof b === "number" ? a - b : String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0);
+
+// Two values by a sort key, those without one last whichever the direction.
+function bySort(a, b, direction) {
+  if (!a || !b) return Number(!a) - Number(!b);
+  const order = byRank(a.rank, b.rank);
+  return direction === "DESC" ? -order : order;
+}
+
+function nodeValue(plan, node, card, field) {
+  if (field === plan.column) return valueOf(field, node.fieldValueByName, card);
+  if (field === plan.priority) return valueOf(field, node.priority, card);
+  const at = plan.values.indexOf(field);
+  return valueOf(field, at >= 0 ? node[`v${at}`] : null, card);
+}
+
+function boardColumns(plan, hidden, answer, held) {
+  const field = plan.column;
   const names = [...hidden];
-  const columns = field.options.map((o) => ({
-    id: o.id,
-    name: o.name,
-    color: GITHUB_COLORS[o.color] ?? "muted",
-    hidden: hidden.has(o.name),
-    count: hidden.has(o.name) ? project[`h${names.indexOf(o.name)}`]?.totalCount ?? null : 0,
+  const base = field.type === "ITERATION"
+    ? field.iterations.filter((i) => !i.completed || held.has(i.id) || hidden.has(i.title)).map((i) => ({ id: i.id, name: i.title, color: "muted" }))
+    : field.options.map((o) => ({ id: o.id, name: o.name, color: GITHUB_COLORS[o.color] ?? "muted" }));
+  return base.map((c) => ({
+    ...c,
+    hidden: hidden.has(c.name),
+    count: hidden.has(c.name) ? answer[`h${names.indexOf(c.name)}`]?.totalCount ?? null : 0,
     target: true,
     cards: [],
   }));
-  const byId = new Map(columns.map((c) => [c.id, c]));
-  const cards = project.items.nodes.map((node) => githubCard(node, view.owners)).map((c) => (byId.has(c.column) ? c : { ...c, column: NO_STATUS }));
-  if (cards.some((c) => c.column === NO_STATUS)) {
-    const none = { id: NO_STATUS, name: "Ohne Status", color: "dim", hidden: false, count: 0, target: false, cards: [] };
-    columns.unshift(none);
-    byId.set(NO_STATUS, none);
+}
+
+// A board's swimlanes: one per value of the swimlane field its cards hold,
+// in the field's order (a single-select's options, an iteration's
+// iterations, else by value), the cards without one last.
+const laneId = (value) => (value ? `v:${value.key}` : NO_VALUE);
+function boardLanes(plan, cards) {
+  if (!plan.lane) return null;
+  const seen = new Map();
+  for (const card of cards) if (card.laneValue && !seen.has(card.laneValue.key)) seen.set(card.laneValue.key, card.laneValue);
+  const lanes = [...seen.values()].sort((a, b) => byRank(a.rank, b.rank)).map((v) => {
+    const option = plan.lane.options?.find((o) => o.id === v.key);
+    return { id: laneId(v), name: v.name, color: option ? GITHUB_COLORS[option.color] ?? "muted" : "muted" };
+  });
+  if (cards.some((c) => !c.laneValue)) lanes.push({ id: NO_VALUE, name: `Ohne ${plan.lane.name}`, color: "dim" });
+  return lanes;
+}
+
+// gh's answers for a board (githubBoardArgs and its pages, joined by
+// addBoardPage; and the GraphQL errors that came with them), read as
+// boardPlan says (`plan`) → the board shape's data (ui/shapes/board.js):
+// columns from the column field, each card in its column (one without a
+// value in a column "Ohne <field>" before them, which takes no card), in
+// its swimlane's order and then by the view's sort keys (those without a
+// value last; unsorted, GitHub's order), and the swimlanes where the view
+// has a swimlane field.
+export function parseGithubBoard(json, view, hidden, errors, plan) {
+  const { project, shown } = plan;
+  const items = json?.data?.repositoryOwner?.projectV2?.items;
+  if (!Array.isArray(items?.nodes)) {
+    const e = errorAt(errors, ITEMS_PATH) ?? errorAt(errors, PROJECT_PATH);
+    throw new BoardError(e ? `Projekt „${project.title}“: ${firstLine(e.message)}` : `Projekt „${project.title}“ lieferte keine Einträge`);
   }
-  for (const card of cards) {
-    const col = byId.get(card.column);
-    col.cards.push(card);
+  const answer = json.data.repositoryOwner.projectV2;
+  const cards = items.nodes.filter(Boolean).map((node) => {
+    const card = githubCard(node, view.owners, plan);
+    const column = nodeValue(plan, node, card, plan.column);
+    const laneValue = plan.lane ? nodeValue(plan, node, card, plan.lane) : null;
+    return { card, column: column?.key ?? null, laneValue, keys: plan.sorts.map((s) => nodeValue(plan, node, card, s.field)) };
+  });
+  const columns = boardColumns(plan, hidden, answer, new Set(cards.map((c) => c.column)));
+  const byId = new Map(columns.map((c) => [c.id, c]));
+  const lanes = boardLanes(plan, cards);
+  const laneAt = new Map((lanes ?? []).map((l, i) => [l.id, i]));
+  const ordered = cards
+    .map((c, i) => ({ ...c, i, lane: laneId(c.laneValue) }))
+    .sort((a, b) => {
+      if (lanes) {
+        const lane = laneAt.get(a.lane) - laneAt.get(b.lane);
+        if (lane) return lane;
+      }
+      for (const [k, s] of plan.sorts.entries()) {
+        const order = bySort(a.keys[k], b.keys[k], s.direction);
+        if (order) return order;
+      }
+      return a.i - b.i;
+    });
+  if (ordered.some((c) => !byId.has(c.column))) {
+    const none = { id: NO_VALUE, name: `Ohne ${plan.column.name}`, color: "dim", hidden: false, count: 0, target: false, cards: [] };
+    columns.unshift(none);
+    byId.set(NO_VALUE, none);
+  }
+  for (const c of ordered) {
+    const col = byId.get(byId.has(c.column) ? c.column : NO_VALUE);
+    col.cards.push({ ...c.card, column: col.id, ...(lanes ? { lane: c.lane } : {}) });
     if (!col.hidden) col.count++;
   }
   return {
     shape: "board",
     meta: {
       projectId: project.id,
-      fieldId: field.id,
+      fieldId: plan.column.id,
+      fieldName: plan.column.name,
+      fieldType: plan.column.type,
+      ownColumn: plan.ownColumn,
       title: project.title,
       url: project.url,
-      lacksPriorityField: !project.priorityField?.id && !errorAt(errors, PRIORITY_FIELD_PATH),
+      view: shown.number,
+      filter: shown.filter,
+      query: boardFilter(plan, hidden),
+      unreadable: plan.unreadable,
     },
     columns,
-    total: project.items.totalCount,
-    limited: project.items.pageInfo.hasNextPage,
-    viewer: json?.data?.viewer?.login ?? null,
-    read: project.items.nodes.length,
+    lanes,
+    total: items.totalCount,
+    limited: items.pageInfo?.hasNextPage ?? false,
+    viewer: project.viewer,
+    count: items.nodes.length,
   };
 }
 
 // The mutation's field, and the path its own GraphQL errors carry.
 const MOVE_FIELD = "updateProjectV2ItemFieldValue";
 export const MOVE_PATH = [MOVE_FIELD];
-export const MOVE_MUTATION = `mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
-  ${MOVE_FIELD}(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) {
+const moveMutation = (value) => `mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+  ${MOVE_FIELD}(input: { projectId: $project, itemId: $item, fieldId: $field, value: { ${value}: $option } }) {
     projectV2Item { id }
   }
 }`;
+// A column of a single-select field is an option, one of an iteration
+// field an iteration.
+export const MOVE_MUTATION = moveMutation("singleSelectOptionId");
+export const MOVE_ITERATION_MUTATION = moveMutation("iterationId");
 
-// gh arguments that set a card's field to a column's option.
+// gh arguments that set a card's column field to a column's option or
+// iteration.
 export function githubMoveArgs(meta, card, column) {
   return [
-    "api", "graphql", "-f", `query=${MOVE_MUTATION}`, "-f", `project=${meta.projectId}`, "-f", `item=${card.itemId}`,
+    "api", "graphql", "-f", `query=${meta.fieldType === "ITERATION" ? MOVE_ITERATION_MUTATION : MOVE_MUTATION}`, "-f", `project=${meta.projectId}`, "-f", `item=${card.itemId}`,
     "-f", `field=${meta.fieldId}`, "-f", `option=${column.id}`,
   ];
 }
@@ -1037,22 +1322,45 @@ export function makeGithub(paths) {
     },
     views: {
       board: {
-        // The first page, then each next one, one call each, until GitHub
-        // has no more, the view's limit is read, or as many calls ran as
-        // full pages would take to read it.
+        // The project with its views and fields (githubProjectArgs), which
+        // the board learns (live.project); then, of the view it shows (the
+        // view's own, or for the view that learns them the one it wants,
+        // else the first), the first page of items and each next one, one
+        // call each, until GitHub has no more, the view's limit is read, or
+        // as many calls ran as full pages would take to read it. A view of
+        // another layout reads no items. Both reads are one load, so that the
+        // view's state, progress, error and saved data stay those of one read;
+        // the board, which knows what shows, names the view it goes on with.
         async load(view, { hiddenFor, live = NO_LIVE }) {
-          const hidden = hiddenFor(view);
-          const { json, warnings, errors } = await gh(paths, githubBoardArgs(view, hidden), what(view, "board-page-1"));
-          const calls = Math.ceil(view.limit / PAGE);
-          const pages = boardPages(json, view, calls);
-          for (let call = 1, next = nextBoardPage(json, view); next && call < calls; call++, next = nextBoardPage(json, view)) {
-            live.partial(() => ({ data: { ...parseGithubBoard(json, view, hidden, errors), partial: true }, warnings: [...warnings] }));
+          // The hidden columns as the load starts: a change since reads again.
+          let hidden = hiddenFor(view);
+          const head = await gh(paths, githubProjectArgs(view), what(view, "project"));
+          const project = parseGithubProject(head.json, view, head.errors);
+          const meta = projectMeta(project);
+          const { wanted = null } = view;
+          const number = view.address.view ?? (project.views.some((v) => v.number === wanted) ? wanted : project.views[0]?.number);
+          const shown = project.views.find((v) => v.number === number);
+          if (!shown) {
+            const why = view.address.view === null ? "hat keine Ansichten" : `hat keine Ansicht ${view.address.view} mehr`;
+            throw Object.assign(new BoardError(`Projekt „${project.title}“ ${why}`), { project: meta });
+          }
+          const learnt = live.project(meta);
+          if (learnt === false || shown.layout !== "board") return { data: { shape: "placeholder" }, warnings: head.warnings };
+          const now = learnt ?? view;
+          const plan = boardPlan(project, shown);
+          if (now !== view) hidden = hiddenFor(now);
+          const { json, warnings, errors } = await gh(paths, githubBoardArgs(now, plan, hidden), what(now, "board-page-1"));
+          warnings.unshift(...head.warnings);
+          const calls = Math.ceil(now.limit / PAGE);
+          const pages = boardPages(json, now, calls);
+          for (let call = 1, next = nextBoardPage(json, now); next && call < calls; call++, next = nextBoardPage(json, now)) {
+            live.partial(() => ({ data: { ...parseGithubBoard(json, now, hidden, errors, plan), partial: true }, warnings: [...warnings] }));
             live.page(call + 1, Math.max(call + 1, pages));
-            const page = await gh(paths, githubBoardPageArgs(view, hidden, next.after, next.read), what(view, `board-page-${call + 1}`));
+            const page = await gh(paths, githubBoardPageArgs(now, plan, hidden, next.after, next.count), what(now, `board-page-${call + 1}`));
             addBoardPage(json, page.json, page.errors);
             warnings.push(...page.warnings);
           }
-          return { data: parseGithubBoard(json, view, hidden, errors), warnings };
+          return { data: parseGithubBoard(json, now, hidden, errors, plan), warnings };
         },
         async move(view, data, card, column) {
           checkMoveResult((await gh(paths, githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH, ...what(view, "move") })).json, card);

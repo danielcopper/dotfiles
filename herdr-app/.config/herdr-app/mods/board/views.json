@@ -14,16 +14,7 @@
       "contexts": [
         {
           "owner": "danielcopper",
-          "projects": [
-            {
-              "id": "mine",
-              "name": "Meine Aufgaben",
-              "number": 2,
-              "field": "Status",
-              "filter": "assignee:@me",
-              "hide": ["Backlog", "Done"]
-            }
-          ],
+          "projects": [{ "number": 2 }],
           "prs": { "id": "prs", "name": "PRs" }
         }
       ],

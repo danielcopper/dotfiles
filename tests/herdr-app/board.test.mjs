@@ -19,16 +19,16 @@
 //
 // Fixtures in board-fixtures/:
 // - recorded from gh 2.96 and GitHub's GraphQL API, then reduced to six items
-//   and rewritten as sample data: github-board.json (the query
-//   githubBoardArgs builds from the shipped views.json), github-not-found.json
-//   (a project number that does not exist), gh-no-login.txt (gh's stderr
-//   without a login);
+//   and rewritten as sample data: github-board.json (the items of the
+//   query githubBoardArgs builds from the shipped views.json),
+//   github-not-found.json (a project number that does not exist),
+//   gh-no-login.txt (gh's stderr without a login);
 // - built by hand in the shapes GitHub returns: github-board-cases.json (a
 //   pull request, a draft, an item without access, an item in an option that
 //   is gone), github-list.json, github-move.json, github-rate-limited.json,
 //   github-scope-error.json; added the same way: the viewer's login in
-//   github-board.json, github-board-cases.json and github-list.json, the
-//   items' authors (a draft's creator) in the first two, the pull requests'
+//   github-list.json, the items' authors (a draft's creator) in
+//   github-board.json and github-board-cases.json, the pull requests'
 //   assignees and review requests in github-list.json and the pull
 //   request's in github-board-cases.json, a review request whose reviewer
 //   is gone (null) and an issue whose author is gone (null), and each issue's
@@ -127,6 +127,10 @@
 //   IdentityRefWithVote), with made-up names, not recorded:
 //   azure-pr-show.json (an active pull request, one approving reviewer and
 //   a team without a vote).
+// The board fixtures (github-board*.json) hold a board's items alone, as
+// githubBoardArgs reads them; the Status options of the project each stands
+// in are the tests' (BOARD_OPTIONS and the others), and GitHub's answer for
+// that project's views and fields is built with them (projectJson).
 
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
@@ -239,8 +243,8 @@ function sampleConfig() {
         contexts: [{
           owner: "sample-user",
           projects: [
-            { id: "mine", name: "Mine", number: 7, filter: "assignee:@me", hide: ["Backlog", "Done"] },
-            { id: "other", name: "Other", number: 8, start: { checkout: "~/src/work", message: "OT {number}" } },
+            { number: 7, views: { 1: { hide: ["Backlog", "Done"] } } },
+            { number: 8, start: { checkout: "~/src/work", message: "OT {number}" } },
           ],
           prs: { id: "prs", name: "PRs" },
         }],
@@ -255,20 +259,119 @@ function sampleConfig() {
 // The PR sections of a views.json of the tests' own.
 const SHARED_PRS = { sections: [{ name: "S", query: "is:pr" }] };
 
-const sampleGithubView = (id) => board.githubViews(sampleConfig()).find((v) => v.id === id);
-const githubView = () => sampleGithubView("mine");
+// The tabs of sampleConfig's and testConfig's projects, 7 and 8 of
+// sample-user, and the ids of their views 1, as the board knows them
+// (KNOWN_PROJECTS).
+const MINE_TAB = "github:project:sample-user/7";
+const OTHER_TAB = "github:project:sample-user/8";
+const MINE = `${MINE_TAB}:1`;
+const OTHER = `${OTHER_TAB}:1`;
+
+// The Status options of the projects the items fixtures were read from,
+// their columns: github-board.json's (github-board-cases.json's alike),
+// github-board-cards.json's and github-board-colors.json's.
+const statusOptions = (rows) => rows.map(([id, name, color]) => ({ id, name, color }));
+const BOARD_OPTIONS = statusOptions([["opt-backlog", "Backlog", "GREEN"], ["opt-ready", "Ready", "BLUE"], ["opt-in-progress", "In progress", "YELLOW"], ["opt-in-review", "In review", "PURPLE"], ["opt-done", "Done", "ORANGE"]]);
+const CARDS_OPTIONS = statusOptions([["opt-backlog", "Backlog", "GREEN"], ["opt-ready", "Ready", "BLUE"], ["opt-in-progress", "In progress", "YELLOW"], ["opt-done", "Done", "PURPLE"]]);
+const COLORS_OPTIONS = statusOptions([["opt-parked", "Parked", "GRAY"], ["opt-backlog", "Backlog", "GREEN"], ["opt-ready", "Ready", "BLUE"], ["opt-in-progress", "In progress", "YELLOW"], ["opt-done", "Done", "PURPLE"]]);
+const FIXTURE_OPTIONS = {
+  "github-board.json": BOARD_OPTIONS, "github-board-cases.json": BOARD_OPTIONS, "github-board-cards.json": CARDS_OPTIONS, "github-board-colors.json": COLORS_OPTIONS,
+};
+const PRIORITIES = [["opt-p0", "P0", "RED"], ["opt-p1", "P1", "ORANGE"], ["opt-p2", "P2", "YELLOW"], ["opt-p3", "P3", "GRAY"]].map(([id, name, color]) => ({ id, name, color }));
+const ITERATIONS = {
+  iterations: [{ id: "it-2", title: "Iteration 2", startDate: "2026-11-26" }, { id: "it-3", title: "Iteration 3", startDate: "2026-12-10" }],
+  completedIterations: [{ id: "it-1", title: "Iteration 1", startDate: "2026-11-12" }],
+};
+
+// A project's fields in the shape GitHub sends them for PROJECT_QUERY (the
+// probe's, with made-up ids): built-in ones, Status with `options`, a
+// Priority, Size, an Estimate, a Target date, a Notes text and an
+// Iteration; `extra` adds more.
+function projectFields(options = BOARD_OPTIONS, extra = []) {
+  const plain = (name, dataType) => ({ __typename: "ProjectV2Field", id: `F_${name.replace(/\s+/g, "_")}`, name, dataType });
+  return [
+    plain("Title", "TITLE"), plain("Assignees", "ASSIGNEES"),
+    { __typename: "ProjectV2SingleSelectField", id: "F_Status", name: "Status", dataType: "SINGLE_SELECT", options },
+    plain("Labels", "LABELS"), plain("Linked pull requests", "LINKED_PULL_REQUESTS"), plain("Milestone", "MILESTONE"), plain("Repository", "REPOSITORY"),
+    plain("Parent issue", "PARENT_ISSUE"), plain("Sub-issues progress", "SUB_ISSUES_PROGRESS"),
+    { __typename: "ProjectV2SingleSelectField", id: "F_Priority", name: "Priority", dataType: "SINGLE_SELECT", options: PRIORITIES },
+    plain("Estimate", "NUMBER"), plain("Target date", "DATE"), plain("Notes", "TEXT"), plain("Created", "CREATED"),
+    { __typename: "ProjectV2SingleSelectField", id: "F_Size", name: "Size", dataType: "SINGLE_SELECT", options: ["XS", "S", "M", "L"].map((n) => ({ id: `opt-size-${n}`, name: n, color: n === "XS" ? "GREEN" : "GRAY" })) },
+    { __typename: "ProjectV2IterationField", id: "F_Iteration", name: "Iteration", dataType: "ITERATION", configuration: ITERATIONS },
+    ...extra,
+  ];
+}
+
+// A view of a project as PROJECT_QUERY reads it: by its layout's short
+// name, its filter, its column and swimlane fields by name and its sort
+// keys as [name, direction].
+function projectViewNode({ number = 1, name = "Mine", layout = "board", filter = "assignee:@me", column = "Status", lane = null, sorts = [] } = {}) {
+  const ref = (n) => ({ id: `F_${n.replace(/\s+/g, "_")}`, name: n });
+  return {
+    number, name, layout: `${layout.toUpperCase()}_LAYOUT`, filter,
+    verticalGroupByFields: { nodes: column ? [ref(column)] : [] },
+    groupByFields: { nodes: lane ? [ref(lane)] : [] },
+    sortByFields: { nodes: sorts.map(([n, direction]) => ({ direction, field: ref(n) })) },
+  };
+}
+
+// gh's answer to githubProjectArgs for a project: its title, its fields'
+// Status `options`, its `views` (projectViewNode's options each).
+function projectJson({ title = "Mine", number = 7, options = BOARD_OPTIONS, views = [{}], fields = projectFields(options) } = {}) {
+  return {
+    data: {
+      viewer: { login: "sample-user" },
+      repositoryOwner: {
+        projectV2: {
+          id: `PVT_sample${number}`, title, url: `https://github.com/users/sample-user/projects/${number}`,
+          fields: { nodes: fields }, views: { nodes: views.map(projectViewNode) },
+        },
+      },
+    },
+  };
+}
+
+// testConfig's projects as GitHub answers for them by default: 7 "Mine"
+// with its view "Mine" (assignee:@me), 8 "Other" with "Other" (no filter),
+// each a board on Status. `options`: another Status field's.
+const PROJECTS_SEEN = {
+  7: { title: "Mine", views: [{}] },
+  8: { title: "Other", views: [{ name: "Other", filter: "" }] },
+};
+const defaultProject = (number, options) => projectJson({ number, options, ...(PROJECTS_SEEN[number] ?? { title: `P${number}` }) });
+// What the board knows of testConfig's projects before a test starts (the
+// store's "project:<tab>"), as their default answers say.
+const knownOf = (answer) => board.projectMeta(board.parseGithubProject(answer, { address: { owner: "sample-user", number: 0 } }));
+const KNOWN_PROJECTS = () => ({ [board.projectKey(MINE_TAB)]: knownOf(defaultProject(7)), [board.projectKey(OTHER_TAB)]: knownOf(defaultProject(8)) });
+const knownGet = (entries = KNOWN_PROJECTS()) => ({ get: (id) => entries[board.projectKey(id)] ?? null });
+
+const sampleViews = (config = sampleConfig()) => board.viewsOf(config, knownGet());
+const sampleGithubView = (id) => sampleViews().find((v) => v.id === id);
+const githubView = () => sampleGithubView(MINE);
 const listView = () => sampleGithubView("prs");
-const otherView = () => sampleGithubView("other");
-// A config's (parsed) GitHub context and a project of it.
+const otherView = () => sampleGithubView(OTHER);
+// A config's GitHub tabs, as readConfig gives them, of all its contexts.
+const githubTabs = (config) => (config?.github?.contexts ?? []).flatMap((c) => c.tabs);
+// A config's (parsed) GitHub context and a project of it, by its number.
 const ghContext = (config) => config.sources.github.contexts[0];
-const ghProject = (config, id) => ghContext(config).projects.find((p) => p.id === id);
+const ghProject = (config, number) => ghContext(config).projects.find((p) => p.number === number);
 // The contexts of testConfig and sampleConfig (alike there), and sampleConfig's Azure team.
 const GITHUB_CONTEXT = "github:sample-user";
 const AZURE_CONTEXT = "azure:Example Project";
 const azureTeam = (config = sampleConfig()) => config.azure.contexts[0].tabs[0];
 const HIDDEN = new Set(["Backlog", "Done"]);
-const githubBoard = () => board.parseGithubBoard(json("github-board.json"), githubView(), HIDDEN);
-const casesBoard = () => board.parseGithubBoard(json("github-board-cases.json"), githubView(), HIDDEN);
+// How the board reads view 1 of project 7 as `answer` (gh's answer to
+// githubProjectArgs) has it (boardPlan).
+const planOf = (answer = defaultProject(7), number = 1) => {
+  const project = board.parseGithubProject(answer, githubView());
+  return board.boardPlan(project, project.views.find((v) => v.number === number));
+};
+// Project 7 as GitHub answers githubProjectArgs for it with the Status
+// `options` of the items an answer holds (BOARD_OPTIONS and the others).
+const projectFor = (options = BOARD_OPTIONS, extra = {}) => projectJson({ ...PROJECTS_SEEN[7], options, ...extra });
+const parseBoard = (name, hidden = HIDDEN, plan = planOf(projectFor(FIXTURE_OPTIONS[name]))) => board.parseGithubBoard(json(name), githubView(), hidden, [], plan);
+const githubBoard = () => parseBoard("github-board.json");
+const casesBoard = () => parseBoard("github-board-cases.json");
 const azureTypes = () => board.parseAzureTypes(fixture("azure-types.json"));
 // A work item as the Azure views will show one.
 const azureItem = () => ({
@@ -412,7 +515,7 @@ test("the build script writes main.js only when the build succeeds", () => {
 
 // ---- views.json ----
 
-test("the shipped views.json is valid: Azure projects, each with a team with Sprint and Backlog and its pull requests, and a GitHub owner with a board and its PR list", () => {
+test("the shipped views.json is valid: Azure projects, each with a team with Sprint and Backlog and its pull requests, and a GitHub owner with a project, its number alone, and its PR list", () => {
   const { config, errors } = board.readConfig(shippedConfig());
   assert.deepEqual(errors, []);
   assert.match(config.azure.org, /^https:\/\/dev\.azure\.com\/[^/]+$/);
@@ -421,13 +524,13 @@ test("the shipped views.json is valid: Azure projects, each with a team with Spr
     assert.deepEqual(context.tabs.map((c) => [c.kind, c.views ?? null, c.project]), [["team", ["sprint", "backlog"], context.project], ["prs", null, context.project]]);
   }
   assert.equal(config.github.contexts.length, 1);
-  assert.deepEqual(config.github.contexts[0].views.map((v) => [v.name, v.source, v.layout]), [
-    ["Meine Aufgaben", "github", "board"],
-    ["PRs", "github", "list"],
+  assert.deepEqual(config.github.contexts[0].tabs.map((v) => [v.entryKind, v.name ?? null, v.source, v.layout ?? null]), [
+    ["project", null, "github", null],
+    ["prs", "PRs", "github", "list"],
   ]);
-  const [mine, prs] = config.github.contexts[0].views;
-  assert.equal(mine.project.owner, config.github.contexts[0].owner);
-  assert.deepEqual(mine.hide, ["Backlog", "Done"]);
+  const [mine, prs] = config.github.contexts[0].tabs;
+  assert.equal(mine.owner, config.github.contexts[0].owner);
+  assert.deepEqual(JSON.parse(shippedConfig()).sources.github.contexts[0].projects, [{ number: mine.number }], "a project is its number alone: the rest comes from GitHub");
   assert.match(prs.sections.map((s) => s.query).join(" "), /author:@me/);
   assert.match(prs.sections.map((s) => s.query).join(" "), /review-requested:@me/);
   const raw = JSON.parse(shippedConfig()).sources.github;
@@ -482,16 +585,17 @@ test("validateConfig keeps the valid tabs of each GitHub context and names each 
     start: { colour: "x", open: "window" },
     sources: { github: { prs: SHARED_PRS, contexts: [
       { owner: "o", projects: [
-        { id: "ok", name: "Ok", number: 1 },
-        { id: "ok", name: "Twice", number: 2 },
-        { name: "No id", number: 1 },
-        { id: "c", name: "No number" },
-        { id: "c2", name: "Zero", number: 0 },
-        { id: "f", name: "Bad hide", number: 1, hide: "Done" },
-        { id: "g", name: "Typo", number: 1, hidden: ["Done"] },
+        { number: 1 },
+        { number: 1, limit: 5 },
+        {},
+        { number: 0 },
+        { number: 2, views: { 1: { hide: "Done" } } },
+        { number: 3, hidden: ["Done"] },
+        { number: 4, views: [] },
+        { number: 5, views: { first: {} } },
+        { number: 6, views: { 2: { hide: [], colour: 1 }, 3: 4 } },
         { id: "h", name: "Old", layout: "board", project: { owner: "o", number: 1 } },
-        { id: "i", number: 1 },
-        { id: "j", name: "Field", number: 1, field: 3 },
+        { number: 7, field: 3 },
         "x",
       ], prs: { id: "prs", ...list } },
       { owner: "p", prs: { id: "p-prs", name: "Reviews", ...list } },
@@ -500,17 +604,17 @@ test("validateConfig keeps the valid tabs of each GitHub context and names each 
       { projects: [], prs: { id: "x", ...list } },
       { owner: "r", colour: 1, prs: { id: "r-prs", ...list } },
       { owner: "s", projects: {}, prs: { id: "s-prs", ...list } },
-      { owner: "t", projects: [{ id: "t1", name: "T", number: 1 }] },
-      { owner: "u", projects: [{ id: "prs", name: "U", number: 1 }], prs: { id: "u-prs", ...list } },
+      { owner: "t", projects: [{ number: 1 }] },
+      { owner: "u", projects: [{ number: 1 }], prs: { id: "prs", ...list } },
       "x",
     ] } },
   });
-  assert.deepEqual(config.github.contexts.map((a) => [a.owner, a.views.map((v) => [v.id, v.name, v.layout, v.project?.owner ?? null])]), [
-    ["o", [["ok", "Ok", "board", "o"], ["prs", "PRs", "list", null]]],
-    ["p", [["p-prs", "Reviews", "list", null]]],
-    ["s", [["s-prs", "PRs", "list", null]]],
-    ["t", [["t1", "T", "board", "t"]]],
-    ["u", [["u-prs", "PRs", "list", null]]],
+  assert.deepEqual(config.github.contexts.map((a) => [a.owner, a.tabs.map((v) => [v.id, v.name ?? null, v.entryKind, v.owner ?? null])]), [
+    ["o", [["github:project:o/1", null, "project", "o"], ["prs", "PRs", "prs", null]]],
+    ["p", [["p-prs", "Reviews", "prs", null]]],
+    ["s", [["s-prs", "PRs", "prs", null]]],
+    ["t", [["github:project:t/1", null, "project", "t"]]],
+    ["u", [["github:project:u/1", null, "project", "u"]]],
   ]);
   assert.equal(config.azure, null);
   assert.equal(config.refreshMinutes, 3);
@@ -519,47 +623,66 @@ test("validateConfig keeps the valid tabs of each GitHub context and names each 
     "„refreshMinutes“ ist eine Zahl ab 1",
     "„start.colour“ gibt es nicht",
     "„start.open“ gibt es nicht mehr: „Öffnen in“ im Startdialog wählt den Space",
-    "GitHub-Kontext 1 („o“), Project 2 („Twice“): „id“ ok gibt es schon",
-    "GitHub-Kontext 1 („o“), Project 3 („No id“): „id“ fehlt",
-    "GitHub-Kontext 1 („o“), Project 4 („No number“): „number“ ist die Nummer des Projects, eine ganze Zahl ab 1",
-    "GitHub-Kontext 1 („o“), Project 5 („Zero“): „number“ ist die Nummer des Projects, eine ganze Zahl ab 1",
-    "GitHub-Kontext 1 („o“), Project 6 („Bad hide“): „hide“ muss eine Liste von Texten sein",
-    "GitHub-Kontext 1 („o“), Project 7 („Typo“): „hidden“ gibt es nicht",
-    "GitHub-Kontext 1 („o“), Project 8 („Old“): „layout“ gibt es nicht",
-    "GitHub-Kontext 1 („o“), Project 8 („Old“): „project“ gibt es nicht",
-    "GitHub-Kontext 1 („o“), Project 8 („Old“): „number“ ist die Nummer des Projects, eine ganze Zahl ab 1",
-    "GitHub-Kontext 1 („o“), Project 9: „name“ fehlt",
-    "GitHub-Kontext 1 („o“), Project 10 („Field“): „field“ muss Text sein",
-    "GitHub-Kontext 1 („o“), Project 11: muss ein Objekt sein",
+    "GitHub-Kontext 1 („o“), Project 2 (1): „number“ 1 gibt es schon",
+    "GitHub-Kontext 1 („o“), Project 3: „number“ ist die Nummer des Projects, eine ganze Zahl ab 1",
+    "GitHub-Kontext 1 („o“), Project 4 (0): „number“ ist die Nummer des Projects, eine ganze Zahl ab 1",
+    "GitHub-Kontext 1 („o“), Project 5 (2): „views.1.hide“ muss eine Liste von Texten sein",
+    "GitHub-Kontext 1 („o“), Project 6 (3): „hidden“ gibt es nicht",
+    "GitHub-Kontext 1 („o“), Project 7 (4): „views“ ist ein Objekt mit den Nummern der Ansichten als Schlüsseln, etwa { \"1\": { \"hide\": [\"Done\"] } }",
+    "GitHub-Kontext 1 („o“), Project 8 (5): „views“ ist ein Objekt mit den Nummern der Ansichten als Schlüsseln, etwa { \"1\": { \"hide\": [\"Done\"] } }",
+    "GitHub-Kontext 1 („o“), Project 9 (6): „views.2.colour“ gibt es nicht",
+    "GitHub-Kontext 1 („o“), Project 9 (6): „views.3“ muss ein Objekt sein",
+    "GitHub-Kontext 1 („o“), Project 10: „id“, „name“ stammen aus der Form vor den Ansichten von GitHub: ein Project ist jetzt { \"number\" }, dazu „limit“, „start“ und je Ansicht „views“: { \"<Nummer der Ansicht>\": { \"hide\": [...] } }; Name, Ansichten, Filter, Spalten und Priorität kommen von GitHub (Kopf von mods/board/src/main.js)",
+    "GitHub-Kontext 1 („o“), Project 11 (7): „field“ stammt aus der Form vor den Ansichten von GitHub: ein Project ist jetzt { \"number\" }, dazu „limit“, „start“ und je Ansicht „views“: { \"<Nummer der Ansicht>\": { \"hide\": [...] } }; Name, Ansichten, Filter, Spalten und Priorität kommen von GitHub (Kopf von mods/board/src/main.js)",
+    "GitHub-Kontext 1 („o“), Project 12: muss ein Objekt sein",
     "GitHub-Kontext 3 („q“), PR-Tab: „name“ muss Text sein",
     "GitHub-Kontext 4 („o“): „owner“ o gibt es schon",
     "GitHub-Kontext 5: „owner“ fehlt: der Benutzer oder die Organisation auf GitHub, der die Projects gehören",
     "GitHub-Kontext 6 („r“): „colour“ gibt es nicht",
     "GitHub-Kontext 7 („s“): „projects“ ist eine Liste von Projects",
     "GitHub-Kontext 8 („t“): „prs“ fehlt: der PR-Tab, der letzte Tab des Kontexts, mit „id“",
-    "GitHub-Kontext 9 („u“), Project 1 („U“): „id“ prs gibt es schon",
+    "GitHub-Kontext 9 („u“), PR-Tab: „id“ prs gibt es schon",
     "GitHub-Kontext 10: muss ein Objekt sein",
   ]);
 });
 
-test("a GitHub context's tabs are views as the board knows them: a project's board of the context's owner with its defaults, then the PR list", () => {
+test("a project entry with any key of the form before its views came from GitHub (id, name, field, filter, priorityField, hide) is left out, the key named", () => {
+  const keys = { id: "mine", name: "Mine", field: "Status", filter: "assignee:@me", priorityField: "Priority", hide: ["Done"] };
+  const projects = Object.entries(keys).map(([key, value], i) => ({ number: i + 1, [key]: value }));
+  const { config, errors } = board.validateConfig({ sources: { github: { prs: SHARED_PRS, contexts: [{ owner: "o", projects, prs: { id: "p" } }] } } });
+  assert.deepEqual(githubTabs(config).map((v) => v.id), ["p"], "every one left out");
+  assert.deepEqual(errors.map((e) => e.replace(/ aus der Form vor den Ansichten von GitHub: .*/, " …")),
+    Object.keys(keys).map((key, i) => `GitHub-Kontext 1 („o“), Project ${i + 1} (${i + 1}): „${key}“ stammt …`));
+});
+
+test("a GitHub context's tabs as views.json gives them: a project of the context's owner by its number, with its limit, start and its views' hidden columns, its defaults filled in, then the PR list", () => {
   const { config } = board.validateConfig({ sources: { github: { prs: { ...SHARED_PRS, limit: 20 }, contexts: [{
     owner: "o",
-    projects: [{ id: "a", name: "A", number: 3, field: "Stage", priorityField: "Prio", filter: "label:x", hide: ["Done"], limit: 200, start: { message: "m" } }, { id: "b", name: "B", number: 4 }],
+    projects: [{ number: 3, limit: 200, start: { message: "m" }, views: { 2: { hide: ["Done"] } } }, { number: 4 }],
     prs: { id: "p" },
   }] } } });
-  const [a, b, p] = config.github.contexts[0].views;
+  const [a, b, p] = config.github.contexts[0].tabs;
   assert.deepEqual(a, {
-    hide: ["Done"], start: { message: "m" }, id: "a", name: "A", source: "github", layout: "board", settingsPath: ["sources", "github", "contexts", "o", "projects", "a"],
-    project: { owner: "o", number: 3, field: "Stage", priorityField: "Prio", priorityGiven: true }, filter: "label:x", limit: 200, owners: { tabOwner: "o", otherOwners: [] },
+    entryKind: "project", start: { message: "m" }, id: "github:project:o/3", source: "github", settingsPath: ["sources", "github", "contexts", "o", "projects", "3"],
+    owner: "o", number: 3, limit: 200, views: { 2: { hide: ["Done"] } }, owners: { tabOwner: "o", otherOwners: [] },
   });
-  assert.deepEqual([b.project, b.filter, b.limit, b.hide], [{ owner: "o", number: 4, field: "Status", priorityField: "Priority", priorityGiven: false }, "", 1000, []]);
+  assert.deepEqual([b.id, b.number, b.limit, b.views, b.start], ["github:project:o/4", 4, 1000, {}, {}]);
   assert.deepEqual(p, {
-    hide: [], start: {}, id: "p", name: "PRs", source: "github", layout: "list", settingsPath: ["sources", "github", "contexts", "o", "prs"], sections: [{ name: "S", query: "is:pr", tone: "blue" }], limit: 20,
+    entryKind: "prs", hide: [], start: {}, id: "p", name: "PRs", source: "github", layout: "list", settingsPath: ["sources", "github", "contexts", "o", "prs"], sections: [{ name: "S", query: "is:pr", tone: "blue" }], limit: 20,
     hideRepos: [], owners: { tabOwner: "o", otherOwners: [] },
   });
-  assert.deepEqual(board.githubViews(config).map((v) => v.id), ["a", "b", "p"]);
-  assert.deepEqual([board.hidePath(a), board.hidePath(p)], [["sources", "github", "contexts", "o", "projects", "a", "hide"], ["sources", "github", "contexts", "o", "prs", "hide"]]);
+  assert.deepEqual(githubTabs(config).map((v) => v.id), ["github:project:o/3", "github:project:o/4", "p"]);
+  const prsView = board.contextsOf(config)[0].tabs[2].view;
+  assert.equal(prsView, p, "the PR tab's view is its entry");
+  assert.equal(Object.hasOwn(prsView, "tab"), false, "and has no `tab`: a view's tab is its tab");
+  assert.equal(board.projectTabId("o", 3), a.id, "the tab's id: its owner's and its number");
+  assert.deepEqual(board.hidePath(p), ["sources", "github", "contexts", "o", "prs", "hide"]);
+});
+
+test("a PR tab's own hide and start in views.json stand on its view", () => {
+  const { config } = board.validateConfig({ sources: { github: { prs: SHARED_PRS, contexts: [{ owner: "o", prs: { id: "p", hide: ["S"], start: { message: "m" } } }] } } });
+  const [p] = config.github.contexts[0].tabs;
+  assert.deepEqual([p.hide, p.start], [["S"], { message: "m" }]);
 });
 
 test("validateConfig reads sources.azure: a context per project, a tab per team with its views, then the project's pull requests, and names each problem", () => {
@@ -661,7 +784,7 @@ test("an old views.json with its views at the top is not read; the board says wh
   const { config, errors } = board.validateConfig(old);
   assert.equal(config, null);
   assert.equal(errors.length, 1);
-  assert.match(errors[0], /alte Form: die Ansichten stehen jetzt unter „sources“, die GitHub-Ansichten in „sources\.github\.contexts“, Azure in „sources\.azure“ mit „org“ und „contexts“/);
+  assert.match(errors[0], /alte Form: die Einträge von „views“ stehen jetzt unter „sources“, die von GitHub in „sources\.github\.contexts“, die von Azure in „sources\.azure“ mit „org“ und „contexts“/);
   const beside = board.validateConfig({ ...old, sources: { azure: { org: "https://dev.azure.com/o", contexts: [{ project: "P" }] } } });
   assert.deepEqual(beside.errors, [errors[0]], "beside sources too, views gets the same message");
   assert.deepEqual(beside.config.azure.contexts.map((a) => a.project), ["P"]);
@@ -674,7 +797,7 @@ test("the old part of a views.json from before the contexts is not read, the res
   const before = board.validateConfig({ sources: { github, azure } });
   assert.equal(before.config, null, "no fallback to the old form");
   assert.equal(before.errors.length, 2);
-  assert.match(before.errors[0], /^views\.json hat noch die Form vor den Kontexten: die GitHub-Ansichten stehen jetzt je Besitzer in „sources\.github\.contexts“ \(\{ "owner", "projects": \[die Boards, ohne „source“ und „layout“, „number“, „field“ und „priorityField“ statt „project“\], "prs": der PR-Tab, ohne „source“, „layout“, „sections“ und „limit“, die für alle PR-Tabs in „sources\.github\.prs“ stehen \}\), die Azure-Teams je Projekt in „sources\.azure\.contexts“ \(\{ "project", "teams": \[\{ "team", "views" \}\] \}; den PR-Tab hat jedes Projekt von selbst\)/);
+  assert.match(before.errors[0], /^views\.json hat noch die Form vor den Kontexten: die Einträge von „sources\.github\.views“ stehen jetzt je Besitzer in „sources\.github\.contexts“ \(\{ "owner", "projects": \[die Projects als \{ "number" \}, ihre Ansichten von GitHub\], "prs": der PR-Tab, ohne „source“, „layout“, „sections“ und „limit“, die für alle PR-Tabs in „sources\.github\.prs“ stehen \}\), die Azure-Teams je Projekt in „sources\.azure\.contexts“ \(\{ "project", "teams": \[\{ "team", "views" \}\] \}; den PR-Tab hat jedes Projekt von selbst\)/);
   assert.equal(before.errors[1], none);
   for (const sources of [{ github }, { azure }]) assert.deepEqual(board.validateConfig({ sources }).errors, [before.errors[0], none], Object.keys(sources)[0]);
   const beside = board.validateConfig({ sources: { github, azure: { org: azure.org, contexts: [{ project: "P" }] } } });
@@ -703,7 +826,7 @@ test("validateConfig rejects the keys of the worktree start with a clear message
   const { config, errors } = board.validateConfig({
     start: { worktree: "{checkout}.worktrees/{branch}", branch: "{type}/{number}-{slug}", base: "main" },
     repos: { "o/r": { checkout: "~/r", worktree: "x" } },
-    sources: { github: { contexts: [{ owner: "o", projects: [{ id: "a", name: "A", number: 1, startColumn: "In progress" }] }] } },
+    sources: { github: { contexts: [{ owner: "o", projects: [{ number: 1, startColumn: "In progress" }] }] } },
   });
   assert.equal(config, null);
   const text = errors.join("\n");
@@ -730,7 +853,7 @@ test("tabs carry their names from views.json: a team's, a project's, or PRs; tea
 
 test("start settings: defaults < start < the view's start < the repo's entry", () => {
   const config = sampleConfig();
-  const [mine, other] = config.github.contexts[0].views;
+  const [mine, other] = config.github.contexts[0].tabs;
   const s = board.startSettings(config, mine, "sample-user/tender");
   assert.deepEqual([s.message, s.review, s.checkout, s.machine], ["/work {number}", "/look {number}", "~/src/tender", "server"]);
   assert.equal(board.startSettings(config, other, "other/repo").checkout, "~/src/work");
@@ -743,16 +866,18 @@ test("start settings: defaults < start < the view's start < the repo's entry", (
 
 const MACHINE_FILE = "/fake-home/board/settings.json";
 const PROJECTS = ["sources", "github", "contexts", "sample-user", "projects"];
-const MINE_HIDE = [...PROJECTS, "mine", "hide"];
+const MINE_HIDE = [...PROJECTS, "7", "views", "1", "hide"];
 const projectsHere = (projects) => ({ sources: { github: { contexts: { "sample-user": { projects } } } } });
-const mineHidden = (hide) => projectsHere({ mine: { hide } });
+const mineHidden = (hide) => projectsHere({ 7: { views: { 1: { hide } } } });
+const prsNamed = (name) => ({ sources: { github: { contexts: { "sample-user": { prs: { name } } } } } });
 // This machine's settings for readConfig, named "settings.json": an object
 // as its JSON, a text as it stands, null for no file.
 const settingsRead = (settings) => ({ name: "settings.json", text: settings === null || typeof settings === "string" ? settings : JSON.stringify(settings) });
-const viewHide = (read, id) => board.githubViews(read.config).find((v) => v.id === id).hide;
+// The hidden columns a read config gives view `view` of project `number`.
+const viewHide = (read, number, view = 1) => githubTabs(read.config).find((v) => v.number === number).views[view]?.hide ?? [];
 const ALONE = "settings.json gilt nicht: das Board zeigt views.json allein";
-const sampleView = (id, extra = {}) => ({ id, name: id, layout: "board", project: { owner: "o", number: 1 }, ...extra });
-const sampleProject = (id, extra = {}) => ({ id, name: id, number: 1, ...extra });
+const sampleView = (id, extra = {}) => ({ id, name: id, layout: "board", address: { owner: "o", number: 1, view: 1 }, ...extra });
+const sampleProject = (number, extra = {}) => ({ number, ...extra });
 const SAMPLE_PRS = { id: "prs" };
 // A views.json of one GitHub context, sample-user's, with these projects.
 const projectsConfig = (projects) => JSON.stringify({ sources: { github: { contexts: [{ owner: "sample-user", projects, prs: SAMPLE_PRS }], prs: SHARED_PRS } } });
@@ -769,46 +894,46 @@ test("settings over views.json: a value overrides, an object merges key by key, 
   assert.deepEqual(read.config.start, { agent: "codex", message: "/work {number}", review: "/look {number}" });
   assert.deepEqual(read.config.azure.contexts.map((a) => a.project), ["Other"]);
   assert.equal(read.config.azure.org, "https://dev.azure.com/example-org", "beside the list, views.json's org stays");
-  assert.deepEqual(viewHide(read, "mine"), ["Ready"], "the hide list replaced, not joined");
+  assert.deepEqual(viewHide(read, 7), ["Ready"], "the hide list replaced, not joined");
 });
 
-test("settings name a views.json list's entries by their id: an object there merges into the entry with that id, wherever views.json moves it; an array replaces the list", () => {
-  const over = projectsHere({ mine: { hide: ["Ready"], filter: "" } });
+test("settings name a views.json list's entries by their name, a project by its number: an object there merges into the entry with that name, wherever views.json moves it; an array replaces the list", () => {
+  const over = projectsHere({ 7: { views: { 1: { hide: ["Ready"] }, 2: { hide: ["Done"] } }, limit: 50 } });
   const read = board.readConfig(testConfig(), settingsRead(over));
   assert.deepEqual(read.errors, []);
-  assert.deepEqual(viewHide(read, "mine"), ["Ready"]);
-  assert.equal(board.githubViews(read.config)[0].filter, "");
-  assert.deepEqual(viewHide(read, "other"), ["Done"], "the other views keep views.json's");
+  assert.deepEqual([viewHide(read, 7), viewHide(read, 7, 2)], [["Ready"], ["Done"]]);
+  assert.equal(githubTabs(read.config)[0].limit, 50);
+  assert.deepEqual(viewHide(read, 8), ["Done"], "the other projects keep views.json's");
   const reordered = JSON.parse(testConfig());
   ghContext(reordered).projects.reverse();
   const moved = board.readConfig(JSON.stringify(reordered), settingsRead(over));
-  assert.deepEqual(board.githubViews(moved.config).map((v) => [v.id, v.hide]), [["other", ["Done"]], ["mine", ["Ready"]], ["prs", []]]);
-  const whole = board.readConfig(testConfig(), settingsRead(projectsHere([sampleProject("solo", { name: "Solo" })])));
+  assert.deepEqual(githubTabs(moved.config).map((v) => [v.id, v.views?.[1]?.hide ?? null]), [[OTHER_TAB, ["Done"]], [MINE_TAB, ["Ready"]], ["prs", null]]);
+  const whole = board.readConfig(testConfig(), settingsRead(projectsHere([sampleProject(9)])));
   assert.deepEqual(whole.errors, []);
-  assert.deepEqual(board.githubViews(whole.config).map((v) => v.id), ["solo", "prs"]);
+  assert.deepEqual(githubTabs(whole.config).map((v) => v.id), ["github:project:sample-user/9", "prs"]);
 });
 
-test("settings name a context by its owner or its project, wherever views.json moves it; a project's tab by its id within its context", () => {
+test("settings name a context by its owner or its project, wherever views.json moves it; a project's tab by its number within its context", () => {
   const two = JSON.parse(testConfig());
-  two.sources.github.contexts.unshift({ owner: "other-org", projects: [sampleProject("org-board")], prs: { ...SAMPLE_PRS, id: "org-prs" } });
+  two.sources.github.contexts.unshift({ owner: "other-org", projects: [sampleProject(1)], prs: { ...SAMPLE_PRS, id: "org-prs" } });
   two.sources.azure.contexts.push({ project: "Second", teams: [{ team: "Second Team", views: ["sprint", "backlog"] }] });
   const over = {
     sources: {
-      github: { contexts: { "sample-user": { projects: { other: { hide: [] } }, prs: { name: "Reviews" } }, "other-org": { projects: { "org-board": { filter: "label:x" } } } } },
+      github: { contexts: { "sample-user": { projects: { 8: { views: { 1: { hide: [] } } } }, prs: { name: "Reviews" } }, "other-org": { projects: { 1: { limit: 20 } } } } },
       azure: { contexts: { Second: { teams: [{ team: "Second Team", views: ["backlog"] }] } } },
     },
   };
   const read = board.readConfig(JSON.stringify(two), settingsRead(over));
   assert.deepEqual(read.errors, []);
-  assert.deepEqual(board.githubViews(read.config).map((v) => [v.id, v.name, v.hide, v.filter ?? null]), [
-    ["org-board", "org-board", [], "label:x"], ["org-prs", "PRs", [], null], ["mine", "Mine", ["Backlog", "Done"], "assignee:@me"], ["other", "Other", [], ""], ["prs", "Reviews", [], null],
+  assert.deepEqual(githubTabs(read.config).map((v) => [v.id, v.entryKind === "project" ? v.views[1]?.hide ?? null : v.name, v.limit]), [
+    ["github:project:other-org/1", null, 20], ["org-prs", "PRs", 50], [MINE_TAB, ["Backlog", "Done"], 1000], [OTHER_TAB, [], 1000], ["prs", "Reviews", 50],
   ]);
   assert.deepEqual(read.config.azure.contexts.map((a) => [a.project, a.tabs.map((c) => c.views ?? null)]), [["Example Project", [["sprint", "backlog"], null]], ["Second", [["backlog"], null]]]);
   assert.equal(read.origin(["sources", "github", "contexts", "sample-user", "prs", "name"]), "dieser Rechner");
   assert.equal(read.origin(["sources", "github", "contexts", "other-org", "owner"]), "views.json");
   assert.equal(read.origin(["sources", "azure", "contexts", "Second", "teams"]), "dieser Rechner");
   const lists = [["sources", "github", "contexts"], ["sources", "azure", "contexts"], ["sources", "github", "contexts", "o", "projects"], ["sources", "azure", "contexts", "P", "teams"], ["sources", "github", "contexts", "o", "prs", "sections"], ["sources", "github", "views"], ["list"]];
-  assert.deepEqual(lists.map(board.nameKeyAt), ["owner", "project", "id", null, null, null, null], "any other list is set only as a whole");
+  assert.deepEqual(lists.map(board.nameKeyAt), ["owner", "project", "number", null, null, null, null], "any other list is set only as a whole");
   const teams = ["sources", "azure", "contexts", "P", "teams"];
   const unnamed = { sources: { azure: { contexts: [{ project: "P", teams: [{ null: "T", team: "T" }] }] } } };
   assert.equal(board.valueAt(unnamed, [...teams, "T", "team"], board.nameKeyAt), undefined, "no entry of such a list is reached by a name");
@@ -817,49 +942,50 @@ test("settings name a context by its owner or its project, wherever views.json m
   assert.deepEqual(named([{ id: "c", owner: "b" }], { b: { x: 1 } }).merged.sources.github.contexts, [{ id: "c", owner: "b", x: 1 }], "a context by its owner");
   assert.deepEqual(named([{ id: "c", owner: "b" }], { c: { x: 1 } }).errors, ["„sources.github.contexts.c“: einen Eintrag mit „owner“ „c“ gibt es in views.json nicht"], "not by an id");
   const projects = (list, over) => board.mergeSettings({ sources: { github: { contexts: [{ owner: "o", projects: list }] } } }, { sources: { github: { contexts: { o: { projects: over } } } } }, board.nameKeyAt);
-  assert.deepEqual(projects([{ name: "b", id: "c" }], { b: { x: 1 } }).errors, ["„sources.github.contexts.o.projects.b“: einen Eintrag mit „id“ „b“ gibt es in views.json nicht"], "a project by its id only");
-  assert.deepEqual(projects([{ name: "b", id: "c" }], { c: { x: 1 } }).merged.sources.github.contexts[0].projects, [{ name: "b", id: "c", x: 1 }]);
-  assert.deepEqual(named([{ owner: 3 }, { owner: "b" }], { b: { x: 1 } }).merged.sources.github.contexts, [{ owner: 3 }, { owner: "b", x: 1 }], "a name that is no text names nothing");
+  assert.deepEqual(projects([{ id: "b", number: 2 }], { b: { x: 1 } }).errors, ["„sources.github.contexts.o.projects.b“: einen Eintrag mit „number“ „b“ gibt es in views.json nicht"], "a project by its number only");
+  assert.deepEqual(projects([{ id: "b", number: 2 }], { 2: { x: 1 } }).merged.sources.github.contexts[0].projects, [{ id: "b", number: 2, x: 1 }], "its number as its digits");
+  assert.deepEqual(projects([{ number: 2 }], { "02": { x: 1 } }).errors, ["„sources.github.contexts.o.projects.02“: einen Eintrag mit „number“ „02“ gibt es in views.json nicht"], "no other way of writing it");
+  assert.deepEqual(named([{ owner: true }, { owner: "b" }], { b: { x: 1 } }).merged.sources.github.contexts, [{ owner: true }, { owner: "b", x: 1 }], "a name that is neither a text nor a number names nothing");
 });
 
 test("a setting that changes an entry's own name is refused and named, the rest of the entry applies, and the entry keeps its path by the name views.json gives it", () => {
   const context = ["sources", "github", "contexts", "sample-user"];
-  const over = { sources: { github: { contexts: { "sample-user": { owner: "someone", prs: { name: "Reviews" }, projects: { mine: { id: "renamed", hide: ["Ready"] }, other: { id: "other", hide: [] } } } } } } };
+  const over = { sources: { github: { contexts: { "sample-user": { owner: "someone", prs: { name: "Reviews" }, projects: { 7: { number: 9, views: { 1: { hide: ["Ready"] } } }, 8: { number: 8, views: { 1: { hide: [] } } } } } } } } };
   const read = board.readConfig(testConfig(), settingsRead(over));
   assert.deepEqual(read.errors, [
     "settings.json: „sources.github.contexts.sample-user.owner“: der Name des Eintrags ändert sich nur in views.json",
-    "settings.json: „sources.github.contexts.sample-user.projects.mine.id“: der Name des Eintrags ändert sich nur in views.json",
+    "settings.json: „sources.github.contexts.sample-user.projects.7.number“: der Name des Eintrags ändert sich nur in views.json",
   ]);
-  assert.deepEqual(board.githubViews(read.config).map((v) => [v.id, v.name, v.hide, v.settingsPath]), [
-    ["mine", "Mine", ["Ready"], [...context, "projects", "mine"]], ["other", "Other", [], [...context, "projects", "other"]], ["prs", "Reviews", [], [...context, "prs"]],
+  assert.deepEqual(githubTabs(read.config).map((v) => [v.id, v.views?.[1]?.hide ?? v.name, v.settingsPath]), [
+    [MINE_TAB, ["Ready"], [...context, "projects", "7"]], [OTHER_TAB, [], [...context, "projects", "8"]], ["prs", "Reviews", [...context, "prs"]],
   ], "its own name given again is no change");
-  assert.deepEqual([read.origin([...context, "owner"]), read.origin([...context, "projects", "mine", "id"])], ["views.json", "views.json"]);
+  assert.deepEqual([read.origin([...context, "owner"]), read.origin([...context, "projects", "7", "number"])], ["views.json", "views.json"]);
   assert.deepEqual(read.config.github.contexts.map((a) => a.owner), ["sample-user"]);
 });
 
-test("one id rule: among a list's entries with a text id the first takes the id, in views.json and in the settings; entries without one leave the others reachable by theirs", () => {
+test("one name rule: among a list's entries with a name the first takes the name, in views.json and in the settings; entries without one leave the others reachable by theirs", () => {
   const over = mineHidden(["Todo", "Done"]);
-  for (const [label, second] of [["an entry without id", { name: "neu", number: 1 }], ["a second entry with the id", sampleProject("mine")]]) {
-    const read = board.readConfig(projectsConfig([sampleProject("mine", { hide: ["Todo"] }), second]), settingsRead(over));
+  for (const [label, second] of [["an entry without a number", {}], ["a second entry with the number", sampleProject(7)]]) {
+    const read = board.readConfig(projectsConfig([sampleProject(7, { views: { 1: { hide: ["Todo"] } } }), second]), settingsRead(over));
     assert.equal(read.errors.some((e) => e.startsWith("settings.json")), false, label);
-    assert.deepEqual(viewHide(read, "mine"), ["Todo", "Done"], label);
+    assert.deepEqual(viewHide(read, 7), ["Todo", "Done"], label);
     assert.equal(read.origin(MINE_HIDE), "dieser Rechner", label);
   }
-  const nameless = { ...sampleProject("mine"), name: undefined };
-  const twice = board.readConfig(projectsConfig([nameless, sampleProject("mine"), sampleProject("other")]));
-  assert.deepEqual(twice.errors, ["GitHub-Kontext 1 („sample-user“), Project 1: „name“ fehlt", "GitHub-Kontext 1 („sample-user“), Project 2 („mine“): „id“ mine gibt es schon"], "the first entry with the id takes it, valid or not");
+  const twice = board.readConfig(projectsConfig([sampleProject(7, { field: "Stage" }), sampleProject(7), sampleProject(8)]));
+  assert.deepEqual(twice.errors.map((e) => e.replace(/ stammt aus .*/, " …")), ["GitHub-Kontext 1 („sample-user“), Project 1 (7): „field“ …", "GitHub-Kontext 1 („sample-user“), Project 2 (7): „number“ 7 gibt es schon"],
+    "the first entry with the number takes it, valid or not");
   const byId = () => "id";
   const { merged } = board.mergeSettings({ list: [{ id: "a" }, { id: "a" }] }, { list: { a: { x: 1 } } }, byId);
   assert.deepEqual(merged, { list: [{ id: "a", x: 1 }, { id: "a" }] });
   assert.deepEqual(board.withSetting({ list: [{ id: "a" }, { id: "a" }] }, ["list", "a", "x"], 1, byId), { list: [{ id: "a", x: 1 }, { id: "a" }] });
 });
 
-test("an id views.json does not have, or an object for a list without names, is an error naming the settings file and the key; the rest applies", () => {
-  const github = { contexts: { "sample-user": { projects: { gone: { hide: [] } } }, nobody: { prs: { name: "X" } } } };
+test("a name views.json does not have, or an object for a list without names, is an error naming the settings file and the key; the rest applies", () => {
+  const github = { contexts: { "sample-user": { projects: { 99: { limit: 5 } } }, nobody: { prs: { name: "X" } } } };
   const read = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 7, sources: { github, azure: { contexts: { "Example Project": { teams: { x: {} } }, Gone: {} } } } }));
   assert.equal(read.config.refreshMinutes, 7);
   assert.deepEqual(read.errors, [
-    "settings.json: „sources.github.contexts.sample-user.projects.gone“: einen Eintrag mit „id“ „gone“ gibt es in views.json nicht",
+    "settings.json: „sources.github.contexts.sample-user.projects.99“: einen Eintrag mit „number“ „99“ gibt es in views.json nicht",
     "settings.json: „sources.github.contexts.nobody“: einen Eintrag mit „owner“ „nobody“ gibt es in views.json nicht",
     "settings.json: „sources.azure.contexts.Example Project.teams“ lässt sich hier nur als ganze Liste setzen",
     "settings.json: „sources.azure.contexts.Gone“: einen Eintrag mit „project“ „Gone“ gibt es in views.json nicht",
@@ -877,15 +1003,15 @@ test("settings that add a problem, or cannot be read, are not applied: each prob
   assert.deepEqual([read.config, read.settings], [alone.config, null]);
   assert.deepEqual(read.errors, [
     "settings.json: „refreshMinutes“ ist eine Zahl ab 1",
-    "settings.json: GitHub-Kontext 1 („sample-user“), Project 1 („Mine“): „hide“ muss eine Liste von Texten sein",
+    "settings.json: GitHub-Kontext 1 („sample-user“), Project 1 (7): „views.1.hide“ muss eine Liste von Texten sein",
     ALONE,
   ]);
-  const both = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 0, ...projectsHere({ gone: { hide: [] } }) }));
+  const both = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 0, ...projectsHere({ 99: { limit: 5 } }) }));
   assert.deepEqual(both.errors, [
-    "settings.json: „sources.github.contexts.sample-user.projects.gone“: einen Eintrag mit „id“ „gone“ gibt es in views.json nicht",
+    "settings.json: „sources.github.contexts.sample-user.projects.99“: einen Eintrag mit „number“ „99“ gibt es in views.json nicht",
     "settings.json: „refreshMinutes“ ist eine Zahl ab 1",
     ALONE,
-  ], "an unknown id is said beside the problem that keeps the file from applying");
+  ], "an unknown number is said beside the problem that keeps the file from applying");
   for (const [text, error] of [["{ refresh", /^settings\.json ist kein gültiges JSON: /], ["[1]", /^settings\.json: Oben muss ein Objekt stehen$/]]) {
     const bad = board.readConfig(testConfig(), settingsRead(text));
     assert.deepEqual([bad.config, bad.settings], [alone.config, null]);
@@ -898,7 +1024,7 @@ test("settings that add a problem, or cannot be read, are not applied: each prob
   assert.deepEqual([none.config, none.errors, none.settings], [alone.config, [], {}], "no file: views.json alone, nothing to say");
   assert.deepEqual(board.readSettings("[1]", "f"), { settings: null, errors: ["f: Oben muss ein Objekt stehen"] });
   const own = JSON.parse(testConfig());
-  ghContext(own).projects.push({ id: "bad" });
+  ghContext(own).projects.push({ number: 0 });
   const flawed = board.readConfig(JSON.stringify(own), settingsRead({ refreshMinutes: 5 }));
   assert.equal(flawed.config.refreshMinutes, 5, "views.json's own problems leave the settings applied");
   assert.deepEqual(flawed.errors, board.readConfig(JSON.stringify(own)).errors);
@@ -912,27 +1038,27 @@ test("each value says where it comes from: this machine, views.json or the built
   assert.equal(origin(["start", "agent"]), "views.json");
   assert.equal(origin(["start", "machine"]), "Standard");
   assert.equal(origin(MINE_HIDE), "dieser Rechner");
-  assert.equal(origin([...projects, "mine"]), "dieser Rechner", "an entry this machine sets a value of");
+  assert.equal(origin([...projects, "7"]), "dieser Rechner", "an entry this machine sets a value of");
   assert.equal(origin(["sources", "github", "contexts", "sample-user"]), "dieser Rechner", "a context this machine sets a value in");
-  assert.equal(origin([...projects, "mine", "filter"]), "views.json");
-  assert.equal(origin([...projects, "other", "hide"]), "views.json");
-  assert.equal(origin([...projects, "other", "limit"]), "Standard");
+  assert.equal(origin([...projects, "7", "number"]), "views.json");
+  assert.equal(origin([...projects, "8", "views", "1", "hide"]), "views.json");
+  assert.equal(origin([...projects, "8", "limit"]), "Standard");
   assert.equal(origin(["sources", "azure", "contexts"]), "dieser Rechner");
-  assert.equal(origin(["sources", "azure", "contexts", "0", "teams"]), "Standard", "a list's entry by its number names nothing");
+  assert.equal(origin(["sources", "azure", "contexts", "0", "teams"]), "Standard", "a list's entry by its place names nothing");
   assert.equal(origin(["sources", "azure", "org"]), "views.json");
   const unused = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 0 }));
   assert.equal(unused.origin(["refreshMinutes"]), "views.json", "settings not applied set nothing");
   const teams = ["sources", "azure", "contexts", "Example Project", "teams"];
-  const refused = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 5, start: {}, ...projectsHere({ gone: { hide: [] } }), sources: { ...projectsHere({ gone: { hide: [] } }).sources, azure: { contexts: { "Example Project": { teams: { x: { views: [] } } } } } } }));
+  const refused = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 5, start: {}, sources: { ...projectsHere({ 99: { limit: 5 } }).sources, azure: { contexts: { "Example Project": { teams: { x: { views: [] } } } } } } }));
   assert.equal(refused.origin(["refreshMinutes"]), "dieser Rechner");
   assert.equal(refused.origin(["start"]), "views.json", "an empty object sets nothing");
-  for (const path of [projects, [...projects, "gone", "hide"], teams, [...teams, "x", "views"]]) {
+  for (const path of [projects, [...projects, "99", "limit"], teams, [...teams, "x", "views"]]) {
     assert.notEqual(refused.origin(path), "dieser Rechner", `what the merge refused: ${path.join(".")}`);
   }
-  const whole = board.readConfig(testConfig(), settingsRead(projectsHere([sampleProject("solo", { name: "Solo" })])));
-  assert.equal(whole.origin([...projects, "solo", "name"]), "dieser Rechner");
-  assert.equal(whole.origin([...projects, "solo", "hide"]), "Standard", "in a list set here, what its entry leaves out is the default");
-  assert.equal(whole.origin([...projects, "mine", "hide"]), "Standard", "nor does views.json's list count below it");
+  const whole = board.readConfig(testConfig(), settingsRead(projectsHere([sampleProject(9, { limit: 5 })])));
+  assert.equal(whole.origin([...projects, "9", "limit"]), "dieser Rechner");
+  assert.equal(whole.origin([...projects, "9", "views"]), "Standard", "in a list set here, what its entry leaves out is the default");
+  assert.equal(whole.origin([...projects, "7", "views"]), "Standard", "nor does views.json's list count below it");
   const listed = board.readConfig(testConfig(), settingsRead({ sources: { github: { contexts: [{ owner: "sample-user", prs: SAMPLE_PRS }] } } }));
   assert.deepEqual(listed.errors, []);
   assert.equal(listed.origin(["sources", "github", "contexts", "sample-user", "prs", "id"]), "dieser Rechner", "below a list of contexts set here, a context by its owner");
@@ -944,12 +1070,12 @@ test("a value set or reset by its path: a reset takes it out and the objects it 
   assert.deepEqual(set, { refreshMinutes: 5, ...mineHidden(["Ready"]) });
   assert.deepEqual(board.withSetting(set, MINE_HIDE, undefined, board.nameKeyAt), { refreshMinutes: 5 });
   assert.deepEqual(board.withSetting({ refreshMinutes: 5 }, MINE_HIDE, undefined, board.nameKeyAt), { refreshMinutes: 5 }, "nothing there: unchanged");
-  const listed = projectsHere([{ id: "mine", hide: [] }]);
-  const gone = ["sources", "github", "contexts", "sample-user", "projects", "gone", "hide"];
-  assert.deepEqual(board.withSetting(listed, MINE_HIDE, ["Done"], board.nameKeyAt), projectsHere([{ id: "mine", hide: ["Done"] }]), "into a list set here, by id");
-  assert.throws(() => board.withSetting(listed, gone, [], board.nameKeyAt), /keinen Eintrag „gone“/);
+  const listed = projectsHere([{ number: 7, views: { 1: { hide: [] } } }]);
+  const gone = ["sources", "github", "contexts", "sample-user", "projects", "99", "limit"];
+  assert.deepEqual(board.withSetting(listed, MINE_HIDE, ["Done"], board.nameKeyAt), projectsHere([{ number: 7, views: { 1: { hide: ["Done"] } } }]), "into a list set here, by number");
+  assert.throws(() => board.withSetting(listed, gone, 5, board.nameKeyAt), /keinen Eintrag „99“/);
   assert.deepEqual(board.withSetting(listed, gone, undefined, board.nameKeyAt), listed, "a reset of an entry not there changes nothing");
-  assert.deepEqual(listed.sources.github.contexts["sample-user"].projects[0].hide, [], "the settings given stay as they were");
+  assert.deepEqual(listed.sources.github.contexts["sample-user"].projects[0].views[1].hide, [], "the settings given stay as they were");
   const contextsHere = { sources: { github: { contexts: [{ owner: "o", id: "x", prs: { name: "P" } }] } } };
   assert.deepEqual(board.withSetting(contextsHere, ["sources", "github", "contexts", "o", "prs", "name"], "R", board.nameKeyAt).sources.github.contexts[0].prs, { name: "R" }, "into a list of contexts set here, by owner");
   assert.equal(board.settingsText({ a: 1 }), '{\n  "a": 1\n}\n');
@@ -962,27 +1088,25 @@ test("a path through a value this machine set: a reset leaves the settings as th
   assert.deepEqual(board.settingsAfter(JSON.stringify(scalar), [[["start", "agent"], "codex"]], "f", board.nameKeyAt), { error: "„start.agent“: „start“ ist auf diesem Rechner ein Wert, kein Objekt" });
 });
 
-test("a path names a list's entry by its id only: a whole entry of a list set here is refused, an entry by its number is one no id matches", () => {
-  const listed = projectsHere([sampleProject("mine")]);
-  for (const value of [sampleProject("mine", { hide: ["X"] }), undefined]) {
-    assert.throws(() => board.withSetting(listed, [...PROJECTS, "mine"], value, board.nameKeyAt), (e) => e instanceof board.BoardError && /ändert sich nur in seinen Werten oder mit der ganzen Liste/.test(e.message), String(value));
+test("a path names a list's entry by its name only: a whole entry of a list set here is refused, an entry by its place is one no name matches", () => {
+  const listed = projectsHere([sampleProject(7)]);
+  for (const value of [sampleProject(7, { limit: 5 }), undefined]) {
+    assert.throws(() => board.withSetting(listed, [...PROJECTS, "7"], value, board.nameKeyAt), (e) => e instanceof board.BoardError && /ändert sich nur in seinen Werten oder mit der ganzen Liste/.test(e.message), String(value));
     assert.throws(() => board.withSetting(listed, [...PROJECTS, "0"], value, board.nameKeyAt), board.BoardError);
   }
-  assert.throws(() => board.withSetting(listed, [...PROJECTS, "0", "hide"], [], board.nameKeyAt), (e) => e instanceof board.BoardError && /keinen Eintrag „0“/.test(e.message));
-  assert.deepEqual(board.withSetting(listed, [...PROJECTS, "0", "hide"], undefined, board.nameKeyAt), listed);
+  assert.throws(() => board.withSetting(listed, [...PROJECTS, "0", "limit"], 5, board.nameKeyAt), (e) => e instanceof board.BoardError && /keinen Eintrag „0“/.test(e.message));
+  assert.deepEqual(board.withSetting(listed, [...PROJECTS, "0", "limit"], undefined, board.nameKeyAt), listed);
 });
 
-test("an id of digits only is an id like any other", () => {
-  const own = JSON.parse(testConfig());
-  ghContext(own).projects.push(sampleProject("7", { name: "Seven" }));
-  const read = board.readConfig(JSON.stringify(own), settingsRead(projectsHere({ 7: { hide: ["Ready"] } })));
-  assert.deepEqual(viewHide(read, "7"), ["Ready"]);
-  assert.equal(read.origin(["sources", "github", "contexts", "sample-user", "projects", "7", "hide"]), "dieser Rechner");
-  assert.equal(read.origin(["sources", "github", "contexts", "sample-user", "projects", "7", "name"]), "views.json");
-  const listed = projectsHere([sampleProject("7")]);
-  assert.deepEqual(board.withSetting(listed, [...PROJECTS, "7", "hide"], ["Done"], board.nameKeyAt).sources.github.contexts["sample-user"].projects[0].hide, ["Done"], "in a list set here");
-  const other = projectsHere([sampleProject("mine")]);
-  assert.throws(() => board.withSetting(other, [...PROJECTS, "7", "hide"], [], board.nameKeyAt), (e) => e instanceof board.BoardError && e.message === "„sources.github.contexts.sample-user.projects.7.hide“: in der Liste dieses Rechners gibt es keinen Eintrag „7“");
+test("a project's number names it in a path as its digits, in views.json's list and in one set here", () => {
+  const read = board.readConfig(testConfig(), settingsRead(projectsHere({ 8: { limit: 40 } })));
+  assert.equal(githubTabs(read.config)[1].limit, 40);
+  assert.equal(read.origin(["sources", "github", "contexts", "sample-user", "projects", "8", "limit"]), "dieser Rechner");
+  assert.equal(read.origin(["sources", "github", "contexts", "sample-user", "projects", "8", "number"]), "views.json");
+  const listed = projectsHere([sampleProject(8)]);
+  assert.deepEqual(board.withSetting(listed, [...PROJECTS, "8", "limit"], 40, board.nameKeyAt).sources.github.contexts["sample-user"].projects[0].limit, 40, "in a list set here");
+  const other = projectsHere([sampleProject(7)]);
+  assert.throws(() => board.withSetting(other, [...PROJECTS, "8", "limit"], 4, board.nameKeyAt), (e) => e instanceof board.BoardError && e.message === "„sources.github.contexts.sample-user.projects.8.limit“: in der Liste dieses Rechners gibt es keinen Eintrag „8“");
 });
 
 test("the file's text after changes: none stays none where nothing is set; a text that is no settings is refused", () => {
@@ -1001,27 +1125,41 @@ test("whether the file still holds at each changed path what the change was made
   assert.equal(board.sameAtPaths(then, "{ x", [[["refreshMinutes"], 5]], "f", board.nameKeyAt), false);
   assert.equal(board.sameAtPaths(then, JSON.stringify({ sources: { github: { contexts: [] } } }), [[MINE_HIDE, []]], "f", board.nameKeyAt), false, "the contexts a list now");
   assert.equal(board.sameAtPaths(then, JSON.stringify({ refreshMinutes: 4, ...mineHidden([]) }), [[["refreshMinutes"], 5], [MINE_HIDE, []]], "f", board.nameKeyAt), false, "every changed path counts");
-  const numbered = [...PROJECTS, "7", "hide"];
-  assert.equal(board.sameAtPaths(JSON.stringify(projectsHere({ 7: { hide: [] } })), JSON.stringify(projectsHere([{ id: "x" }])), [[numbered, ["Done"]]], "f", board.nameKeyAt), false, "a path the file no longer resolves");
+  assert.equal(board.sameAtPaths(then, JSON.stringify(projectsHere([{ number: 8 }])), [[MINE_HIDE, ["Done"]]], "f", board.nameKeyAt), false, "a path the file no longer resolves");
+});
+
+test("this machine's settings of a project in the form before its views came from GitHub (an entry by its id, or old keys of one by its number) are named, not applied, and stay in the file; the rest applies", () => {
+  const over = { refreshMinutes: 6, ...projectsHere({ mine: { hide: ["Done"] }, 7: { hide: ["Backlog"], filter: "x", views: { 1: { hide: ["Ready"] } } } }) };
+  const read = board.readConfig(testConfig(), settingsRead(over));
+  const said = "gilt nicht, aus der Form vor den Ansichten von GitHub: ein Project heißt jetzt nach seiner Nummer, die ausgeblendeten Spalten stehen je Ansicht in „sources.github.contexts.<owner>.projects.<Nummer>.views.<Nummer der Ansicht>.hide“; bitte von Hand übertragen";
+  assert.deepEqual(read.errors, [
+    `settings.json: „sources.github.contexts.sample-user.projects.7.filter“ ${said}`,
+    `settings.json: „sources.github.contexts.sample-user.projects.7.hide“ ${said}`,
+    `settings.json: „sources.github.contexts.sample-user.projects.mine“ ${said}`,
+  ]);
+  assert.deepEqual([read.config.refreshMinutes, viewHide(read, 7)], [6, ["Ready"]], "the rest of the file applies, the project's views too");
+  assert.equal(read.origin([...PROJECTS, "7", "hide"]), "Standard");
+  assert.deepEqual(read.settings, { refreshMinutes: 6, ...projectsHere({ 7: { views: { 1: { hide: ["Ready"] } } } }) }, "what applies");
+  const after = board.settingsAfter(JSON.stringify(over), [[["refreshMinutes"], 7]], "f", board.nameKeyAt);
+  assert.deepEqual(JSON.parse(after.text).sources, over.sources, "a change by the board keeps them in the file");
 });
 
 // ---- This machine's settings from before the contexts ----
 
 const OLD_PATH = (id) => ["sources", "github", "views", id];
+// What settings from before the contexts by an id no PR tab has are told.
+const NO_PR_TAB = (id) =>
+  `views.json hat keinen PR-Tab mit „id“ „${id}“; ein Project hat keine „id“ mehr, seine ausgeblendeten Spalten stehen je Ansicht in „sources.github.contexts.<owner>.projects.<Nummer>.views.<Nummer der Ansicht>.hide“; bitte von Hand übertragen`;
 const CONTEXT_PATH = (...rest) => ["sources", "github", "contexts", "sample-user", ...rest];
 const SHARED_PATH = (key) => ["sources", "github", "prs", key];
 
-test("settings from before the contexts move into them: a GitHub view's entry by id into its context's project or PR tab, the project's fields flat, a list's sections and limit into sources.github.prs, a board's limit into its project, what the context says dropped; the rest stays", () => {
+test("settings from before the contexts move into them: a PR view's entry by id into its context's PR tab, its sections and limit into sources.github.prs, what the context says dropped; the rest stays; a board's entry has no tab to go to, a project's tab having no `id` in views.json", () => {
   const sections = [{ name: "S", query: "is:pr" }];
   const settings = {
     refreshMinutes: 4,
     sources: {
       azure: { org: "https://dev.azure.com/x" },
-      github: { views: {
-        mine: { hide: ["Ready"], source: "github", layout: "board", project: { owner: "sample-user", number: 9, field: "Stage", priorityField: "P" }, start: { agent: "codex" } },
-        prs: { source: "github", layout: "list", sections, limit: 10, name: "Reviews" },
-        other: {},
-      } },
+      github: { views: { prs: { source: "github", layout: "list", sections, limit: 10, name: "Reviews" } } },
     },
   };
   const before = clone(settings);
@@ -1030,32 +1168,19 @@ test("settings from before the contexts move into them: a GitHub view's entry by
       refreshMinutes: 4,
       sources: {
         azure: { org: "https://dev.azure.com/x" },
-        github: {
-          contexts: { "sample-user": {
-            projects: { mine: { hide: ["Ready"], number: 9, field: "Stage", priorityField: "P", start: { agent: "codex" } }, other: {} },
-            prs: { name: "Reviews" },
-          } },
-          prs: { sections, limit: 10 },
-        },
+        github: { contexts: { "sample-user": { prs: { name: "Reviews" } } }, prs: { sections, limit: 10 } },
       },
     },
-    moved: [
-      [OLD_PATH("mine"), CONTEXT_PATH("projects", "mine")], [OLD_PATH("prs"), CONTEXT_PATH("prs")],
-      [[...OLD_PATH("prs"), "sections"], SHARED_PATH("sections")], [[...OLD_PATH("prs"), "limit"], SHARED_PATH("limit")], [OLD_PATH("other"), CONTEXT_PATH("projects", "other")],
-    ],
+    moved: [[OLD_PATH("prs"), CONTEXT_PATH("prs")], [[...OLD_PATH("prs"), "sections"], SHARED_PATH("sections")], [[...OLD_PATH("prs"), "limit"], SHARED_PATH("limit")]],
   });
   assert.deepEqual(settings, before, "the settings given stay as they were");
-  const beside = { sources: { github: { views: { mine: { hide: [] } }, contexts: { "sample-user": { prs: { name: "X" } } } } } };
-  assert.deepEqual(board.settingsForContexts(JSON.parse(testConfig()), beside).settings, { sources: { github: { contexts: { "sample-user": { prs: { name: "X" }, projects: { mine: { hide: [] } } } } } } }, "beside what the contexts hold here already");
+  const beside = { sources: { github: { views: { prs: { name: "R" } }, contexts: { "sample-user": { projects: { 7: { limit: 5 } } } } } } };
+  assert.deepEqual(board.settingsForContexts(JSON.parse(testConfig()), beside).settings, { sources: { github: { contexts: { "sample-user": { projects: { 7: { limit: 5 } }, prs: { name: "R" } } } } } }, "beside what the contexts hold here already");
   for (const none of [{}, { refreshMinutes: 4 }, mineHidden([]), { sources: { github: {} } }, { sources: "x" }, null]) assert.equal(board.settingsForContexts(JSON.parse(testConfig()), none), null, JSON.stringify(none));
   assert.deepEqual(board.settingsForContexts(JSON.parse(testConfig()), { refreshMinutes: 4, sources: { github: { views: {} } } }), { settings: { refreshMinutes: 4 }, moved: [] }, "an empty entry goes, and what it leaves empty");
   assert.deepEqual(board.settingsForContexts(JSON.parse(testConfig()), { sources: { github: { views: { mine: { layout: "board", limit: 30 } } } } }), {
-    settings: { sources: { github: { contexts: { "sample-user": { projects: { mine: { limit: 30 } } } } } } },
-    moved: [[OLD_PATH("mine"), CONTEXT_PATH("projects", "mine")]],
-  }, "a board's limit is its own, not the PR tabs'");
-  assert.deepEqual(board.settingsForContexts(JSON.parse(testConfig()), { sources: { github: { views: { mine: { sections } } } } }), {
-    problems: [`„${OLD_PATH("mine").join(".")}“ lässt sich nicht auf die Kontexte umstellen: „sections“ hat im Kontext sample-user keinen Platz`],
-  }, "nor are sections a board's");
+    problems: [`„${OLD_PATH("mine").join(".")}“ lässt sich nicht auf die Kontexte umstellen: ${NO_PR_TAB("mine")}`],
+  }, "a board's entry is named");
 });
 
 test("settings from before the contexts move the sections and limit of every list tab to one place, sources.github.prs: equal ones once, the tab's entry only where more is left; differing ones are named and nothing moves; the moved settings apply", () => {
@@ -1082,7 +1207,7 @@ test("settings from before the contexts move the sections and limit of every lis
   const read = board.readConfig(JSON.stringify(raw), settingsRead(move.settings));
   assert.deepEqual(read.errors, []);
   assert.notEqual(read.settings, null, "the moved settings apply");
-  assert.deepEqual(board.githubViews(read.config).filter((v) => v.layout === "list").map((v) => [v.id, v.name, v.sections.map((x) => x.query), v.limit]), [
+  assert.deepEqual(githubTabs(read.config).filter((v) => v.layout === "list").map((v) => [v.id, v.name, v.sections.map((x) => x.query), v.limit]), [
     ["prs", "R", ["is:pr author:@me"], 20], ["org-prs", "PRs", ["is:pr author:@me"], 20],
   ]);
 });
@@ -1090,7 +1215,7 @@ test("settings from before the contexts move the sections and limit of every lis
 test("settings from before the contexts move nothing while views.json has problems: its contexts are not yet what they will be", () => {
   const prs = (id) => ({ id });
   const unnamed = { sources: { github: { contexts: [{ projects: [], prs: prs("p") }, { owner: "o", prs: prs("q") }], prs: SHARED_PRS } } };
-  const twice = { sources: { github: { contexts: [{ owner: "o", projects: [sampleProject("b")], prs: prs("p") }, { owner: "o", prs: prs("z") }], prs: SHARED_PRS } } };
+  const twice = { sources: { github: { contexts: [{ owner: "o", projects: [sampleProject(1)], prs: prs("p") }, { owner: "o", prs: prs("z") }], prs: SHARED_PRS } } };
   const refused = { problems: ["noch in der Form vor den Kontexten; erst views.json berichtigen, dann werden die Einstellungen umgestellt"] };
   for (const [label, raw, id] of [["a context without owner", unnamed, "p"], ["a second context of one owner", twice, "z"]]) {
     assert.deepEqual(board.settingsForContexts(raw, { sources: { github: { views: { [id]: { limit: 20 } } } } }), refused, label);
@@ -1107,41 +1232,36 @@ test("settings from before the contexts with a value that has no place in them m
   const views = {
     mine: { hide: ["Ready"] },
     gone: { hide: [] },
-    other: { project: { owner: "someone", number: 1 } },
-    odd: {},
     prs: { colour: 1 },
   };
-  const own = clone(base);
-  ghContext(own).projects.push({ id: "odd", name: "Odd", number: 3 });
-  const settings = { sources: { github: { views: { ...views, odd: { layout: "list" } } }, azure: { contexts: [{ prs: { project: "P" } }] } } };
-  assert.deepEqual(board.settingsForContexts(own, settings), { problems: [
+  const settings = { sources: { github: { views }, azure: { contexts: [{ prs: { project: "P" } }] } } };
+  assert.deepEqual(board.settingsForContexts(base, settings), { problems: [
     cannot(["sources", "azure", "contexts"], 'die Teams stehen jetzt je Projekt in „sources.azure.contexts“ ({ "project", "teams" }); bitte von Hand übertragen'),
-    cannot(OLD_PATH("gone"), "views.json hat keinen Tab mit „id“ „gone“"),
-    cannot(OLD_PATH("other"), "„project.owner“ hat im Kontext sample-user keinen Platz"),
-    cannot(OLD_PATH("odd"), "„layout“ hat im Kontext sample-user keinen Platz"),
+    cannot(OLD_PATH("mine"), NO_PR_TAB("mine")),
+    cannot(OLD_PATH("gone"), NO_PR_TAB("gone")),
     cannot(OLD_PATH("prs"), "„colour“ hat im Kontext sample-user keinen Platz"),
   ] });
+  assert.deepEqual(board.settingsForContexts(base, { sources: { github: { views: { prs: { layout: "board" } } } } }), { problems: [cannot(OLD_PATH("prs"), "„layout“ hat im Kontext sample-user keinen Platz")] });
   const azureNow = { sources: { azure: { contexts: { "Example Project": { teams: [{ team: "Example Team", views: ["backlog"] }] } } } } };
   assert.equal(board.settingsForContexts(base, azureNow), null, "Azure contexts in the form with them move nothing");
   assert.equal(board.settingsForContexts(base, { sources: { azure: { contexts: [{ project: "Example Project" }] } } }), null, "nor does a whole list of them");
   assert.deepEqual(board.settingsForContexts(base, { sources: { azure: { contexts: [{ team: { project: "P", team: "T" } }] } } }).problems.length, 1, "an old team entry is named");
   assert.deepEqual(board.settingsForContexts(base, { sources: { github: { views: [sampleView("mine")] } } }), { problems: [cannot(["sources", "github", "views"], "hier eine ganze Liste; bitte von Hand nach „sources.github.contexts“ übertragen")] });
-  assert.deepEqual(board.settingsForContexts(base, { sources: { github: { views: { mine: 5 } } } }), { problems: [cannot(OLD_PATH("mine"), "ist kein Objekt")] });
-  assert.deepEqual(board.settingsForContexts(base, { sources: { github: { views: { mine: { project: { filter: "x" } } } } } }), { problems: [cannot(OLD_PATH("mine"), "„project.filter“ hat im Kontext sample-user keinen Platz")] });
-  const twice = { sources: { github: { views: { mine: { hide: [] } }, ...projectsHere({ mine: { hide: ["Done"] } }).sources.github } } };
-  assert.deepEqual(board.settingsForContexts(base, twice), { problems: [cannot(OLD_PATH("mine"), `„${CONTEXT_PATH("projects", "mine").join(".")}“ steht hier schon`)] });
-  assert.deepEqual(board.settingsForContexts(base, { sources: { github: { views: { mine: {} }, contexts: [] } } }), { problems: [cannot(["sources", "github", "contexts"], "hier eine ganze Liste")] });
-  const valueThere = { sources: { github: { views: { mine: { hide: [] } }, contexts: { "sample-user": 5 } } } };
-  assert.deepEqual(board.settingsForContexts(base, valueThere), { problems: [cannot(OLD_PATH("mine"), `„${CONTEXT_PATH("projects", "mine").join(".")}“: „sources.github.contexts.sample-user“ ist auf diesem Rechner ein Wert, kein Objekt`)] });
+  assert.deepEqual(board.settingsForContexts(base, { sources: { github: { views: { prs: 5 } } } }), { problems: [cannot(OLD_PATH("prs"), "ist kein Objekt")] });
+  const twice = { sources: { github: { views: { prs: { name: "R" } }, contexts: { "sample-user": { prs: { name: "X" } } } } } };
+  assert.deepEqual(board.settingsForContexts(base, twice), { problems: [cannot(OLD_PATH("prs"), `„${CONTEXT_PATH("prs").join(".")}“ steht hier schon`)] });
+  assert.deepEqual(board.settingsForContexts(base, { sources: { github: { views: { prs: {} }, contexts: [] } } }), { problems: [cannot(["sources", "github", "contexts"], "hier eine ganze Liste")] });
+  const valueThere = { sources: { github: { views: { prs: { name: "R" } }, contexts: { "sample-user": 5 } } } };
+  assert.deepEqual(board.settingsForContexts(base, valueThere), { problems: [cannot(OLD_PATH("prs"), `„${CONTEXT_PATH("prs").join(".")}“: „sources.github.contexts.sample-user“ ist auf diesem Rechner ein Wert, kein Objekt`)] });
 });
 
 test("readConfig never applies settings from before the contexts: it names what cannot move, or that they are not moved yet, and shows views.json alone", () => {
   const alone = board.readConfig(testConfig());
-  const pending = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 9, sources: { github: { views: { mine: { hide: [] } } } } }));
+  const pending = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 9, sources: { github: { views: { prs: { name: "R" } } } } }));
   assert.deepEqual([pending.config, pending.settings, pending.errors], [alone.config, null, ["settings.json hat noch die Form vor den Kontexten und ist nicht umgestellt; das nächste Lesen (r) versucht es noch einmal", ALONE]]);
-  assert.deepEqual(pending.moving, { settings: { refreshMinutes: 9, ...mineHidden([]) }, moved: [[OLD_PATH("mine"), MINE_HIDE.slice(0, -1)]] }, "with the move to write");
+  assert.deepEqual(pending.moving, { settings: { refreshMinutes: 9, sources: { github: { contexts: { "sample-user": { prs: { name: "R" } } } } } }, moved: [[OLD_PATH("prs"), CONTEXT_PATH("prs")]] }, "with the move to write");
   const stuck = board.readConfig(testConfig(), settingsRead({ sources: { github: { views: { gone: {} } } } }));
-  assert.deepEqual([stuck.config, stuck.errors, stuck.moving], [alone.config, ["settings.json: „sources.github.views.gone“ lässt sich nicht auf die Kontexte umstellen: views.json hat keinen Tab mit „id“ „gone“", ALONE], undefined]);
+  assert.deepEqual([stuck.config, stuck.errors, stuck.moving], [alone.config, [`settings.json: „sources.github.views.gone“ lässt sich nicht auf die Kontexte umstellen: ${NO_PR_TAB("gone")}`, ALONE], undefined]);
 });
 
 // ---- The top bar's contexts and tabs ----
@@ -1154,9 +1274,11 @@ test("the contexts come grouped by source, GitHub first, each source's in views.
     ["azure:team:Example Project/Example Team", "team", "Example Team"],
     ["azure:prs:Example Project", "prs", "PRs"],
   ]);
-  assert.deepEqual(contexts[0].tabs.map((c) => [c.id, c.kind, c.name, c.view.id]), [
-    ["github:mine", "view", "Mine", "mine"], ["github:other", "view", "Other", "other"], ["github:prs", "view", "PRs", "prs"],
-  ]);
+  assert.deepEqual(contexts[0].tabs.map((c) => [c.id, c.kind, c.name, c.views ?? c.view.id]), [
+    [MINE_TAB, "project", "Projekt 7", []], [OTHER_TAB, "project", "Projekt 8", []], ["github:prs", "view", "PRs", "prs"],
+  ], "a project's tab before the board knows its views: named by its number");
+  assert.deepEqual(board.contextsOf(config, knownGet())[0].tabs.map((c) => [c.id, c.name, c.views ?? null]), [[MINE_TAB, "Mine", [1]], [OTHER_TAB, "Other", [1]], ["github:prs", "PRs", null]],
+    "once it knows them, named as GitHub names the project, with its views by their numbers");
   const raw = { sources: {
     azure: { org: "https://dev.azure.com/o", contexts: [{ project: "Z" }, { project: "A" }] },
     github: { contexts: [{ owner: "zed", prs: SAMPLE_PRS }, { owner: "abe", prs: { ...SAMPLE_PRS, id: "p2" } }], prs: SHARED_PRS },
@@ -1179,7 +1301,7 @@ test("the source and the tabs a board kept before the contexts become the shown 
   assert.deepEqual(moves({ source: "azure", "tab:github": "github:prs" }), { set: [["tab:github:sample-user", "github:prs"], ["context", "azure:Example Project"]], remove: ["tab:github", "source"] }, "another source's tab names no context of this one");
   assert.deepEqual(moves({ source: "jira", "tab:azure": "azure:gone" }), { set: [], remove: ["tab:azure", "source"] }, "what names nothing goes");
   assert.deepEqual(moves({ source: "jira", "tab:azure": "azure:gone", "tab:github": "github:prs" }, false), { set: [["tab:github:sample-user", "github:prs"]], remove: ["tab:github"] }, "unless views.json may have left it out");
-  assert.deepEqual(moves({ source: "github", context: "azure:Second", "tab:github": "github:other", "tab:github:sample-user": "github:mine" }), { set: [], remove: ["tab:github", "source"] });
+  assert.deepEqual(moves({ source: "github", context: "azure:Second", "tab:github": OTHER_TAB, "tab:github:sample-user": MINE_TAB }), { set: [], remove: ["tab:github", "source"] });
   assert.deepEqual(moves({ context: "azure:Second", "tab:azure:Second": "azure:prs:Second" }), { set: [], remove: [] });
   assert.deepEqual(moves({ source: "azure", "tab:azure": "github:prs" }), { set: [["tab:github:sample-user", "github:prs"], ["context", "azure:Example Project"]], remove: ["tab:azure", "source"] }, "a source's tab that names another source's context: the source's first");
   assert.deepEqual(moves({ source: "azure", "tab:azure": "azure:team:Gone/Team" }, false), { set: [], remove: [] }, "while views.json may have left out the context of its tab, the source waits too");
@@ -1193,8 +1315,8 @@ test("the shown view a board kept before the top bar (\"view\", a GitHub view's 
   const contexts = board.contextsOf(board.readConfig(testConfig()).config);
   const moves = (stored, complete = true) => board.shownContextMoves(contexts, (key) => stored[key] ?? null, complete);
   assert.deepEqual(moves({ view: "prs" }), { set: [["tab:github:sample-user", "github:prs"], ["context", GITHUB_CONTEXT]], remove: ["view"] });
-  assert.deepEqual(moves({ view: "prs", source: "azure", "tab:github": "github:other" }), {
-    set: [["tab:github:sample-user", "github:other"], ["context", AZURE_CONTEXT]], remove: ["tab:github", "source", "view"],
+  assert.deepEqual(moves({ view: "prs", source: "azure", "tab:github": MINE_TAB }), {
+    set: [["tab:github:sample-user", MINE_TAB], ["context", AZURE_CONTEXT]], remove: ["tab:github", "source", "view"],
   }, "a source and a tab chosen since stay");
   assert.deepEqual(moves({ view: "gone" }, false), { set: [], remove: [] }, "a view views.json may have left out waits");
   assert.deepEqual(moves({ view: "gone" }), { set: [["context", GITHUB_CONTEXT]], remove: ["view"] });
@@ -1205,28 +1327,51 @@ test("a remembered choice falls back to the first one when views.json no longer 
   const list = [{ id: "a" }, { id: "b" }];
   assert.deepEqual([board.pick(list, "b"), board.pick(list, "gone"), board.pick(list, null), board.pick([], "a")], [list[1], list[0], list[0], null]);
   const team = { views: ["sprint", "backlog"] };
-  assert.deepEqual([board.teamView(team, "backlog"), board.teamView(team, null), board.teamView({ views: ["backlog"] }, "sprint")], ["backlog", "sprint", "backlog"]);
+  assert.deepEqual([board.tabView(team, "backlog"), board.tabView(team, null), board.tabView({ views: ["backlog"] }, "sprint")], ["backlog", "sprint", "backlog"]);
+  assert.deepEqual([board.tabView({ views: [1, 7] }, 7), board.tabView({ views: [1, 7] }, 5), board.tabView({ views: [] }, 7)], [7, 1, null], "a project's views by their numbers; none known, none");
 });
 
-test("each tab shows one view, with an id and a kind; an Azure view's kind says which view it will be", () => {
+test("each tab shows one view, with an id and a kind; an Azure view's kind says which view it will be; a project's views are GitHub's, by their layout", () => {
   const config = sampleConfig();
-  const [github, azure] = board.contextsOf(config);
+  const meta = { title: "Mine", url: null, views: [{ number: 1, name: "Mine", layout: "board", filter: "" }, { number: 4, name: "Plan", layout: "roadmap", filter: "" }, { number: 5, name: "List", layout: "table", filter: "" }] };
+  const [github, azure] = board.contextsOf(config, { get: (id) => (id === MINE_TAB ? meta : null) });
   const [team, prs] = azure.tabs;
-  const [mine] = github.tabs;
-  const views = [board.viewOf(team, "sprint"), board.viewOf(team, "backlog"), board.viewOf(prs), board.viewOf(mine)];
+  const [mine, other] = github.tabs;
+  const views = [board.viewOf(team, "sprint"), board.viewOf(team, "backlog"), board.viewOf(prs), board.viewOf(mine, 1), board.viewOf(mine, 4), board.viewOf(mine, 5), board.viewOf(other, null), board.viewOf(other, 3)];
   assert.deepEqual(views.map((v) => [v.id, board.viewKind(v)]), [
     ["azure:team:Example Project/Example Team:sprint", "azure sprint"],
     ["azure:team:Example Project/Example Team:backlog", "azure backlog"],
     ["azure:prs:Example Project", "azure prs"],
-    ["mine", "github board"],
+    [MINE, "github board"],
+    [`${MINE_TAB}:4`, "github roadmap"],
+    [`${MINE_TAB}:5`, "github table"],
+    [`${OTHER_TAB}:first`, "github board"],
+    [`${OTHER_TAB}:first`, "github board"],
   ]);
-  assert.deepEqual(views.map((v) => board.kindOf(v)), [
-    { shape: "sprint" }, { shape: "backlog" }, { text: "PR-Ansicht folgt" }, { shape: "board" },
+  assert.deepEqual(views.map((v) => board.kindOf(v).shape ?? board.kindOf(v).text(v)), [
+    "sprint", "backlog", "PR-Ansicht folgt", "board", "„Plan“: Roadmap-Ansicht folgt", "„List“: Tabellenansicht folgt", "board", "board",
   ]);
+  assert.deepEqual([views[6].address, views[6].wanted, views[7].address, views[7].wanted], [{ owner: "sample-user", number: 8, view: null }, null, { owner: "sample-user", number: 8, view: null }, 3],
+    "a project the board knows no views of: the view that learns them, wanting the one remembered");
   assert.deepEqual(board.viewsOf(config).map((v) => v.id), [
-    "mine", "other", "prs", "azure:team:Example Project/Example Team:sprint", "azure:team:Example Project/Example Team:backlog", "azure:prs:Example Project",
+    `${MINE_TAB}:first`, `${OTHER_TAB}:first`, "prs", "azure:team:Example Project/Example Team:sprint", "azure:team:Example Project/Example Team:backlog", "azure:prs:Example Project",
   ]);
+  assert.deepEqual(board.viewsOf(config, knownGet()).map((v) => v.id).slice(0, 3), [MINE, OTHER, "prs"]);
   assert.equal(board.kindOf({ source: "jira", layout: "board" }), null);
+});
+
+test("a project's view carries what views.json gives its project (limit, start, this view's hidden columns) and its own settings path; the view that learns the views none", () => {
+  const raw = JSON.parse(testConfig({ start: {} }));
+  Object.assign(ghProject(raw, 7), { limit: 300, start: { message: "P {number}" }, views: { 1: { hide: ["Done"] }, 2: { hide: ["Ready"] } } });
+  const config = board.readConfig(JSON.stringify(raw)).config;
+  const meta = { title: "Mine", url: null, views: [{ number: 1, name: "Mine", layout: "board", filter: "" }, { number: 2, name: "Two", layout: "board", filter: "" }] };
+  const tab = board.contextsOf(config, { get: () => meta })[0].tabs[0];
+  const [one, two] = [1, 2].map((n) => board.viewOf(tab, n));
+  const own = ["sources", "github", "contexts", "sample-user", "projects", "7"];
+  assert.deepEqual([one.limit, one.start, one.hide, two.hide, board.hidePath(two)], [300, { message: "P {number}" }, ["Done"], ["Ready"], [...own, "views", "2", "hide"]]);
+  assert.deepEqual([one.name, one.tab.id, one.address, one.owners], ["Mine", MINE_TAB, { owner: "sample-user", number: 7, view: 1 }, { tabOwner: "sample-user", otherOwners: [] }]);
+  const first = board.viewOf(board.contextsOf(config)[0].tabs[0], null);
+  assert.deepEqual([first.hide, first.limit, first.name, first.settingsPath], [[], 300, "Projekt 7", null], "no settings of its own: a hide there would write the project's");
 });
 
 // ---- Hidden columns ----
@@ -1241,6 +1386,13 @@ test("hidden columns are the view's hide; what the browser storage kept moves ov
 test("a stored hidden set is read only when it is lists of names", () => {
   assert.deepEqual(board.readStoredHidden({ hide: ["A"], show: [] }), { hide: ["A"], show: [] });
   for (const bad of [null, ["A"], { hide: [1], show: [] }, { hide: ["A"] }, "x"]) assert.equal(board.readStoredHidden(bad), null);
+});
+
+test("a stored hidden set of the view that learns a project's views, which has no settings of its own, is dropped and moves nowhere", () => {
+  const views = board.viewsOf(board.readConfig(testConfig()).config).filter((v) => v.settingsPath === null);
+  assert.deepEqual(views.map((v) => v.id), [`${MINE_TAB}:first`, `${OTHER_TAB}:first`]);
+  const { moves, drop } = board.storedHiddenMoves(views, () => ({ hide: ["Ready"], show: [] }), () => null);
+  assert.deepEqual([moves, drop.map((v) => v.id)], [[], views.map((v) => v.id)]);
 });
 
 test("toggling gives the view's whole hide with the column added or taken out; a column that takes no drops gives none", () => {
@@ -1259,34 +1411,107 @@ test("names in hide that match no column are reported", () => {
 
 // ---- GitHub board ----
 
-test("the board query leaves hidden columns out and counts them in the same request", () => {
-  const args = board.githubBoardArgs(githubView(), HIDDEN);
+test("the items' query takes the view's filter, leaves its hidden columns out by its column field and counts them in the same request", () => {
+  const args = board.githubBoardArgs(githubView(), planOf(), HIDDEN);
   const value = (name) => args.find((a) => a.startsWith(`${name}=`)).slice(name.length + 1);
   assert.equal(value("filter"), 'assignee:@me -status:"Backlog","Done"');
   assert.equal(value("h0"), 'assignee:@me status:"Backlog"');
   assert.equal(value("h1"), 'assignee:@me status:"Done"');
+  assert.deepEqual([value("column"), value("priority"), value("login")], ["Status", "Priority", "sample-user"]);
   assert.ok(args.includes("-F") && args.includes("number=7"));
   const doc = value("query");
   assert.match(doc, /h0: items\(first: 0, query: \$h0\)/);
   assert.match(doc, /items\(first: 100, query: \$filter\) \{ totalCount pageInfo \{ hasNextPage endCursor \}/, "a page of GitHub's 100, and where the next starts");
   assert.match(doc, /\$h1: String!/);
-  assert.doesNotMatch(board.githubBoardArgs({ ...githubView(), filter: "" }, new Set()).find((a) => a.startsWith("query=")), /\$h0/);
-  assert.match(doc, /^query\([^)]*\) \{\n  viewer \{ login \}\n/, "and who gh runs as, for „nur meine“");
+  assert.doesNotMatch(board.githubBoardArgs(githubView(), planOf(projectJson({ views: [{ filter: "" }] })), new Set()).find((a) => a.startsWith("query=")), /\$h0/);
+  assert.doesNotMatch(doc, /\bviewer \{/, "who gh runs as comes with the project's views");
+  assert.match(board.PROJECT_QUERY, /^query\([^)]*\) \{\n  viewer \{ login \}\n/, "for „nur meine“");
+  const iteration = planOf(projectJson({ views: [{ filter: "is:open", column: "Iteration" }] }));
+  const byIteration = board.githubBoardArgs(githubView(), iteration, new Set(["Iteration 1"]));
+  assert.deepEqual(["filter", "h0", "column"].map((n) => byIteration.find((a) => a.startsWith(`${n}=`)).slice(n.length + 1)), ['is:open -iteration:"Iteration 1"', 'is:open iteration:"Iteration 1"', "Iteration"],
+    "an iteration field's columns are its iterations, by their titles");
 });
 
-test("columns come from the project's field options, in order, with theme colors", () => {
+test("a project's views and fields are one request, in GitHub's order (PROJECT_QUERY): each view's layout, filter, column field, swimlane field and sort keys; its fields' options and iterations", () => {
+  const args = board.githubProjectArgs(githubView());
+  assert.deepEqual(args.filter((a) => !a.startsWith("query=")), ["api", "graphql", "-f", "-f", "login=sample-user", "-F", "number=7"]);
+  const doc = board.PROJECT_QUERY.replace(/\s+/g, " ");
+  assert.match(doc, /views\(first: 50, orderBy: \{ field: POSITION, direction: ASC \}\) \{ nodes \{ number name layout filter verticalGroupByFields\(first: 1\)/);
+  assert.match(doc, /groupByFields\(first: 1\) .* sortByFields\(first: 5\) \{ nodes \{ direction field \{ \.\.\. on ProjectV2FieldCommon \{ id name \} \} \} \}/);
+  assert.match(doc, /fields\(first: 50\) \{ nodes \{ \.\.\. on ProjectV2FieldCommon \{ id name dataType \} \.\.\. on ProjectV2SingleSelectField \{ options \{ id name color \} \} \.\.\. on ProjectV2IterationField \{ configuration \{ iterations \{ id title startDate \} completedIterations \{ id title startDate \} \} \}/);
+  assert.doesNotMatch(doc, /\b(groupBy|verticalGroupBy|sortBy|visibleFields)\(/, "none of the deprecated fields");
+  const views = [{}, { number: 4, name: "Roadmap", layout: "roadmap", filter: null, column: null }, { number: 5, name: "Mine as a list", layout: "table", column: null },
+    { number: 7, name: "Now", filter: "iteration:@current", lane: "Priority", sorts: [["Priority", "ASC"], ["Estimate", "DESC"]] }];
+  const project = board.parseGithubProject(projectJson({ views }), githubView());
+  assert.deepEqual(project.views.map((v) => [v.number, v.name, v.layout, v.filter, v.column, v.lane, v.sorts]), [
+    [1, "Mine", "board", "assignee:@me", "F_Status", null, []],
+    [4, "Roadmap", "roadmap", "", null, null, []],
+    [5, "Mine as a list", "table", "assignee:@me", null, null, []],
+    [7, "Now", "board", "iteration:@current", "F_Status", "F_Priority", [{ field: "F_Priority", direction: "ASC" }, { field: "F_Estimate", direction: "DESC" }]],
+  ]);
+  assert.deepEqual([project.title, project.viewer, project.id], ["Mine", "sample-user", "PVT_sample7"]);
+  const iteration = project.fields.find((f) => f.name === "Iteration");
+  assert.deepEqual(iteration.iterations.map((i) => [i.title, i.completed]), [["Iteration 1", true], ["Iteration 2", false], ["Iteration 3", false]], "completed ones first, all by their start");
+  assert.deepEqual(project.fields.find((f) => f.name === "Status").options.map((o) => o.name), ["Backlog", "Ready", "In progress", "In review", "Done"]);
+  assert.deepEqual(board.projectMeta(project), {
+    title: "Mine", url: "https://github.com/users/sample-user/projects/7",
+    views: [[1, "Mine", "board", "assignee:@me"], [4, "Roadmap", "roadmap", ""], [5, "Mine as a list", "table", "assignee:@me"], [7, "Now", "board", "iteration:@current"]].map(([number, name, layout, filter]) => ({ number, name, layout, filter })),
+  }, "what the board keeps of it");
+});
+
+test("columns come from the view's column field, its options in order with theme colors; an iteration field's iterations, the completed ones only where cards stand in them; a view without one takes Status, as GitHub does, and says so; without Status it has none", () => {
   const b = githubBoard();
   assert.deepEqual(names(b), ["Backlog", "Ready", "In progress", "In review", "Done"]);
   assert.deepEqual(b.columns.map((c) => c.color), ["ansi2", "ansi4", "ansi3", "ansi5", "ansi11"]);
-  assert.deepEqual(b.meta, { projectId: "PVT_sample", fieldId: "PVTSSF_sample", title: "Sample", url: "https://github.com/users/sample-user/projects/7", lacksPriorityField: true });
+  assert.deepEqual(b.meta, {
+    projectId: "PVT_sample7", fieldId: "F_Status", fieldName: "Status", fieldType: "SINGLE_SELECT", ownColumn: true, title: "Mine", url: "https://github.com/users/sample-user/projects/7", view: 1,
+    filter: "assignee:@me", query: 'assignee:@me -status:"Backlog","Done"', unreadable: [],
+  });
+  assert.deepEqual(board.boardShape.warnings(githubView(), b), []);
+  const plan = planOf(projectJson({ views: [{ column: "Iteration" }] }));
+  const items = json("github-board.json");
+  const nodes = items.data.repositoryOwner.projectV2.items.nodes;
+  nodes.forEach((n, i) => (n.fieldValueByName = [{ iterationId: "it-2", title: "Iteration 2" }, null, { iterationId: "it-3", title: "Iteration 3" }][i % 3]));
+  const byIteration = board.parseGithubBoard(items, githubView(), new Set(), [], plan);
+  assert.deepEqual(byIteration.columns.map((c) => [c.name, c.cards.length, c.target]), [["Ohne Iteration", 2, false], ["Iteration 2", 2, true], ["Iteration 3", 2, true]]);
+  assert.equal(byIteration.meta.fieldType, "ITERATION");
+  nodes[1].fieldValueByName = { iterationId: "it-1", title: "Iteration 1" };
+  assert.deepEqual(board.parseGithubBoard(items, githubView(), new Set(), [], plan).columns.map((c) => c.name), ["Ohne Iteration", "Iteration 1", "Iteration 2", "Iteration 3"], "a completed one holding a card");
+  const priorityFirst = projectFields().sort((a, b) => Number(b.name === "Priority") - Number(a.name === "Priority"));
+  const noColumn = planOf(projectJson({ fields: priorityFirst, views: [{ column: null }] }));
+  assert.deepEqual([noColumn.column.name, noColumn.ownColumn], ["Status", false], "a view without a column field: Status, wherever it stands");
+  const fallen = board.parseGithubBoard(json("github-board.json"), githubView(), HIDDEN, [], noColumn);
+  assert.deepEqual(board.boardShape.warnings(githubView(), fallen), ["Ansicht „Mine“ nennt kein Feld für ihre Spalten: das Board nimmt „Status“, wie GitHub"]);
+  const none = { message: "Ansicht „Mine“ von „Mine“ hat kein Feld für ihre Spalten (ein Auswahl- oder Iterationsfeld)" };
+  assert.throws(() => planOf(projectJson({ fields: priorityFirst.filter((f) => f.name !== "Status"), views: [{ column: null }] })), none, "without Status, not another single-select field");
+  assert.throws(() => planOf(projectJson({ fields: projectFields().filter((f) => f.dataType !== "SINGLE_SELECT"), views: [{ column: null }] })), none);
+});
+
+test("a completed iteration that is a hidden column stays a column, hidden, with GitHub's count, though no card stands in it", () => {
+  const plan = planOf(projectJson({ views: [{ column: "Iteration" }] }));
+  const items = json("github-board.json");
+  items.data.repositoryOwner.projectV2.items.nodes.forEach((n) => (n.fieldValueByName = { iterationId: "it-2", title: "Iteration 2" }));
+  items.data.repositoryOwner.projectV2.h0 = { totalCount: 4 };
+  const data = board.parseGithubBoard(items, githubView(), new Set(["Iteration 1"]), [], plan);
+  assert.deepEqual(data.columns.map((c) => [c.name, c.hidden, c.count]), [["Iteration 1", true, 4], ["Iteration 2", false, 6], ["Iteration 3", false, 0]]);
+});
+
+test("an iteration field's iterations stand in the order of their start, the completed ones among them, whatever order GitHub sends them in", () => {
+  const configuration = {
+    iterations: [{ id: "it-3", title: "Iteration 3", startDate: "2026-12-10" }, { id: "it-2", title: "Iteration 2", startDate: "2026-11-26" }],
+    completedIterations: [{ id: "it-1", title: "Iteration 1", startDate: "2026-11-12" }, { id: "it-0", title: "Iteration 0", startDate: "2026-10-29" }],
+  };
+  const fields = projectFields().map((f) => (f.name === "Iteration" ? { ...f, configuration } : f));
+  const project = board.parseGithubProject(projectJson({ fields }), githubView());
+  assert.deepEqual(project.fields.find((f) => f.name === "Iteration").iterations.map((i) => [i.id, i.completed]), [["it-0", true], ["it-1", true], ["it-2", false], ["it-3", false]]);
 });
 
 test("a board and a list carry the login gh read them as, null when GitHub did not say", () => {
   assert.equal(githubBoard().viewer, "sample-user");
   assert.equal(board.parseGithubList(json("github-list.json"), listView()).viewer, "sample-user");
-  const without = json("github-board.json");
+  const without = projectJson();
   delete without.data.viewer;
-  assert.equal(board.parseGithubBoard(without, githubView(), HIDDEN).viewer, null);
+  assert.equal(board.parseGithubBoard(json("github-board.json"), githubView(), HIDDEN, [], planOf(without)).viewer, null);
   const list = json("github-list.json");
   delete list.data.viewer;
   assert.equal(board.parseGithubList(list, listView()).viewer, null);
@@ -1311,7 +1536,7 @@ test("a card carries repo, number, title, labels, assignees, author, parent and 
   assert.equal(board.findCard(b, "PVTI_rec2").card.parent, 3002);
   const cases = casesBoard();
   assert.deepEqual(["PVTI_case1", "PVTI_case2"].map((k) => board.findCard(cases, k).card.author), ["sample-contributor", "sample-contributor"], "a pull request's author, a draft's creator");
-  const doc = board.githubBoardArgs(githubView(), HIDDEN).find((a) => a.startsWith("query="));
+  const doc = board.githubBoardArgs(githubView(), planOf(), HIDDEN).find((a) => a.startsWith("query="));
   assert.equal(doc.match(/author \{ login \}/g).length, 2, "asked of issues and pull requests");
   assert.match(doc, /DraftIssue \{ title creator \{ login \}/);
 });
@@ -1326,39 +1551,144 @@ test("items without a status, or in an option that is gone, share a column that 
   assert.deepEqual([pr.kind, pr.branch, pr.number], ["pr", "feat/3000-retry-once", 3050]);
 });
 
-test("parseGithubBoard says when the owner, project or field is missing", () => {
-  const view = githubView();
-  assert.throws(() => board.parseGithubBoard({ data: { repositoryOwner: null } }, view, new Set()), /kennt „sample-user“ nicht/);
-  assert.throws(() => board.parseGithubBoard({ data: { repositoryOwner: { projectV2: null } } }, view, new Set()), /Projekt 7 von sample-user nicht gefunden/);
-  const noField = json("github-board.json");
-  noField.data.repositoryOwner.projectV2.field = null;
-  assert.throws(() => board.parseGithubBoard(noField, view, new Set()), /kein Auswahlfeld „Status“/);
+// github-board.json's items with values for project 7's fields: `values`
+// by card number, { priority: "P0", v0: { optionId } | { number } … } as
+// the items' query names them.
+function boardItemsWith(values) {
+  const items = json("github-board.json");
+  for (const node of items.data.repositoryOwner.projectV2.items.nodes) Object.assign(node, values[node.content.number] ?? {});
+  return items;
+}
+const priorityOf = (name) => ({ optionId: PRIORITIES.find((p) => p.name === name).id, name, color: PRIORITIES.find((p) => p.name === name).color });
+const orderIn = (b, name) => numbersIn(b, name);
+const sortedBy = (sorts, values, extra = {}) => board.parseGithubBoard(boardItemsWith(values), githubView(), HIDDEN, [], planOf(projectJson({ views: [{ sorts, ...extra }] })));
+
+test("a view's sort keys order the cards within each column, one after the other, ascending or descending, those without a value last either way; unsorted, as GitHub sends them", () => {
+  const values = {
+    3000: { priority: priorityOf("P2") }, 3003: { priority: priorityOf("P0") },
+    3004: { priority: priorityOf("P1"), v0: { number: 3 } }, 3005: { priority: priorityOf("P1"), v0: { number: 8 } }, 3007: { priority: priorityOf("P1") },
+  };
+  const both = sortedBy([["Priority", "ASC"], ["Estimate", "DESC"]], values);
+  assert.deepEqual([orderIn(both, "In progress"), orderIn(both, "Ready")], [[3003, 3000, 3001], [3005, 3004, 3007]], "Priority by its options' order, then Estimate from the highest");
+  const down = sortedBy([["Priority", "DESC"]], values);
+  assert.deepEqual(orderIn(down, "In progress"), [3000, 3003, 3001], "descending, the one without a priority still last");
+  assert.deepEqual(orderIn(sortedBy([], values), "In progress"), [3000, 3001, 3003], "unsorted: GitHub's order");
+  assert.deepEqual(orderIn(sortedBy([["Title", "ASC"]], values), "In progress"), [3000, 3003, 3001], "a field of the item itself, by its text");
+  const args = board.githubBoardArgs(githubView(), planOf(projectJson({ views: [{ sorts: [["Priority", "ASC"], ["Estimate", "DESC"], ["Title", "ASC"]] }] })), HIDDEN);
+  assert.ok(args.includes("v0=Estimate") && !args.some((a) => a.startsWith("v1=")), "a field the item does not hold read by its name, once");
+  assert.match(args.find((a) => a.startsWith("query=")), /v0: fieldValueByName\(name: \$v0\) \{[\s\S]*?ProjectV2ItemFieldNumberValue \{ number \}/);
 });
 
-test("a part missing from GitHub's answer is explained by the error at its path", () => {
+test("a view's swimlane field bands its cards across the columns: one band per value its cards hold, in the field's order, those without a value in the last; within a band the sort keys order them", () => {
+  const sizes = { 3000: "M", 3001: "XS", 3004: "M", 3005: "L", 3007: "XS" };
+  const values = Object.fromEntries(Object.entries(sizes).map(([n, size]) => [n, { v0: { optionId: `opt-size-${size}`, name: size } }]));
+  const lanes = sortedBy([], values, { lane: "Size" });
+  assert.deepEqual(lanes.lanes, [
+    { id: "v:opt-size-XS", name: "XS", color: "ansi2" }, { id: "v:opt-size-M", name: "M", color: "muted" }, { id: "v:opt-size-L", name: "L", color: "muted" }, { id: "none", name: "Ohne Size", color: "dim" },
+  ], "S, which no card has, has no band; each band in its option's color");
+  assert.deepEqual([orderIn(lanes, "In progress"), orderIn(lanes, "Ready")], [[3001, 3000, 3003], [3007, 3004, 3005]], "the cards of a column band after band");
+  assert.deepEqual(board.findCard(lanes, "PVTI_rec3").card.lane, "none");
+  const rows = board.laneRows(lanes.lanes, board.shownColumns(lanes, "", false));
+  assert.deepEqual(rows.map((r) => (r.head ? `${r.lane.name} ${r.count}` : r.cards.map((c) => c?.number ?? null))), [
+    "XS 2", [3007, 3001, null], "M 2", [3004, 3000, null], "L 1", [3005, null, null], "Ohne Size 1", [null, 3003, null],
+  ], "each band its head and rows, the n-th card of each shown column (Ready, In progress, In review) in its n-th row");
+  assert.deepEqual(rows.filter((r) => r.head).map((r) => r.lane.name), ["XS", "M", "L", "Ohne Size"]);
+  assert.deepEqual(board.laneRows(lanes.lanes, board.shownColumns(lanes, "dry-run", false)).filter((r) => r.head).map((r) => r.lane.name), ["Ohne Size"], "a band the filter empties has none");
+  const sorted = sortedBy([["Title", "DESC"]], { ...values, 3003: { v0: { optionId: "opt-size-M", name: "M" } } }, { lane: "Size" });
+  assert.deepEqual(orderIn(sorted, "In progress"), [3001, 3003, 3000], "within a band by the sort keys");
+  const byPeople = board.parseGithubBoard(json("github-board.json"), githubView(), HIDDEN, [], planOf(projectJson({ views: [{ lane: "Assignees" }] })));
+  assert.deepEqual(byPeople.lanes.map((l) => l.name), ["sample-user"], "a field of the item itself, by its values");
+  assert.equal(githubBoard().lanes, null, "no swimlane field, no bands");
+});
+
+test("a swimlane whose value is the text „none“ is a band of its own, apart from the band of the cards without a value; each card is drawn once", () => {
+  const data = sortedBy([], { 3000: { v0: { text: "none" } }, 3001: { v0: { text: "none" } } }, { lane: "Notes" });
+  assert.deepEqual(data.lanes.map((l) => [l.id, l.name]), [["v:none", "none"], ["none", "Ohne Notes"]]);
+  const columns = board.shownColumns(data, "", false);
+  const drawn = board.laneRows(data.lanes, columns).filter((r) => !r.head).flatMap((r) => r.cards.filter(Boolean).map((c) => c.key));
+  assert.deepEqual(drawn.sort(), columns.flatMap((c) => c.shown.map((card) => card.key)).sort());
+});
+
+test("a sort by the parent's title, those without a parent last either way; by labels, milestone, repo, issue type and sub-issues done, which the item holds, and by a date and a text field", () => {
+  const fields = projectFields(BOARD_OPTIONS, [{ __typename: "ProjectV2Field", id: "F_Type", name: "Type", dataType: "ISSUE_TYPE" }]);
+  const sorted = (field, direction, patch) => {
+    const items = json("github-board.json");
+    for (const node of items.data.repositoryOwner.projectV2.items.nodes) patch(node.content.number, node.content, node);
+    return orderIn(board.parseGithubBoard(items, githubView(), HIDDEN, [], planOf(projectJson({ fields, views: [{ sorts: [[field, direction]] }] }))), "In progress");
+  };
+  const parents = { 3000: "Beta", 3001: "alpha" };
+  const withParents = (n, content) => (content.parent = parents[n] ? { number: 4000 + n, title: parents[n], repository: { nameWithOwner: "sample-user/tender" } } : null);
+  assert.deepEqual([sorted("Parent issue", "ASC", withParents), sorted("Parent issue", "DESC", withParents)], [[3001, 3000, 3003], [3000, 3001, 3003]], "by title, not case; none last");
+  const set = (values) => (n, content, node) => values[n]?.(content, node);
+  const cases = [
+    ["Labels", {}, [3003, 3000, 3001], "enhancement before enhancement, area:…; none last"],
+    ["Milestone", set({ 3000: (c) => (c.milestone = { title: "v2" }), 3001: (c) => (c.milestone = { title: "v1" }) }), [3001, 3000, 3003]],
+    ["Repository", set({ 3000: (c) => (c.repository = { nameWithOwner: "sample-user/zeta" }), 3001: (c) => (c.repository = { nameWithOwner: "sample-user/alpha" }) }), [3001, 3003, 3000]],
+    ["Type", set({ 3000: (c) => (c.issueType = { name: "Task" }), 3001: (c) => (c.issueType = { name: "Bug" }) }), [3001, 3000, 3003]],
+    ["Sub-issues progress", {}, [3003, 3000, 3001], "1 of 2 before 15 of 22; none last"],
+    ["Target date", set({ 3000: (_c, node) => (node.v0 = { date: "2026-12-01" }), 3001: (_c, node) => (node.v0 = { date: "2026-11-30" }) }), [3001, 3000, 3003]],
+    ["Notes", set({ 3000: (_c, node) => (node.v0 = { text: "b" }), 3001: (_c, node) => (node.v0 = { text: "A" }) }), [3001, 3000, 3003]],
+  ];
+  for (const [field, patch, order, why] of cases) assert.deepEqual(sorted(field, "ASC", typeof patch === "function" ? patch : () => {}), order, why ?? field);
+});
+
+test("with swimlanes h/l go to the next column's card in the same band and row, else that band's last there, else as without; j/k through the column, band after band", () => {
+  const sizes = { 3000: "M", 3001: "XS", 3004: "M", 3005: "M", 3007: "XS" };
+  const values = Object.fromEntries(Object.entries(sizes).map(([n, size]) => [n, { v0: { optionId: `opt-size-${size}`, name: size } }]));
+  const data = sortedBy([], values, { lane: "Size" });
+  const columns = board.shownColumns(data, "", false);
+  const at = (key) => ({ col: board.columnOf(columns, key), key });
+  const go = (key, dir) => board.laneNavigate(columns, at(key), dir).key;
+  assert.deepEqual(columns.map((c) => c.shown.map((card) => card.number)), [[3007, 3004, 3005], [3001, 3000, 3003], []]);
+  assert.equal(go("PVTI_rec1", "left"), "PVTI_rec4", "M's first row");
+  assert.equal(go("PVTI_rec2", "left"), "PVTI_rec6", "XS's");
+  assert.equal(go("PVTI_rec5", "right"), "PVTI_rec1", "M's second row: the band's last there");
+  assert.equal(go("PVTI_rec3", "left"), "PVTI_rec5", "a band the next column lacks: by row, as without bands");
+  assert.deepEqual(board.laneNavigate(columns, at("PVTI_rec1"), "right"), { col: 2, key: null }, "an empty column: as without bands");
+  assert.deepEqual([go("PVTI_rec2", "down"), go("PVTI_rec1", "down"), go("PVTI_rec1", "up")], ["PVTI_rec1", "PVTI_rec3", "PVTI_rec2"]);
+});
+
+test("a sort key or swimlane field of a kind the board does not read (here linked pull requests and the date an item was created) orders nothing, and the board says so", () => {
+  const plan = planOf(projectJson({ views: [{ lane: "Linked pull requests", sorts: [["Created", "ASC"], ["Estimate", "ASC"]] }] }));
+  assert.deepEqual([plan.lane, plan.sorts.map((s) => s.field.name), plan.unreadable], [null, ["Estimate"], ["Linked pull requests", "Created"]]);
+  const data = board.parseGithubBoard(json("github-board.json"), githubView(), HIDDEN, [], plan);
+  assert.deepEqual([data.lanes, data.meta.unreadable], [null, ["Linked pull requests", "Created"]]);
+  assert.deepEqual(board.SHAPES.board.warnings(githubView(), data), [
+    "Ansicht „Mine“ sortiert oder gruppiert nach „Linked pull requests“, einem Feld, das das Board nicht liest: es ordnet ohne",
+    "Ansicht „Mine“ sortiert oder gruppiert nach „Created“, einem Feld, das das Board nicht liest: es ordnet ohne",
+  ]);
+  assert.deepEqual(board.SHAPES.board.warnings(githubView(), githubBoard()), []);
+});
+
+test("a part missing from GitHub's answers is explained by the error at its path: the owner, the project, its fields or views, the items", () => {
   const view = githubView();
-  const parse = (data, errors) => () => board.parseGithubBoard({ data }, view, HIDDEN, errors);
+  const project = (data, errors = []) => () => board.parseGithubProject({ data }, view, errors);
+  assert.throws(project({ repositoryOwner: null }), { message: "GitHub kennt „sample-user“ nicht" });
+  assert.throws(project({ repositoryOwner: null }, [{ type: "FORBIDDEN", path: ["repositoryOwner"], message: "blocked" }]), { message: "GitHub: blocked" });
   const notFound = json("github-not-found.json");
-  assert.throws(() => board.parseGithubBoard(notFound, view, HIDDEN, notFound.errors), { message: "Projekt 7 von sample-user nicht gefunden – project.number in views.json prüfen" });
+  assert.throws(() => board.parseGithubProject(notFound, view, notFound.errors), { message: "Projekt 7 von sample-user nicht gefunden – „number“ in views.json prüfen" });
   const saml = "Resource protected by organization SAML enforcement. You must grant your OAuth token access to this organization.";
-  assert.throws(parse({ repositoryOwner: { projectV2: null } }, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2"], message: saml }]),
+  assert.throws(project({ repositoryOwner: { projectV2: null } }, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2"], message: saml }]),
     { message: `Projekt 7 von sample-user: ${saml}` });
-  assert.throws(parse({ repositoryOwner: { projectV2: null } }, [{ type: "NOT_FOUND", path: ["viewer", "repository"], message: "x" }]),
+  assert.throws(project({ repositoryOwner: { projectV2: null } }, [{ type: "NOT_FOUND", path: ["viewer", "repository"], message: "x" }]),
     { message: "Projekt 7 von sample-user nicht gefunden oder kein Zugriff" }, "NOT_FOUND counts only at the project's path");
-  const project = { ...json("github-board.json").data.repositoryOwner.projectV2, items: null };
-  assert.throws(parse({ repositoryOwner: { projectV2: project } }, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "items", "nodes", 0], message: "no access to a repository" }]),
-    { message: "Projekt „Sample“: no access to a repository" });
-  assert.throws(parse({ repositoryOwner: { projectV2: project } }, []), { message: "Projekt „Sample“ lieferte keine Einträge" });
-  const noField = { ...json("github-board.json").data.repositoryOwner.projectV2, field: null };
-  assert.throws(parse({ repositoryOwner: { projectV2: noField } }, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "field"], message: "field hidden" }]),
-    { message: "Projekt „Sample“: field hidden" });
+  const answer = projectJson().data.repositoryOwner.projectV2;
+  assert.throws(project({ repositoryOwner: { projectV2: { ...answer, fields: null } } }, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "fields"], message: "fields hidden" }]),
+    { message: "Projekt „Mine“: fields hidden" });
+  assert.throws(project({ repositoryOwner: { projectV2: { ...answer, views: { nodes: null } } } }), { message: "Projekt „Mine“ lieferte seine Ansichten nicht" });
+  const items = (data, errors) => () => board.parseGithubBoard({ data }, view, HIDDEN, errors, planOf());
+  const noItems = { ...json("github-board.json").data.repositoryOwner.projectV2, items: null };
+  assert.throws(items({ repositoryOwner: { projectV2: noItems } }, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "items", "nodes", 0], message: "no access to a repository" }]),
+    { message: "Projekt „Mine“: no access to a repository" });
+  assert.throws(items({ repositoryOwner: { projectV2: noItems } }, []), { message: "Projekt „Mine“ lieferte keine Einträge" });
+  assert.throws(items({ repositoryOwner: { projectV2: null } }, [{ type: "NOT_FOUND", path: ["repositoryOwner", "projectV2"], message: "gone meanwhile" }]), { message: "Projekt „Mine“: gone meanwhile" });
 });
 
 test("a board with more items than one page says it is cut", () => {
   const data = json("github-board.json");
   data.data.repositoryOwner.projectV2.items.pageInfo.hasNextPage = true;
   data.data.repositoryOwner.projectV2.items.totalCount = 290;
-  const b = board.parseGithubBoard(data, githubView(), HIDDEN);
+  const b = board.parseGithubBoard(data, githubView(), HIDDEN, [], planOf());
   assert.deepEqual([b.limited, b.total], [true, 290]);
 });
 
@@ -1376,20 +1706,22 @@ function boardPage(from, to, next, { first = from === 0, total = 6 } = {}) {
 }
 
 test("a board's next page is one query of its items after the cursor: the same filter and field, no counts, as many as its limit leaves (githubBoardPageArgs)", () => {
-  const args = board.githubBoardPageArgs(githubView(), HIDDEN, "Y3Vyc29y", 100);
+  const plan = planOf();
+  const args = board.githubBoardPageArgs(githubView(), plan, HIDDEN, "Y3Vyc29y", 100);
   const value = (name) => args.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1);
-  assert.deepEqual([value("filter"), value("after"), value("login"), value("field")], ['assignee:@me -status:"Backlog","Done"', "Y3Vyc29y", "sample-user", "Status"]);
+  assert.deepEqual([value("filter"), value("after"), value("login"), value("column")], ['assignee:@me -status:"Backlog","Done"', "Y3Vyc29y", "sample-user", "Status"]);
   assert.ok(args.includes("-F") && args.includes("number=7"));
   const doc = value("query").replace(/\s+/g, " ");
-  assert.match(doc, /items\(first: 100, after: \$after, query: \$filter\) \{ totalCount pageInfo \{ hasNextPage endCursor \} nodes \{ id fieldValueByName\(name: \$field\)/);
+  assert.match(doc, /items\(first: 100, after: \$after, query: \$filter\) \{ totalCount pageInfo \{ hasNextPage endCursor \} nodes \{ id fieldValueByName\(name: \$column\)/);
   assert.doesNotMatch(doc, /\bviewer \{|h0:|options \{/, "nothing the first page read");
+  assert.match(doc, /projectV2\(number: \$number\) \{ title items\(first/, "of the project its title alone, for what a page says");
   assert.equal(value("h0"), undefined);
-  assert.match(board.githubBoardPageArgs({ ...githubView(), limit: 250 }, HIDDEN, "c", 200)[3], /items\(first: 50, after/, "the last page to the limit");
-  assert.match(board.githubBoardArgs({ ...githubView(), limit: 30 }, HIDDEN)[3], /items\(first: 30, query/, "a limit below a page");
+  assert.match(board.githubBoardPageArgs({ ...githubView(), limit: 250 }, plan, HIDDEN, "c", 200)[3], /items\(first: 50, after/, "the last page to the limit");
+  assert.match(board.githubBoardArgs({ ...githubView(), limit: 30 }, plan, HIDDEN)[3], /items\(first: 30, query/, "a limit below a page");
   const empty = boardPage(0, 0, "c0");
   const next = board.nextBoardPage(empty, githubView());
-  assert.deepEqual(next, { after: "c0", read: 0 }, "an empty first page that says more follow");
-  const after = board.githubBoardPageArgs(githubView(), HIDDEN, next.after, next.read);
+  assert.deepEqual(next, { after: "c0", count: 0 }, "an empty first page that says more follow");
+  const after = board.githubBoardPageArgs(githubView(), plan, HIDDEN, next.after, next.count);
   assert.match(after[3], /items\(first: 100, after: \$after, query/, "its next page reads from the cursor it declares");
   assert.match(after[3], /^query=query\([^)]*, \$after: String!\)/, "and declares it");
   assert.ok(after.includes("after=c0"));
@@ -1398,7 +1730,7 @@ test("a board's next page is one query of its items after the cursor: the same f
 test("a board's pages add up: each item once, the last page's pageInfo; the next page while GitHub has one and the limit leaves room (addBoardPage, nextBoardPage)", () => {
   const view = githubView();
   const first = boardPage(0, 3, "c1");
-  assert.deepEqual(board.nextBoardPage(first, view), { after: "c1", read: 3 });
+  assert.deepEqual(board.nextBoardPage(first, view), { after: "c1", count: 3 });
   const second = boardPage(2, 6, null, { first: false });
   board.addBoardPage(first, second);
   const items = first.data.repositoryOwner.projectV2.items;
@@ -1411,8 +1743,8 @@ test("a board's pages add up: each item once, the last page's pageInfo; the next
     "more without a cursor to go on from");
   assert.equal(board.nextBoardPage(noCursor, { ...view, limit: 3 }), null, "unless the limit is read");
   assert.equal(board.nextBoardPage({ data: { repositoryOwner: null } }, view), null, "no items: the parser explains");
-  const cut = board.parseGithubBoard(board.addBoardPage(boardPage(0, 3, "c1", { total: 9 }), boardPage(3, 5, "c2", { first: false })), { ...view, limit: 5 }, HIDDEN);
-  assert.deepEqual([cut.limited, cut.total, cut.read], [true, 9, 5], "cut: said, with how many it read");
+  const cut = board.parseGithubBoard(board.addBoardPage(boardPage(0, 3, "c1", { total: 9 }), boardPage(3, 5, "c2", { first: false })), { ...view, limit: 5 }, HIDDEN, [], planOf());
+  assert.deepEqual([cut.limited, cut.total, cut.count], [true, 9, 5], "cut: said, with how many it read");
   const stuck = (page) => () => board.addBoardPage(boardPage(0, 3, "c1"), page);
   const STUCK = { message: "Projekt „Sample“: GitHub kam nach 3 Einträgen nicht weiter" };
   assert.throws(stuck(boardPage(1, 3, "c2", { first: false })), STUCK, "more promised, but only items it holds");
@@ -1435,18 +1767,18 @@ test("a board's pages add up: each item once, the last page's pageInfo; the next
 
 test("validateConfig: a board's limit is the most items it reads, 1000 by default and at most; the PR sections' at most 100, 50 by default, for every PR tab", () => {
   assert.equal(board.PAGE, 100, "a page of GitHub's");
-  const board1 = (limit) => ({ id: `b${limit}`, name: "B", number: 1, ...(limit === undefined ? {} : { limit }) });
-  const projects = [board1(undefined), board1(1000), board1(1001)];
-  const contexts = [{ owner: "o", projects, prs: { id: "lo" } }, { owner: "p", prs: { id: "lp" } }, { owner: "q", projects: [board1(0)], prs: { id: "lq" } }];
+  const board1 = (limit, number) => ({ number, ...(limit === undefined ? {} : { limit }) });
+  const projects = [board1(undefined, 1), board1(1000, 2), board1(1001, 3)];
+  const contexts = [{ owner: "o", projects, prs: { id: "lo" } }, { owner: "p", prs: { id: "lp" } }, { owner: "q", projects: [board1(0, 1)], prs: { id: "lq" } }];
   const read = (limit) => board.validateConfig({ sources: { github: { contexts, prs: { ...SHARED_PRS, ...(limit === undefined ? {} : { limit }) } } } });
   const { config, errors } = read(undefined);
-  assert.deepEqual(board.githubViews(config).map((v) => [v.id, v.limit]), [["bundefined", 1000], ["b1000", 1000], ["lo", 50], ["lp", 50], ["lq", 50]]);
+  assert.deepEqual(githubTabs(config).map((v) => [v.id, v.limit]), [["github:project:o/1", 1000], ["github:project:o/2", 1000], ["lo", 50], ["lp", 50], ["lq", 50]]);
   assert.deepEqual(errors.filter((e) => /limit/.test(e)), [
-    "GitHub-Kontext 1 („o“), Project 3 („B“): „limit“ ist eine ganze Zahl von 1 bis 1000",
-    "GitHub-Kontext 3 („q“), Project 1 („B“): „limit“ ist eine ganze Zahl von 1 bis 1000",
+    "GitHub-Kontext 1 („o“), Project 3 (3): „limit“ ist eine ganze Zahl von 1 bis 1000",
+    "GitHub-Kontext 3 („q“), Project 1 (1): „limit“ ist eine ganze Zahl von 1 bis 1000",
   ]);
-  assert.deepEqual(board.githubViews(read(100).config).filter((v) => v.layout === "list").map((v) => v.limit), [100, 100, 100]);
-  assert.deepEqual([read(101).errors.filter((e) => /prs/.test(e)), board.githubViews(read(101).config).filter((v) => v.layout === "list")], [["„sources.github.prs.limit“ ist eine ganze Zahl von 1 bis 100"], []],
+  assert.deepEqual(githubTabs(read(100).config).filter((v) => v.layout === "list").map((v) => v.limit), [100, 100, 100]);
+  assert.deepEqual([read(101).errors.filter((e) => /prs/.test(e)), githubTabs(read(101).config).filter((v) => v.layout === "list")], [["„sources.github.prs.limit“ ist eine ganze Zahl von 1 bis 100"], []],
     "without valid sections no PR tab");
 });
 
@@ -1555,7 +1887,19 @@ test("a GitHub status change is one GraphQL mutation with the project, item, fie
   assert.ok(args.includes(`query=${board.MOVE_MUTATION}`));
   assert.match(board.MOVE_MUTATION, /updateProjectV2ItemFieldValue/);
   assert.deepEqual(args.filter((a, i) => args[i - 1] === "-f" && !a.startsWith("query=")),
-    ["project=PVT_sample", "item=PVTI_rec4", "field=PVTSSF_sample", "option=opt-in-progress"]);
+    ["project=PVT_sample7", "item=PVTI_rec4", "field=F_Status", "option=opt-in-progress"]);
+});
+
+test("a move on a board whose columns are an iteration field's sets the card's iteration", () => {
+  const items = json("github-board.json");
+  items.data.repositoryOwner.projectV2.items.nodes.forEach((n) => (n.fieldValueByName = { iterationId: "it-2", title: "Iteration 2" }));
+  const b = board.parseGithubBoard(items, githubView(), new Set(), [], planOf(projectJson({ views: [{ column: "Iteration" }] })));
+  const card = board.findCard(b, "PVTI_rec4").card;
+  const args = board.githubMoveArgs(b.meta, card, b.columns.find((c) => c.name === "Iteration 3"));
+  assert.ok(args.includes(`query=${board.MOVE_ITERATION_MUTATION}`));
+  assert.match(board.MOVE_ITERATION_MUTATION, /value: \{ iterationId: \$option \}/);
+  assert.match(board.MOVE_MUTATION, /value: \{ singleSelectOptionId: \$option \}/);
+  assert.deepEqual(args.filter((a, i) => args[i - 1] === "-f" && !a.startsWith("query=")), ["project=PVT_sample7", "item=PVTI_rec4", "field=F_Iteration", "option=it-3"]);
 });
 
 test("a mutation's answer must name the item it changed, else the outcome is unclear", () => {
@@ -1653,7 +1997,7 @@ test("„nur meine“ keeps the items assigned to, opened by or asking a review 
   nodes[1].content.assignees.nodes = [];
   nodes[2].content.assignees.nodes = [];
   nodes[2].content.author.login = "sample-user";
-  const b = board.parseGithubBoard(data, githubView(), HIDDEN);
+  const b = board.parseGithubBoard(data, githubView(), HIDDEN, [], planOf());
   const all = (text, mine) => board.shownColumns(b, text, mine).flatMap((c) => c.shown.map((x) => x.number));
   assert.deepEqual(all("", true), [3004, 3005, 3007, 3003], "not 3000 (someone else's) nor 3001 (no one's); 3003 unassigned but opened by sample-user");
   assert.deepEqual(all("BUG input", true), [3007], "with the filter");
@@ -1755,7 +2099,7 @@ test("a section missing from GitHub's answer is an error, explained by the error
 // ---- PR list: whether the viewer has to act ----
 
 // The PR view of the shipped views.json, its three sections.
-const shippedListView = () => board.githubViews(board.readConfig(shippedConfig()).config).find((v) => v.layout === "list");
+const shippedListView = () => githubTabs(board.readConfig(shippedConfig()).config).find((v) => v.layout === "list");
 // github-list-attention.json as the shipped PR view reads it, and the rows
 // of its sections by number.
 const attentionList = (data = json("github-list-attention.json"), view = shippedListView(), errors = []) => board.parseGithubList(data, view, errors);
@@ -2129,12 +2473,12 @@ test("the shipped views.json's PR view searches what one is asked to review, one
 test("a list section takes the tone views.json gives it, one of copper's hues but orange, else the next by its place of blue, violet, teal, green, yellow, red that no other section sets; any other tone, and any other key, is named as an error", () => {
   const list = (sections) => board.validateConfig({ sources: { github: { contexts: [{ owner: "o", prs: { id: "l", name: "L" } }], prs: { sections } } } });
   const s = (name, tone) => ({ name, query: "is:pr", ...(tone === undefined ? {} : { tone }) });
-  const tones = (sections) => board.githubViews(list(sections).config)[0].sections.map((x) => x.tone);
+  const tones = (sections) => githubTabs(list(sections).config)[0].sections.map((x) => x.tone);
   const { config, errors } = list([s("A"), s("B", "violet"), s("C"), s("D", "red")]);
   assert.deepEqual(errors, []);
-  assert.deepEqual(board.githubViews(config)[0].sections.map((x) => x.tone), ["blue", "violet", "teal", "red"], "C takes teal: violet is B's");
+  assert.deepEqual(githubTabs(config)[0].sections.map((x) => x.tone), ["blue", "violet", "teal", "red"], "C takes teal: violet is B's");
   const answer = { data: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((i) => [`s${i}`, { issueCount: 0, nodes: [] }])) };
-  assert.deepEqual(board.parseGithubList(answer, board.githubViews(config)[0]).sections.map((x) => x.color), ["ansi4", "ansi5", "ansi6", "ansi1"]);
+  assert.deepEqual(board.parseGithubList(answer, githubTabs(config)[0]).sections.map((x) => x.color), ["ansi4", "ansi5", "ansi6", "ansi1"]);
   assert.deepEqual(tones([0, 1, 2, 3, 4, 5, 6].map((i) => s(`S${i}`))), ["blue", "violet", "teal", "green", "yellow", "red", "blue"], "the seventh starts again");
   assert.deepEqual(tones([...["red", "green", "yellow", "blue", "violet", "teal"].map((t) => s(t, t)), s("X")]), ["red", "green", "yellow", "blue", "violet", "teal", "blue"],
     "every tone set: the order from its start");
@@ -2907,9 +3251,9 @@ function deferred() {
 }
 
 // The UI tests' own views.json: on Azure a team and its project's pull
-// requests, and three GitHub views. hide: the first view's hidden columns;
-// repos: more repos entries.
-function testConfig({ start = {}, filter = "assignee:@me", hide = ["Backlog", "Done"], repos = {} } = {}) {
+// requests, and on GitHub two projects and the PR tab. hide: the hidden
+// columns of the first project's view 1; repos: more repos entries.
+function testConfig({ start = {}, hide = ["Backlog", "Done"], repos = {} } = {}) {
   return JSON.stringify({
     refreshMinutes: 3,
     start: { agent: "claude", message: "/work {number}", review: "/look {number}", ...start },
@@ -2920,8 +3264,8 @@ function testConfig({ start = {}, filter = "assignee:@me", hide = ["Backlog", "D
         contexts: [{
           owner: "sample-user",
           projects: [
-            { id: "mine", name: "Mine", number: 7, filter, hide },
-            { id: "other", name: "Other", number: 8, hide: ["Done"] },
+            { number: 7, views: { 1: { hide } } },
+            { number: 8, views: { 1: { hide: ["Done"] } } },
           ],
           prs: { id: "prs", name: "PRs" },
         }],
@@ -2931,16 +3275,10 @@ function testConfig({ start = {}, filter = "assignee:@me", hide = ["Backlog", "D
   });
 }
 
-// A parsed testConfig whose view "mine" is the PR list in place of "prs".
-function mineAsList(config) {
-  ghContext(config).projects = ghContext(config).projects.filter((p) => p.id !== "mine");
-  ghContext(config).prs = { ...ghContext(config).prs, id: "mine", name: "Mine" };
-}
-
-// testConfig without the view "mine".
+// testConfig without project 7.
 function withoutMine() {
   const config = JSON.parse(testConfig());
-  ghContext(config).projects = ghContext(config).projects.filter((v) => v.id !== "mine");
+  ghContext(config).projects = ghContext(config).projects.filter((v) => v.number !== 7);
   return JSON.stringify(config);
 }
 
@@ -3010,7 +3348,11 @@ function textView(format, id, text) {
 // and gh's request for the unread notifications (githubNotificationsArgs),
 // answered at once with `notificationsAnswer` (by default none; an Error
 // rejects it; null leaves it to the test, as any other call), which a test
-// may change, and counted in notificationsAsks.
+// may change, and counted in notificationsAsks; and gh's request for a
+// project's views and fields (githubProjectArgs), answered at once with
+// projectAnswer(number) (by default defaultProject's; an Error rejects it,
+// null leaves it to the test), which a test may change, and recorded in
+// projectAsks.
 // spaces() is spaceList, which a test may change.
 // layout() is `tree` (the shown layout; none by default), focused() is
 // `focus`, props() is `copyProps` (the copy's own props, as herdr gives
@@ -3025,7 +3367,7 @@ const SAMPLE_LOGIN = { code: 0, stdout: JSON.stringify({ data: { viewer: { login
 const NO_NOTIFICATIONS = { code: 0, stdout: "[]", stderr: "" };
 function fakeHost({
   config = testConfig(), shown = true, tree = null, props = {}, which = (tool) => (tool === "az" ? "" : found(tool)), oldScroll = false, oldMouse = false, viewerAnswer = SAMPLE_LOGIN,
-  notificationsAnswer = NO_NOTIFICATIONS, claudeHome = null, claudeAnswer = null, files = {}, failWrite = null,
+  notificationsAnswer = NO_NOTIFICATIONS, claudeHome = null, claudeAnswer = null, files = {}, failWrite = null, projectAnswer = (number) => ok(JSON.stringify(defaultProject(number))),
 } = {}) {
   const calls = [];
   const lacked = oldMouse ? ["on_window_mouse_up"] : [];
@@ -3097,10 +3439,19 @@ function fakeHost({
     viewerAsks: 0,
     notificationsAnswer,
     notificationsAsks: 0,
+    projectAnswer,
+    projectAsks: [],
     exec: (tool, args, options) => {
       if (args.includes(`query=${board.VIEWER_QUERY}`)) {
         host.viewerAsks++;
         return Promise.resolve(viewerAnswer);
+      }
+      if (args.includes(`query=${board.PROJECT_QUERY}`)) {
+        const number = Number(args.find((a) => a.startsWith("number=")).slice(7));
+        host.projectAsks.push(number);
+        const a = host.projectAnswer?.(number, args) ?? null;
+        if (a instanceof Error) return Promise.reject(a);
+        if (a) return Promise.resolve(a);
       }
       if (args.includes(board.NOTIFICATIONS_PATH)) host.notificationsAsks++;
       if (args.includes(board.NOTIFICATIONS_PATH) && host.notificationsAnswer !== null) {
@@ -3396,6 +3747,7 @@ const ok = (stdout) => ({ code: 0, stdout, stderr: "" });
 // they stand (a saved state: savedFor).
 async function bootBoard(options = {}) {
   memory.clear();
+  for (const [key, value] of Object.entries(options.known ?? KNOWN_PROJECTS())) memory.set(key, JSON.stringify(value));
   for (const [key, value] of Object.entries(options.stored ?? {})) memory.set(key, JSON.stringify(value));
   for (const [key, text] of Object.entries(options.raw ?? {})) memory.set(key, text);
   clockOffset = 0;
@@ -3405,16 +3757,21 @@ async function bootBoard(options = {}) {
   const cx = fakeCx(options);
   b.init(options.props ?? {}, cx);
   await settle();
-  return { b, cx, host, st: () => b.views.mine };
+  return { b, cx, host, st: () => b.views[MINE] };
 }
 
-// A Board on the fake host, its first view loaded from github-board.json
-// (or `answer`).
+// A Board on the fake host, its first view loaded from the items fixture
+// `fixture` (github-board.json by default) or from `answer`, its project as
+// projectFor that fixture's Status options (FIXTURE_OPTIONS), or
+// `statusOptions` for an answer of no fixture's.
 async function openBoard(options = {}) {
-  const { b, cx, host } = await bootBoard(options);
-  await host.answer("gh", ok(options.answer ?? fixture("github-board.json")));
+  const name = options.fixture ?? "github-board.json";
+  const answer = options.answer ?? fixture(name);
+  const project = projectFor(options.statusOptions ?? FIXTURE_OPTIONS[name]);
+  const { b, cx, host } = await bootBoard({ projectAnswer: (number) => ok(JSON.stringify(number === 7 ? project : defaultProject(number))), ...options });
+  await host.answer("gh", ok(answer));
   cx.later.splice(0); // init's focus retry
-  return { b, cx, host, st: () => b.views.mine };
+  return { b, cx, host, st: () => b.views[MINE] };
 }
 
 // The board on its PR tab, read as github-list.json answers (`list`).
@@ -3441,10 +3798,12 @@ const isBoardCall = (args) => args.some((a) => String(a).includes("projectV2(num
 const isRelatedCall = (args) => args.some((a) => String(a).includes("closedByPullRequestsReferences"));
 const confirmed = (id) => ok(JSON.stringify({ data: { updateProjectV2ItemFieldValue: { projectV2Item: { id } } } }));
 
-test("UI: on the shipped views.json, with nothing remembered, the board opens on GitHub, its first view", async () => {
+test("UI: on the shipped views.json, with nothing remembered, the board opens on GitHub, its first project's first view", async () => {
   const { b, host } = await bootBoard({ config: shippedConfig(), stored: {} });
-  assert.deepEqual([b.context().source, b.tab().id], ["github", "github:mine"]);
-  assert.equal(host.open("gh").length, 1, "and loads it");
+  const shipped = JSON.parse(shippedConfig()).sources.github.contexts[0];
+  const tab = board.projectTabId(shipped.owner, shipped.projects[0].number);
+  assert.deepEqual([b.context().source, b.tab().id, b.view().id], ["github", tab, `${tab}:1`]);
+  assert.deepEqual([host.projectAsks, host.open("gh").length], [[shipped.projects[0].number], 1], "and loads it: its views, then its first view's items");
   const contexts = board.contextsOf(b.config);
   assert.deepEqual(byId(b.render(), "context").kids.map((k) => k.with.id[0]), [
     "context-source-github", `context-${contexts[0].id}`, "context-rule-azure", "context-source-azure", ...contexts.slice(1).map((a) => `context-${a.id}`),
@@ -3453,7 +3812,7 @@ test("UI: on the shipped views.json, with nothing remembered, the board opens on
 
 test("UI: on the shipped views.json with Azure remembered, the board opens on its team's Sprint and reads it with az, not gh", async () => {
   const { b, host } = await bootBoard({ config: shippedConfig(), stored: { context: shippedContext("azure") } });
-  assert.deepEqual([b.context().source, b.tab().kind, b.teamViewOf(b.tab())], ["azure", "team", "sprint"]);
+  assert.deepEqual([b.context().source, b.tab().kind, b.tabViewOf(b.tab())], ["azure", "team", "sprint"]);
   assert.deepEqual(b.tabs().map((c) => c.kind).slice(0, 2), ["team", "prs"]);
   assert.deepEqual([host.calls, host.asked.map((a) => a.tool)], [[], ["az"]], "az is asked for (and not found here), gh is not");
   assert.equal(b.state(b.view().id).error, "az ist nicht installiert");
@@ -3461,10 +3820,11 @@ test("UI: on the shipped views.json with Azure remembered, the board opens on it
 });
 
 test("UI: on the shipped views.json the GitHub source loads its first view", async () => {
-  const { b, st, host } = await openBoard({ config: shippedConfig() });
-  assert.equal(st().data.columns.length, 5);
-  assert.deepEqual(st().sel, { col: 0, key: "PVTI_rec4" });
-  assert.deepEqual(b.tabs().map((c) => c.view.id), ["mine", "prs"]);
+  const { b, host } = await openBoard({ config: shippedConfig() });
+  const st = b.state(b.view().id);
+  assert.equal(st.data.columns.length, 5);
+  assert.equal(st.sel.key, "PVTI_rec4");
+  assert.deepEqual(b.tabs().map((c) => [c.kind, c.name]), [["project", `P${JSON.parse(shippedConfig()).sources.github.contexts[0].projects[0].number}`], ["view", "PRs"]], "the project named as GitHub names it");
   assert.deepEqual(host.asked.filter((a) => a.tool === "az"), []);
 });
 
@@ -3485,7 +3845,7 @@ test("UI: a GitHub board reads every page, one gh call each, and shows all their
 
 test("UI: a GitHub board makes at most as many calls as full pages of its limit take; where they cut it, it says how many items it read", async () => {
   const config = JSON.parse(testConfig());
-  ghProject(config, "mine").limit = 150;
+  ghProject(config, 7).limit = 150;
   const { b, host, st } = await bootBoard({ config: JSON.stringify(config) });
   assert.match(host.open("gh")[0].args[3], /items\(first: 100, query/);
   await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1", { total: 9 }))), isBoardCall);
@@ -3801,7 +4161,7 @@ test("UI: Esc closes the details, then the notice, then clears the filter, and t
   b.filterInput.set_value("tender");
   b.filterText = "tender";
   await press(b, cx, "escape");
-  assert.deepEqual([host.runs.splice(0), b.views.mine.detail, b.notice?.text], [[], false, "x"], "the details");
+  assert.deepEqual([host.runs.splice(0), b.views[MINE].detail, b.notice?.text], [[], false, "x"], "the details");
   await press(b, cx, "escape");
   assert.deepEqual([host.runs.splice(0), b.notice, b.filterText], [[], null, "tender"], "the notice");
   await press(b, cx, "escape");
@@ -4028,15 +4388,15 @@ test("UI: number keys beyond the views do nothing; [ and ] go back and forth, al
   await press(b, cx, "[");
   assert.equal(b.view().id, "prs", "[ from the first view wraps to the last, the PR tab");
   await press(b, cx, "]");
-  assert.equal(b.view().id, "mine");
+  assert.equal(b.view().id, MINE);
   await press(b, cx, "]", { modifiers: { control: true } });
-  assert.equal(b.view().id, "mine");
+  assert.equal(b.view().id, MINE);
   await press(b, cx, "]", { modifiers: { control: true, alt: true } });
-  assert.equal(b.view().id, "other");
+  assert.equal(b.view().id, OTHER);
   await press(b, cx, "4");
-  assert.equal(b.view().id, "other", "4 names no view");
+  assert.equal(b.view().id, OTHER, "4 names no view");
   await press(b, cx, "9");
-  assert.equal(b.view().id, "other");
+  assert.equal(b.view().id, OTHER);
   await press(b, cx, "3");
   assert.equal(b.view().id, "prs");
 });
@@ -4056,13 +4416,13 @@ test("UI: a digit beyond the status menu's rows does nothing; a valid one moves 
 });
 
 test("UI: the command menu offers no „Spalte ausblenden“ on the column without status", async () => {
-  const { b, cx, st, host } = await openBoard({ answer: fixture("github-board-cases.json") });
+  const { b, cx, st, host } = await openBoard({ fixture: "github-board-cases.json" });
   st().sel = { col: 0, key: null };
   const entries = await openMenu(b, cx);
   assert.equal(entries.some(([name]) => name.startsWith("Spalte ausblenden")), false);
   assert.ok(entries.some(([name]) => name === "Spalten…"), "the column menu it does offer");
   await press(b, cx, "escape");
-  assert.equal(memory.has("hidden:mine"), false);
+  assert.equal(memory.has(board.hiddenKey(MINE)), false);
   assert.equal(host.files[MACHINE_FILE], undefined);
   assert.equal(st().data.columns[0].hidden, false);
   assert.equal(host.open("gh").length, 0, "no refresh");
@@ -4151,6 +4511,7 @@ test("UI: a reset takes this machine's entry out of the file, and views.json's h
   assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { refreshMinutes: 4 });
   assert.equal(b.origin(MINE_HIDE), "views.json");
   assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
+  await settle();
   assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Backlog","Done"'), "read again without them");
 });
 
@@ -4239,7 +4600,7 @@ test("UI: with settings that are no JSON the board runs on views.json, says so w
 });
 
 test("UI: the hidden columns the browser storage kept move into this machine's settings once and leave the storage", async () => {
-  const stored = { "hidden:mine": { hide: ["Ready"], show: ["Done"] }, "hidden:other": { hide: [], show: [] }, "hidden:prs": { hide: ["Review"], show: [] }, "hidden:gone": "x" };
+  const stored = { [board.hiddenKey(MINE)]: { hide: ["Ready"], show: ["Done"] }, [board.hiddenKey(OTHER)]: { hide: [], show: [] }, "hidden:prs": { hide: ["Review"], show: [] }, "hidden:gone": "x" };
   const { st, host } = await openBoard({ stored });
   assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), mineHidden(["Backlog", "Ready"]), "only what changed the view's hide");
   assert.deepEqual([...memory.keys()].filter((k) => k.startsWith("hidden:")), ["hidden:gone"], "a list's go too: it hides no columns; a view views.json lacks keeps its");
@@ -4247,21 +4608,21 @@ test("UI: the hidden columns the browser storage kept move into this machine's s
   const set = JSON.stringify(mineHidden(["Done"]));
   const kept = await openBoard({ stored, files: { [MACHINE_FILE]: set } });
   assert.equal(kept.host.files[MACHINE_FILE], set, "where the settings set the view's hide, they win");
-  assert.equal(memory.has("hidden:mine"), false);
+  assert.equal(memory.has(board.hiddenKey(MINE)), false);
   const failing = await openBoard({ stored, failWrite: new Error("Permission denied") });
   assert.equal(failing.b.notice.text, `${MACHINE_FILE} nicht gespeichert: Permission denied`);
-  assert.deepEqual(memory.get("hidden:mine"), JSON.stringify(stored["hidden:mine"]), "a move that failed leaves it in the storage for the next read");
+  assert.deepEqual(memory.get(board.hiddenKey(MINE)), JSON.stringify(stored[board.hiddenKey(MINE)]), "a move that failed leaves it in the storage for the next read");
 });
 
 const NOT_APPLIED = `Nicht geändert: ${MACHINE_FILE} gilt nicht: das Board zeigt views.json allein`;
 
 test("UI: settings read but not applied, as they give views.json a problem, are never written: a change is refused and the stored hidden columns wait for a later read", async () => {
   const text = JSON.stringify({ refreshMinutes: "oft", ...mineHidden(["Done"]) });
-  const stored = { "hidden:mine": { hide: ["Ready"], show: [] }, "hidden:other": { hide: [], show: [] } };
+  const stored = { [board.hiddenKey(MINE)]: { hide: ["Ready"], show: [] }, [board.hiddenKey(OTHER)]: { hide: [], show: [] } };
   const { b, cx, host, st } = await openBoard({ stored, files: { [MACHINE_FILE]: text } });
   assert.deepEqual(b.configErrors, [`${MACHINE_FILE}: „refreshMinutes“ ist eine Zahl ab 1`, `${MACHINE_FILE} gilt nicht: das Board zeigt views.json allein`]);
   assert.equal(host.files[MACHINE_FILE], text, "the migration writes nothing");
-  assert.deepEqual(["hidden:mine", "hidden:other"].map((k) => memory.has(k)), [true, true], "and keeps the entries");
+  assert.deepEqual([board.hiddenKey(MINE), board.hiddenKey(OTHER)].map((k) => memory.has(k)), [true, true], "and keeps the entries");
   assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
   const reads = host.open("gh").length;
   await click(b, cx, "show-opt-done");
@@ -4328,13 +4689,13 @@ test("UI: a reset with no file and nothing set writes no file", async () => {
 });
 
 test("UI: settings from before the contexts move into them at a read of views.json, written at once over the file as read and said; the board then applies them", async () => {
-  const old = `${JSON.stringify({ refreshMinutes: 9, sources: { github: { views: { mine: { hide: ["Ready"] } } } } })}\n`;
+  const old = `${JSON.stringify({ refreshMinutes: 9, sources: { github: { views: { prs: { name: "Reviews" } } } } })}\n`;
   const { b, host, st } = await bootBoard({ files: { [MACHINE_FILE]: old } });
-  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { refreshMinutes: 9, ...mineHidden(["Ready"]) });
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { refreshMinutes: 9, ...prsNamed("Reviews") });
   assert.ok(host.files[MACHINE_FILE].endsWith("}\n"));
-  assert.deepEqual(b.notice, { text: `${MACHINE_FILE} auf die Kontexte umgestellt: „sources.github.views.mine“ → „sources.github.contexts.sample-user.projects.mine“`, level: "info" });
-  assert.deepEqual([b.configErrors, b.config.refreshMinutes, [...st().hidden]], [[], 9, ["Ready"]]);
-  assert.equal(b.origin(MINE_HIDE), "dieser Rechner");
+  assert.deepEqual(b.notice, { text: `${MACHINE_FILE} auf die Kontexte umgestellt: „sources.github.views.prs“ → „sources.github.contexts.sample-user.prs“`, level: "info" });
+  assert.deepEqual([b.configErrors, b.config.refreshMinutes, b.tabs().at(-1).name], [[], 9, "Reviews"]);
+  assert.equal(b.origin(["sources", "github", "contexts", "sample-user", "prs", "name"]), "dieser Rechner");
   const again = await bootBoard({ files: { [MACHINE_FILE]: host.files[MACHINE_FILE] } });
   assert.equal(again.b.notice, null, "once: settings in the new form move nothing");
   const empty = await bootBoard({ files: { [MACHINE_FILE]: JSON.stringify({ refreshMinutes: 9, sources: { github: { views: {} } } }) } });
@@ -4344,12 +4705,12 @@ test("UI: settings from before the contexts move into them at a read of views.js
 
 test("UI: a move of the settings that is refused or fails is said with the next read trying again, and the file read again: a failed one leaves views.json alone in force, a refused one applies what the file now holds; what cannot move is named", async () => {
   const again = "das nächste Lesen (r) versucht es noch einmal";
-  const old = JSON.stringify({ sources: { github: { views: { mine: { hide: ["Ready"] } } } } });
+  const old = JSON.stringify({ sources: { github: { views: { prs: { name: "Reviews" } } } } });
   const failing = await bootBoard({ files: { [MACHINE_FILE]: old }, failWrite: new Error("Permission denied\nmore") });
   assert.deepEqual(failing.b.notice, { text: `${MACHINE_FILE} nicht auf die Kontexte umgestellt: Permission denied; ${again}`, level: "error" });
   assert.equal(failing.host.files[MACHINE_FILE], old);
   assert.deepEqual(failing.b.configErrors, [`${MACHINE_FILE} hat noch die Form vor den Kontexten und ist nicht umgestellt; ${again}`, `${MACHINE_FILE} gilt nicht: das Board zeigt views.json allein`]);
-  assert.deepEqual([...failing.st().hidden], ["Backlog", "Done"]);
+  assert.equal(failing.b.tabs().at(-1).name, "PRs");
   const { b, cx, host } = await bootBoard({ files: { [MACHINE_FILE]: "{}\n" } });
   host.files[MACHINE_FILE] = old;
   const outside = JSON.stringify({ refreshMinutes: 4 });
@@ -4373,23 +4734,23 @@ test("UI: a move of the settings that is refused or fails is said with the next 
   host.files[MACHINE_FILE] = old;
   await press(b, cx, "r");
   assert.equal(host.files[MACHINE_FILE], old, "the move waits for the writes before it");
-  host.files[MACHINE_FILE] = JSON.stringify({ refreshMinutes: 6, sources: { github: { views: { mine: { hide: [] } } } } });
+  host.files[MACHINE_FILE] = JSON.stringify({ refreshMinutes: 6, sources: { github: { views: { prs: { name: "R2" } } } } });
   release();
   assert.equal(await change, false, "the write before it finds the file changed");
   await settle();
   assert.deepEqual(b.notice, { text: `${MACHINE_FILE} nicht auf die Kontexte umgestellt: die Datei hat sich inzwischen geändert; ${again}`, level: "error" }, "a file changed since it was read");
-  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]).sources.github.views, { mine: { hide: [] } }, "is not written over");
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]).sources.github.views, { prs: { name: "R2" } }, "is not written over");
   await press(b, cx, "r");
-  assert.deepEqual([JSON.parse(host.files[MACHINE_FILE]), b.config.refreshMinutes], [{ refreshMinutes: 6, ...mineHidden([]) }, 6], "the next read moves it");
+  assert.deepEqual([JSON.parse(host.files[MACHINE_FILE]), b.config.refreshMinutes], [{ refreshMinutes: 6, ...prsNamed("R2") }, 6], "the next read moves it");
   const stuck = JSON.stringify({ sources: { github: { views: { gone: { hide: [] } } } } });
   const named = await bootBoard({ files: { [MACHINE_FILE]: stuck } });
   assert.equal(named.host.files[MACHINE_FILE], stuck, "nothing written");
   assert.equal(named.b.notice, null);
-  assert.equal(named.b.configErrors[0], `${MACHINE_FILE}: „sources.github.views.gone“ lässt sich nicht auf die Kontexte umstellen: views.json hat keinen Tab mit „id“ „gone“`);
+  assert.equal(named.b.configErrors[0], `${MACHINE_FILE}: „sources.github.views.gone“ lässt sich nicht auf die Kontexte umstellen: ${NO_PR_TAB("gone")}`);
 });
 
 test("UI: two reads in quick succession that both find settings from before the contexts: the first moves them and says so, the second finds them moved and applies them without a word", async () => {
-  const old = JSON.stringify({ refreshMinutes: 9, sources: { github: { views: { mine: { hide: ["Ready"] } } } } });
+  const old = JSON.stringify({ refreshMinutes: 9, sources: { github: { views: { prs: { name: "Reviews" } } } } });
   const { b, cx, host } = await bootBoard({ files: { [MACHINE_FILE]: "{}\n" } });
   host.files[MACHINE_FILE] = old;
   const writes = [];
@@ -4405,14 +4766,14 @@ test("UI: two reads in quick succession that both find settings from before the 
   cx.call((own) => (b.key(key("r"), own), b.key(key("r"), own)));
   await settle();
   assert.deepEqual([writes.length, said.length], [1, 1], "written and said once");
-  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { refreshMinutes: 4, ...mineHidden(["Ready"]) }, "what the file holds since is kept");
-  assert.deepEqual(b.notice, { text: `${MACHINE_FILE} auf die Kontexte umgestellt: „sources.github.views.mine“ → „sources.github.contexts.sample-user.projects.mine“`, level: "info" });
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { refreshMinutes: 4, ...prsNamed("Reviews") }, "what the file holds since is kept");
+  assert.deepEqual(b.notice, { text: `${MACHINE_FILE} auf die Kontexte umgestellt: „sources.github.views.prs“ → „sources.github.contexts.sample-user.prs“`, level: "info" });
   assert.deepEqual([b.configErrors, b.config.refreshMinutes], [[], 4], "and applies");
 });
 
 test("UI: a move of the settings that finds the file no valid JSON since it was read is refused and said, writes nothing, and the file read again names the problem", async () => {
   const again = "das nächste Lesen (r) versucht es noch einmal";
-  const old = JSON.stringify({ sources: { github: { views: { mine: { hide: ["Ready"] } } } } });
+  const old = JSON.stringify({ sources: { github: { views: { prs: { name: "Reviews" } } } } });
   const { b, cx, host } = await bootBoard({ files: { [MACHINE_FILE]: "{}\n" } });
   host.files[MACHINE_FILE] = old;
   const read = host.readTextFile;
@@ -4456,7 +4817,7 @@ test("UI: the command menu's „Spalte ausblenden“ hides the selected column; 
 
 test("UI: H/L and the status menu move a card into a hidden column, and the notice says it is hidden; counts leave it out", async () => {
   const { b, cx, host, st } = await openBoard();
-  const tab = () => texts(byId(b.render(), "tab-github:mine")).at(-1);
+  const tab = () => texts(byId(b.render(), `tab-${MINE_TAB}`)).at(-1);
   assert.equal(tab(), "6");
   await press(b, cx, "h", { char: "H", modifiers: { shift: true } });
   assert.equal(board.findCard(st().data, "PVTI_rec4").column.name, "Backlog");
@@ -4552,7 +4913,7 @@ test("UI: the command menu's „Spalten…“ opens the column menu: every colum
 });
 
 test("UI: the column menu says the column without status is always shown, and leaves it so", async () => {
-  const { b, cx, st } = await openBoard({ answer: fixture("github-board-cases.json") });
+  const { b, cx, st } = await openBoard({ fixture: "github-board-cases.json" });
   await runCommand(b, cx, "Spalten…");
   assert.equal(b.modal?.kind, "columns");
   assert.deepEqual(texts(byId(b.render(), "column-0")).filter(Boolean).at(-1), "immer gezeigt");
@@ -4690,20 +5051,21 @@ test("UI: r with views.json unchanged, or after an invalid one was fixed, keeps 
   }
 });
 
-test("UI: a write under way while r makes its view a list leaves nothing open", async () => {
-  const { b, cx, host } = await openBoard({ stored: { [`tab:${GITHUB_CONTEXT}`]: "github:mine" } });
+// GitHub's answer for project 7 once its view 1 is a table.
+const mineAsTable = () => ok(JSON.stringify(projectJson({ title: "Mine", views: [{ layout: "table", column: null }] })));
+
+test("UI: a write under way while r finds its view a table now leaves nothing open", async () => {
+  const { b, cx, host } = await openBoard({ stored: { [`tab:${GITHUB_CONTEXT}`]: MINE_TAB } });
   await press(b, cx, "l", shiftL);
-  const config = JSON.parse(testConfig());
-  mineAsList(config);
-  host.config = JSON.stringify(config);
+  host.projectAnswer = (number) => (number === 7 ? mineAsTable() : ok(JSON.stringify(defaultProject(number))));
   await press(b, cx, "r");
-  assert.ok(texts(b.render()).includes("In progress"), "until the list is read, the board's data is drawn as a board");
-  await host.answer("gh", ok(fixture("github-list.json")), "search(");
+  assert.deepEqual([board.viewKind(b.view()), host.open("gh").map((c) => c.args.some((a) => a.includes("items(first")))], ["github table", [false]], "no items read for a table: only the move is open");
+  assert.ok(texts(b.render()).includes("„Mine“: Tabellenansicht folgt"));
   await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s", "no follow-up promised");
-  assert.deepEqual(b.views.mine.unclear, []);
+  assert.deepEqual(b.views[MINE].unclear, []);
   assert.equal(host.open("gh").length, 0, "no refresh of a board that is gone");
-  assert.equal(b.views.mine.error, null);
+  assert.equal(b.views[MINE].error, null);
 });
 
 test("UI: a write under way while r removes its view promises no follow-up", async () => {
@@ -4713,7 +5075,7 @@ test("UI: a write under way while r removes its view promises no follow-up", asy
   await press(b, cx, "r");
   await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s");
-  assert.deepEqual(b.views.mine.unclear, []);
+  assert.deepEqual(b.views[MINE].unclear, []);
 });
 
 test("UI: a write that ends unclear after r read an invalid views.json is told once views.json is fixed", async () => {
@@ -4784,27 +5146,26 @@ test("UI: a later write refused while views.json is invalid starts no refresh", 
 
 test("UI: open outcomes of a view that is no board any more are dropped without a word", async () => {
   const { b, cx } = await openBoard();
-  const st = b.views.mine;
+  const st = b.views[MINE];
   st.data = board.parseGithubList(json("github-list.json"), listView());
   st.unclear = [{ key: "PVTI_rec4", label: "tender#3004", kind: "move", to: { id: "opt-in-progress", name: "In progress" }, at: 0 }];
   b.notice = null;
-  b.settleUnclear(board.githubViews(b.config)[0], 1, st.data, cx);
+  b.settleUnclear(b.viewById(MINE), 1, st.data, cx);
   assert.deepEqual([st.unclear, b.notice], [[], null]);
 });
 
-test("UI: r drops the open outcomes of a view that became a list", async () => {
-  const { b, cx, host } = await openBoard({ stored: { [`tab:${GITHUB_CONTEXT}`]: "github:mine" } });
+test("UI: r drops the open outcomes of a view that GitHub made a table", async () => {
+  const { b, cx, host } = await openBoard({ stored: { [`tab:${GITHUB_CONTEXT}`]: MINE_TAB } });
   await press(b, cx, "l", shiftL);
   await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
-  const config = JSON.parse(testConfig());
-  mineAsList(config);
-  host.config = JSON.stringify(config);
+  assert.equal(b.views[MINE].unclear.length, 1);
+  await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, "items(first");
+  assert.equal(b.views[MINE].unclear.length, 1, "the refresh after it failed: still open");
+  host.projectAnswer = (number) => (number === 7 ? mineAsTable() : ok(JSON.stringify(defaultProject(number))));
   await press(b, cx, "r");
-  assert.deepEqual(b.views.mine.unclear, []);
-  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
-  await host.answer("gh", ok(fixture("github-list.json")), "search(");
-  assert.equal(b.views.mine.error, null);
-  assert.equal(b.views.mine.data.shape, "prs");
+  assert.deepEqual([b.views[MINE].unclear, b.views[MINE].error, b.views[MINE].data.shape, host.open("gh").length], [[], null, "placeholder", 0]);
+  await cx.fire();
+  assert.notEqual(JSON.parse(memory.get(board.savedKey(MINE)) ?? "{}").data?.shape, "placeholder", "a placeholder is no data to keep");
 });
 
 test("UI: a refresh settles the outcomes that came before it started and keeps the later ones for the next", async () => {
@@ -4812,7 +5173,7 @@ test("UI: a refresh settles the outcomes that came before it started and keeps t
   await press(b, cx, "l", shiftL);
   await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   advance(5);
-  b.views.mine.sel = { col: 2, key: "PVTI_rec1" };
+  b.views[MINE].sel = { col: 2, key: "PVTI_rec1" };
   await press(b, cx, "l", shiftL);
   await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   await host.answer("gh", ok(fixture("github-board.json")), "items(first");
@@ -4844,10 +5205,10 @@ test("UI: r forgets the open outcomes of views no longer in views.json", async (
   const { b, cx, host } = await openBoard();
   await press(b, cx, "l", shiftL);
   await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
-  assert.equal(b.views.mine.unclear.length, 1);
+  assert.equal(b.views[MINE].unclear.length, 1);
   host.config = withoutMine();
   await press(b, cx, "r");
-  assert.deepEqual(b.views.mine.unclear, []);
+  assert.deepEqual(b.views[MINE].unclear, []);
 });
 test("UI: a refresh during a write keeps the move until the write is confirmed", async () => {
   const { b, cx, host, st } = await openBoard();
@@ -4861,12 +5222,13 @@ test("UI: a refresh during a write keeps the move until the write is confirmed",
   assert.equal(st().moves.length, 1, "kept until a refresh starts after the confirmation");
 });
 
-test("UI: the refresh that follows a running one reads the view from the config as it is now", async () => {
+test("UI: the refresh that follows a running one reads the view as GitHub has it now", async () => {
   const { b, cx, host } = await openBoard();
   await press(b, cx, "r");
-  host.config = testConfig({ filter: "assignee:@me label:urgent" });
+  host.projectAnswer = (number) => ok(JSON.stringify(projectJson({ number, views: [{ filter: "assignee:@me label:urgent" }] })));
   await press(b, cx, "r");
   await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  await settle();
   const follow = host.open("gh").find((c) => c.args.some((a) => a.startsWith("filter=")));
   assert.ok(follow.args.includes('filter=assignee:@me label:urgent -status:"Backlog","Done"'));
 });
@@ -5508,7 +5870,7 @@ test("UI: a card whose repo has no checkout names where to set one", async () =>
 });
 
 test("UI: Enter on a draft says it needs an issue first", async () => {
-  const { b, cx, st } = await openBoard({ answer: fixture("github-board-cases.json") });
+  const { b, cx, st } = await openBoard({ fixture: "github-board-cases.json" });
   st().sel = { col: 0, key: "PVTI_case2" };
   await press(b, cx, "enter");
   await press(b, cx, "enter");
@@ -5639,14 +6001,14 @@ test("UI: a program the shell no longer finds is not installed at once; one it f
   b.refresh(b.view(), cx);
   await settle();
   await host.answer("gh", notRun(found("gh")));
-  assert.equal(b.views.mine.error, "gh ist nicht installiert");
+  assert.equal(b.views[MINE].error, "gh ist nicht installiert");
   assert.equal(host.open("gh").length, 0, "not run again");
   host.which = found;
   b.refresh(b.view(), cx);
   await settle();
   await host.answer("gh", notRun(found("gh")));
   await host.answer("gh", notRun(found("gh")));
-  assert.equal(b.views.mine.error, "gh ließ sich nicht starten: cannot run /opt/fake/bin/gh: No such file or directory (os error 2)");
+  assert.equal(b.views[MINE].error, "gh ließ sich nicht starten: cannot run /opt/fake/bin/gh: No such file or directory (os error 2)");
 });
 
 test("UI: a move whose lookup fails is a plain refusal: the card goes back, nothing is unclear", async () => {
@@ -5732,13 +6094,13 @@ test("UI: no sidebar: the content fills the width under the top bar, and it and 
 test("UI: the board, the line naming its hidden columns and the detail beside it start at the top", async () => {
   const { b, cx } = await openBoard();
   await press(b, cx, "enter");
-  assert.equal(b.views.mine.detail, true);
+  assert.equal(b.views[MINE].detail, true);
   const root = b.render();
   const detail = pathTo(root, "SITZUNG");
   assert.ok(detail);
   assert.deepEqual(centring(detail), [], "no row centres the detail");
   // A column's name sits in its head, a centring row of its own.
-  const name = b.views.mine.data.columns.find((c) => !c.hidden).name;
+  const name = b.views[MINE].data.columns.find((c) => !c.hidden).name;
   const column = pathTo(root, (s) => s === name);
   assert.ok(column, name);
   assert.deepEqual(centring(column.slice(0, -2)), [], "no row centres the columns");
@@ -5820,7 +6182,7 @@ test("UI: the top bar has two rows, the contexts and the shown context's tabs ab
   assert.equal(bar.kids.length, 2);
   const [nav, tools] = bar.kids;
   assert.deepEqual(nav.kids.map((k) => k.with.id?.[0]), ["context", "tabs"]);
-  assert.deepEqual(tools.kids.map((k) => k.with.id?.[0]).filter(Boolean), ["team-view", "mine", "filter", "refresh"]);
+  assert.deepEqual(tools.kids.map((k) => k.with.id?.[0]).filter(Boolean), ["tab-view", "mine", "filter", "refresh"]);
   assert.deepEqual(byId(root, "context").kids.map((k) => [k.with.id[0], texts(k).join("")]), [
     ["context-source-github", "GitHub"], [`context-${GITHUB_CONTEXT}`, "sample-user"], ["context-rule-azure", ""], ["context-source-azure", "Azure"], [`context-${AZURE_CONTEXT}`, "Example Project"],
   ], "each source's name once before its contexts, a rule between two sources");
@@ -5859,11 +6221,11 @@ test("UI: } and { step through the contexts, g and a digit, a click on a context
   await press(b, cx, "g");
   await press(b, cx, "x");
   await press(b, cx, "1");
-  assert.deepEqual(shown(), [GITHUB_CONTEXT, "github:mine"], "a g with another key between is no g: the digit picks a tab");
+  assert.deepEqual(shown(), [GITHUB_CONTEXT, MINE_TAB], "a g with another key between is no g: the digit picks a tab");
   await click(b, cx, `context-${AZURE_CONTEXT}`);
   assert.deepEqual(shown(), [AZURE_CONTEXT, "azure:prs:Example Project"], "a click on the context's name");
   await runCommand(b, cx, "Kontext 1: sample-user");
-  assert.deepEqual(shown(), [GITHUB_CONTEXT, "github:mine"], "its menu entry");
+  assert.deepEqual(shown(), [GITHUB_CONTEXT, MINE_TAB], "its menu entry");
   assert.deepEqual(JSON.parse(memory.get("context")), GITHUB_CONTEXT, "remembered");
 });
 
@@ -5896,7 +6258,7 @@ test("UI: { and } also as AltGr types them, with Control and Alt, not with Contr
   assert.equal(one.b.context().id, GITHUB_CONTEXT);
   await press(one.b, one.cx, "0", altGr("}"));
   await press(one.b, one.cx, "7", altGr("{"));
-  assert.deepEqual([one.b.context().id, one.b.tab().id], [GITHUB_CONTEXT, "github:mine"]);
+  assert.deepEqual([one.b.context().id, one.b.tab().id], [GITHUB_CONTEXT, MINE_TAB]);
   assert.equal(hintKeys(one.b).includes("{ }"), false);
   const entries = await openMenu(one.b, one.cx);
   assert.deepEqual(entries.filter(([name]) => /Kontext/.test(name)), [], "no context to switch to");
@@ -5913,14 +6275,14 @@ test("UI: a new board opens on the context, tab and team view shown last; ones v
   await settle();
   assert.deepEqual([again.context().id, again.tab().id], [AZURE_CONTEXT, "azure:prs:Example Project"]);
   await press(again, cx2, "1");
-  assert.equal(again.teamViewOf(again.tab()), "backlog");
+  assert.equal(again.tabViewOf(again.tab()), "backlog");
   assert.deepEqual(host.open("gh"), [], "an Azure tab reads nothing");
   memory.set(`tab:${AZURE_CONTEXT}`, JSON.stringify("azure:team:Gone/Team"));
   memory.set("teamView:azure:team:Example Project/Example Team", JSON.stringify("kanban"));
   const third = new board.default();
   third.init({}, fakeCx());
   await settle();
-  assert.deepEqual([third.tab().id, third.teamViewOf(third.tab())], ["azure:team:Example Project/Example Team", "sprint"]);
+  assert.deepEqual([third.tab().id, third.tabViewOf(third.tab())], ["azure:team:Example Project/Example Team", "sprint"]);
 });
 
 test("UI: a board that kept the old shown view alone opens on that GitHub view, once; later choices stay", async () => {
@@ -5928,19 +6290,19 @@ test("UI: a board that kept the old shown view alone opens on that GitHub view, 
   assert.deepEqual([b.context().id, b.tab().id], [GITHUB_CONTEXT, "github:prs"]);
   await host.answer("gh", ok(fixture("github-list.json")));
   assert.deepEqual(["view", "source", "tab:github"].map((k) => memory.has(k)), [false, false, false], "migrated once");
-  const { b: kept } = await bootBoard({ stored: { view: "prs", source: "azure", "tab:github": "github:other" } });
+  const { b: kept } = await bootBoard({ stored: { view: "prs", source: "azure", "tab:github": OTHER_TAB } });
   assert.equal(kept.context().id, AZURE_CONTEXT, "a source chosen since stays");
-  assert.equal(JSON.parse(memory.get(`tab:${GITHUB_CONTEXT}`)), "github:other");
+  assert.equal(JSON.parse(memory.get(`tab:${GITHUB_CONTEXT}`)), OTHER_TAB);
 });
 
 test("UI: a board that kept a source and its tabs opens on their context and tab, which it keeps from then on; the old entries go", async () => {
-  const stored = { source: "azure", "tab:azure": "azure:prs:Example Project", "tab:github": "github:other" };
+  const stored = { source: "azure", "tab:azure": "azure:prs:Example Project", "tab:github": OTHER_TAB };
   const { b, cx } = await bootBoard({ stored });
   assert.deepEqual([b.context().id, b.tab().id], [AZURE_CONTEXT, "azure:prs:Example Project"]);
   assert.deepEqual(["source", "tab:azure", "tab:github"].map((k) => memory.has(k)), [false, false, false]);
-  assert.deepEqual([memory.get("context"), memory.get(`tab:${AZURE_CONTEXT}`), memory.get(`tab:${GITHUB_CONTEXT}`)].map((v) => JSON.parse(v)), [AZURE_CONTEXT, "azure:prs:Example Project", "github:other"]);
+  assert.deepEqual([memory.get("context"), memory.get(`tab:${AZURE_CONTEXT}`), memory.get(`tab:${GITHUB_CONTEXT}`)].map((v) => JSON.parse(v)), [AZURE_CONTEXT, "azure:prs:Example Project", OTHER_TAB]);
   await press(b, cx, "{");
-  assert.equal(b.tab().id, "github:other", "the GitHub context's tab, as the source kept it");
+  assert.equal(b.tab().id, OTHER_TAB, "the GitHub context's tab, as the source kept it");
   const broken = JSON.parse(testConfig());
   broken.refreshMinutes = 0;
   const waiting = await bootBoard({ config: JSON.stringify(broken), stored: { ...stored, "tab:azure": "azure:team:Example Project/Gone Team" } });
@@ -5983,11 +6345,11 @@ test("UI: an Azure team tab shows its Sprint or its Backlog, and v switches them
   assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "{ }", "v", "n", "s", "a", "Enter", "o", "m", "r", ":", "Esc"], "the Backlog's keys");
   await press(b, cx, "v");
   assert.equal(layout(), "sprint");
-  await click(b, cx, "team-view-backlog");
+  await click(b, cx, "tab-view-backlog");
   assert.equal(layout(), "backlog", "a click on the switch");
   await press(b, cx, "2");
   assert.ok(shown().includes("PR-Ansicht folgt"));
-  assert.equal(byId(b.render(), "team-view"), null, "no view switch on the PRs tab");
+  assert.equal(byId(b.render(), "tab-view"), null, "no view switch on the PRs tab");
   assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "{ }", "m", "r", ":", "Esc"]);
   await press(b, cx, "v");
   assert.ok(shown().includes("PR-Ansicht folgt"), "v does nothing there");
@@ -6002,13 +6364,13 @@ test("UI: a team with one view shows it without a switch; with one context, no k
   delete config.sources.github;
   const { b, cx } = await bootBoard({ config: JSON.stringify(config), stored: {} });
   assert.equal(b.view().layout, "backlog");
-  assert.equal(byId(b.render(), "team-view"), null);
+  assert.equal(byId(b.render(), "tab-view"), null);
   assert.deepEqual(hintKeys(b), ["1 2 3 [ ]", "n", "s", "a", "Enter", "o", "m", "r", ":", "Esc"]);
   const entries = await openMenu(b, cx);
   assert.deepEqual(entries.filter(([name]) => /Kontext|Ansicht wechseln/.test(name)), []);
   await press(b, cx, "escape");
   await press(b, cx, "v");
-  assert.deepEqual([b.context().source, b.teamViewOf(b.tab())], ["azure", "backlog"]);
+  assert.deepEqual([b.context().source, b.tabViewOf(b.tab())], ["azure", "backlog"]);
   for (const k of ["}", "{"]) await press(b, cx, k);
   await press(b, cx, "g");
   await press(b, cx, "1");
@@ -6023,7 +6385,7 @@ test("UI: an Azure view drawn as a board has what the board shape and the start 
   const root = b.render();
   assert.ok(texts(root).includes("In Progress"), "the board's columns");
   assert.equal(b.shape(view), board.SHAPES.board, "the data's shape wins over the placeholder");
-  b.state(view.id).data = { ...typedBoard(), limited: true, total: 9, read: 5 };
+  b.state(view.id).data = { ...typedBoard(), limited: true, total: 9, count: 5 };
   assert.ok(texts(b.render()).some((s) => s.startsWith("Nur die ersten 5 von 9 Einträgen")), "the cut names how many items the data holds; the view has no limit");
 });
 
@@ -6033,8 +6395,8 @@ test("UI: switching a team's view loads the view now shown, where its source rea
   b.sources.azure.views.backlog = { load: async (view) => (loads.push(view.id), { data: { shape: "prs", sections: [], viewer: null }, warnings: [] }) };
   await press(b, cx, "v");
   assert.deepEqual(loads, ["azure:team:Example Project/Example Team:backlog"]);
-  await click(b, cx, "team-view-sprint");
-  await click(b, cx, "team-view-backlog");
+  await click(b, cx, "tab-view-sprint");
+  await click(b, cx, "tab-view-backlog");
   assert.equal(loads.length, 1, "not again while it is fresh");
 });
 
@@ -6062,16 +6424,16 @@ test("UI: Alt+] and Control+Alt+[ switch tabs; Control+] and a logged Alt with a
   await settle();
   assert.deepEqual([b.context().id, cx.stopped], [GITHUB_CONTEXT, 0], "the logged Alt with a letter: not taken");
   await press(b, cx, "]", { modifiers: { alt: true } });
-  assert.equal(b.tab().id, "github:other", "Alt+]");
+  assert.equal(b.tab().id, OTHER_TAB, "Alt+]");
   await press(b, cx, "[", { modifiers: { ...LOGGED.ctrlAlt9.modifiers } });
-  assert.equal(b.tab().id, "github:mine", "Control+Alt+[");
+  assert.equal(b.tab().id, MINE_TAB, "Control+Alt+[");
   const stopped = cx.stopped;
   await press(b, cx, "]", { modifiers: { control: true } });
-  assert.deepEqual([b.tab().id, cx.stopped], ["github:mine", stopped], "Control+]");
+  assert.deepEqual([b.tab().id, cx.stopped], [MINE_TAB, stopped], "Control+]");
 });
 
 test("the GitHub tab id, a team's switch and its hint: githubTabId, hasViewSwitch, viewSwitchHint", () => {
-  assert.equal(board.githubTabId("mine"), "github:mine");
+  assert.equal(board.githubTabId("prs"), "github:prs");
   const team = azureTeam();
   assert.deepEqual([board.hasViewSwitch(team), board.viewSwitchHint(team)], [true, "Sprint/Backlog"]);
   assert.deepEqual([board.hasViewSwitch({ ...team, views: ["backlog"] }), board.hasViewSwitch({ kind: "prs" }), board.hasViewSwitch(null)], [false, false, false]);
@@ -6082,7 +6444,7 @@ test("UI: while one types in the filter, m, :, v and digits are text, not keys",
   await press(b, cx, "/");
   assert.equal(b.filtering, true);
   for (const k of ["m", ":", "v", "2", "]"]) await press(b, cx, k);
-  assert.deepEqual([b.mine, b.modal, b.teamViewOf(b.tab()), b.tab().kind], [false, null, "sprint", "team"]);
+  assert.deepEqual([b.mine, b.modal, b.tabViewOf(b.tab()), b.tab().kind], [false, null, "sprint", "team"]);
   await press(b, cx, "escape");
   await press(b, cx, "m");
   assert.equal(b.mine, true, "after Esc they are keys again");
@@ -6277,7 +6639,7 @@ test("UI: a card dragged onto another column moves there, chosen, without openin
 });
 
 test("UI: a card dragged onto a column it may not go to stays there, chosen in its own column", async () => {
-  const { b, cx, st, host } = await openBoard({ answer: fixture("github-board-cases.json") });
+  const { b, cx, st, host } = await openBoard({ fixture: "github-board-cases.json" });
   const ready = b.navColumns(b.view()).findIndex((c) => c.name === "Ready");
   assert.equal(b.navColumns(b.view())[0].name, "Ohne Status");
   await mouse(b, cx, "card-PVTI_case3", "on_mouse_down");
@@ -6324,8 +6686,8 @@ test("UI: clicks on a context, a tab and „nur meine“ do what their keys do, 
   await click(b, cx, "tab-azure:prs:Example Project");
   assert.equal(b.tab().kind, "prs");
   await click(b, cx, `context-${GITHUB_CONTEXT}`);
-  await click(b, cx, "tab-github:other");
-  assert.equal(b.tab().id, "github:other");
+  await click(b, cx, `tab-${OTHER_TAB}`);
+  assert.equal(b.tab().id, OTHER_TAB);
   await host.answer("gh", ok(fixture("github-board.json")));
   await click(b, cx, "mine");
   assert.equal(b.mine, true);
@@ -6333,8 +6695,8 @@ test("UI: clicks on a context, a tab and „nur meine“ do what their keys do, 
   assert.equal(b.modal?.kind, "status");
   await click(b, cx, "mine");
   await click(b, cx, `context-${AZURE_CONTEXT}`);
-  await click(b, cx, "tab-github:mine");
-  assert.deepEqual([b.mine, b.context().id, b.tab().id], [true, GITHUB_CONTEXT, "github:other"], "the dialog keeps them");
+  await click(b, cx, `tab-${MINE_TAB}`);
+  assert.deepEqual([b.mine, b.context().id, b.tab().id], [true, GITHUB_CONTEXT, OTHER_TAB], "the dialog keeps them");
 });
 
 test("UI: „nur meine“ on stands on the theme's selected as the chosen tab does, with the accent border of its own, not as a primary button; its text, weight and padding stay, so its size never changes", async () => {
@@ -6359,7 +6721,7 @@ test("UI: „nur meine“ on stands on the theme's selected as the chosen tab do
   assert.deepEqual([on.text, on.colors], [["nur meine"], ["#selected", "#accent", "#foreground", "#hover"]], "on: no ✓, the chosen tab's ground");
   assert.deepEqual(on.size, off.size, "the same text size, padding, border and weight on and off");
   assert.equal(on.size.some(([name]) => /^font_/.test(name)), false, "no weight of its own");
-  assert.equal(byId(b.render(), "tab-github:mine").with.bg[0], "#selected", "as the chosen tab");
+  assert.equal(byId(b.render(), `tab-${MINE_TAB}`).with.bg[0], "#selected", "as the chosen tab");
 });
 
 test("UI: m shows only one's own items on a board and a list, without reading again, and says so in the top bar", async () => {
@@ -6420,7 +6782,7 @@ test("a board pull request asking only for one's review counts as one's own; an 
   node.content.assignees.nodes = [];
   node.content.author = { login: "someone-else" };
   node.content.reviewRequests.nodes = [null, { requestedReviewer: { login: "sample-user" } }];
-  const pr = board.findCard(board.parseGithubBoard(data, githubView(), HIDDEN), "PVTI_case1").card;
+  const pr = board.findCard(board.parseGithubBoard(data, githubView(), HIDDEN, [], planOf()), "PVTI_case1").card;
   assert.deepEqual([pr.assignees, pr.reviewers, board.isMine(pr, "sample-user")], [[], ["sample-user"], true]);
 });
 
@@ -6438,7 +6800,7 @@ test("„nur meine“ counts a search of one's own whole, and a pull request on 
   const issue = cases.columns.flatMap((c) => c.cards).find((c) => c.kind === "issue" && c.author === null);
   assert.ok(issue, "an issue whose author is gone");
   assert.equal(board.isMine(issue, "sample-user"), issue.assignees.includes("sample-user"));
-  assert.match(board.githubBoardArgs(githubView(), HIDDEN).find((a) => a.startsWith("query=")), /PullRequest \{[^}]*\}[^]*?reviewRequests\(first: 20\)/);
+  assert.match(board.githubBoardArgs(githubView(), planOf(), HIDDEN).find((a) => a.startsWith("query=")), /PullRequest \{[^}]*\}[^]*?reviewRequests\(first: 20\)/);
 });
 
 test("UI: what the filter or „nur meine“ hides is said: in the column, its count and the tab's", async () => {
@@ -6447,7 +6809,7 @@ test("UI: what the filter or „nur meine“ hides is said: in the column, its c
     if (n.fieldValueByName.name === "In progress") n.content.assignees.nodes = [{ login: "someone-else" }];
   }
   const { b, cx } = await openBoard({ answer: JSON.stringify(data) });
-  const tab = () => texts(byId(b.render(), "tab-github:mine"));
+  const tab = () => texts(byId(b.render(), `tab-${MINE_TAB}`));
   const column = (name) => texts(byId(b.render(), `col-${b.navColumns(b.view()).findIndex((c) => c.name === name)}`));
   assert.deepEqual([tab().at(-1), column("In progress")[1]], ["6", "3"]);
   await press(b, cx, "m");
@@ -6517,13 +6879,11 @@ test("UI: a column operation on a view without columns is said; a reload that fi
   await press(b, cx, "1");
   await press(b, cx, "s");
   assert.equal(b.modal?.kind, "status");
-  const config = JSON.parse(testConfig());
-  mineAsList(config);
-  host.config = JSON.stringify(config);
+  host.projectAnswer = (number) => (number === 7 ? mineAsTable() : ok(JSON.stringify(defaultProject(number))));
   b.reload(cx);
   await settle();
-  assert.equal(b.modal, null, "the status menu closed: its view is a list now");
-  host.config = testConfig();
+  assert.equal(b.modal, null, "the status menu closed: its view is a table now");
+  host.projectAnswer = (number) => ok(JSON.stringify(defaultProject(number)));
   b.reload(cx);
   await settle();
   await host.answer("gh", ok(fixture("github-board.json")));
@@ -6572,7 +6932,7 @@ test("UI: a prs row draws without checks or author; a draft mark is its own cell
   assert.deepEqual(widths(plain), widths(draft), "the same cells on a draft row and on another");
   assert.equal(texts(byId(b.render(), `row-${plain.key}`)).includes("Entwurf"), false);
   assert.equal(texts(b.render()).some((s) => s.includes("undefined")), false);
-  assert.equal(board.parseGithubBoard(json("github-board.json"), { ...githubView(), limit: 3 }, HIDDEN).read, 6, "the cut names how many items the answer holds, not the limit");
+  assert.equal(board.parseGithubBoard(json("github-board.json"), { ...githubView(), limit: 3 }, HIDDEN, [], planOf()).count, 6, "the cut names how many items the answer holds, not the limit");
 });
 
 test("every view gets its own default fields; the Board imports no shape module but the index", () => {
@@ -6611,7 +6971,7 @@ const ORG_FOREIGN = "Other-Owner/lib";
 test("a GitHub context's PR tab holds the pull requests of its owner's repos and of foreign repos, not those of another context's repos, owners in any case; its searches run as written, each pull request once", () => {
   const { config, errors } = board.readConfig(JSON.stringify(twoContexts()));
   assert.deepEqual(errors, []);
-  const [user, org] = ["prs", "org-prs"].map((id) => board.githubViews(config).find((v) => v.id === id));
+  const [user, org] = ["prs", "org-prs"].map((id) => githubTabs(config).find((v) => v.id === id));
   assert.deepEqual([user.owners, org.owners], [{ tabOwner: "sample-user", otherOwners: ["sample-org"] }, { tabOwner: "sample-org", otherOwners: ["sample-user"] }], "folded");
   const rows = (view) => board.parseGithubList(json("github-list-contexts.json"), view).sections.map((s) => s.rows.map((r) => [board.itemKey(r), r.foreign === true]));
   assert.deepEqual(rows(user), [
@@ -6662,7 +7022,7 @@ test("two GitHub contexts whose owners differ only in case are one owner: the se
   config.sources.github.contexts[1].owner = "SAMPLE-USER";
   const read = board.readConfig(JSON.stringify(config));
   assert.deepEqual(read.errors, ["GitHub-Kontext 2 („SAMPLE-USER“): „owner“ SAMPLE-USER gibt es schon als „sample-user“"]);
-  const user = board.githubViews(read.config).find((v) => v.id === "prs");
+  const user = githubTabs(read.config).find((v) => v.id === "prs");
   assert.deepEqual(user.owners, { tabOwner: "sample-user", otherOwners: [] }, "its own owner is none of its others");
   const keys = board.parseGithubList(json("github-list-contexts.json"), user).sections.flatMap((s) => s.rows.map((r) => board.itemKey(r)));
   assert.deepEqual(keys.filter((k) => !k.includes("/")), ["tender#10", "tender#11", "atlas#40"]);
@@ -6670,7 +7030,7 @@ test("two GitHub contexts whose owners differ only in case are one owner: the se
 
 test("the PR tabs leave out the repos of the contexts the board reads with a PR tab only: where a context has none, or one with problems, its repos' pull requests are foreign in the others", () => {
   const cases = [
-    ["no PR tab", (c) => Object.assign(c, { prs: undefined, projects: [{ id: "org-board", name: "Org", number: 1 }] })],
+    ["no PR tab", (c) => Object.assign(c, { prs: undefined, projects: [{ number: 1 }] })],
     ["a PR tab with problems", (c) => (c.prs.hideRepos = ["api"])],
   ];
   for (const [why, change] of cases) {
@@ -6678,7 +7038,7 @@ test("the PR tabs leave out the repos of the contexts the board reads with a PR 
     change(config.sources.github.contexts[1]);
     const read = board.readConfig(JSON.stringify(config));
     assert.equal(read.errors.length, 1, why);
-    const user = board.githubViews(read.config).find((v) => v.id === "prs");
+    const user = githubTabs(read.config).find((v) => v.id === "prs");
     assert.deepEqual(user.owners.otherOwners, [], why);
     const foreign = board.parseGithubList(json("github-list-contexts.json"), user).sections.flatMap((s) => s.rows.filter((r) => r.foreign).map((r) => board.itemKey(r)));
     assert.deepEqual(foreign.filter((k) => /sample-org/i.test(k)), ["sample-org/api#20", "SAMPLE-ORG/web#21"], why);
@@ -6691,14 +7051,14 @@ test("a context's PR tab with its own sections or limit has the older form: the 
   config.sources.github.contexts[1].prs = { id: "org-prs", sections: [{ name: "S", query: "is:pr" }], limit: 5 };
   const read = board.readConfig(JSON.stringify(config));
   assert.deepEqual(read.errors, [moved(2, "Sample-Org", "sections"), moved(2, "Sample-Org", "limit")]);
-  assert.deepEqual(board.githubViews(read.config).map((v) => v.id), ["mine", "other", "prs"]);
+  assert.deepEqual(githubTabs(read.config).map((v) => v.id), [MINE_TAB, OTHER_TAB, "prs"]);
   const here = board.readConfig(testConfig(), settingsRead({ sources: { github: { contexts: { "sample-user": { prs: { sections: [{ name: "X", query: "is:pr" }] } } } } } }));
   assert.deepEqual([here.settings, here.errors], [null, [`settings.json: ${moved(1, "sample-user", "sections")}`, ALONE]], "named, not applied");
   const none = JSON.parse(testConfig());
   delete none.sources.github.prs;
   const without = board.readConfig(JSON.stringify(none));
-  assert.deepEqual([without.errors, board.githubViews(without.config).map((v) => v.id)],
-    [["„sources.github.prs“ fehlt: die Abschnitte der PR-Tabs aller Kontexte, { \"sections\": [{ \"name\", \"query\" }] }"], ["mine", "other"]]);
+  assert.deepEqual([without.errors, githubTabs(without.config).map((v) => v.id)],
+    [["„sources.github.prs“ fehlt: die Abschnitte der PR-Tabs aller Kontexte, { \"sections\": [{ \"name\", \"query\" }] }"], [MINE_TAB, OTHER_TAB]]);
   const odd = JSON.parse(testConfig());
   odd.sources.github.prs.colour = 1;
   assert.deepEqual(board.readConfig(JSON.stringify(odd)).errors, ["„sources.github.prs.colour“ gibt es nicht"]);
@@ -6707,7 +7067,7 @@ test("a context's PR tab with its own sections or limit has the older form: the 
 });
 
 test("the errors GitHub sent at a pull request of another context's repo stay warnings of the list: no row shows them", () => {
-  const user = board.githubViews(board.readConfig(JSON.stringify(twoContexts())).config).find((v) => v.id === "prs");
+  const user = githubTabs(board.readConfig(JSON.stringify(twoContexts())).config).find((v) => v.id === "prs");
   const errors = [{ path: ["s0", "nodes", 1, "reviews"], message: "Reviews of api are hidden" }, { path: ["s0", "nodes", 0, "reviews"], message: "Reviews of tender are hidden" }];
   assert.deepEqual(board.parseGithubList(json("github-list-contexts.json"), user, errors).warnings, ["Reviews of api are hidden"]);
 });
@@ -6970,12 +7330,226 @@ test("UI: R opens the repo menu: the PR tab's repos as its „Repos:“ line nam
 });
 
 test("UI: „nur meine“ over data without the viewer's login shows nothing and says why", async () => {
-  const data = json("github-board.json");
-  delete data.data.viewer;
-  const { b, cx } = await openBoard({ answer: JSON.stringify(data) });
+  const project = projectJson();
+  delete project.data.viewer;
+  const { b, cx } = await openBoard({ projectAnswer: () => ok(JSON.stringify(project)) });
   await press(b, cx, "m");
   assert.equal(b.navColumns(b.view()).flatMap((c) => c.shown).length, 0);
   assert.ok(texts(b.render()).includes("„nur meine“ zeigt nichts: GitHub hat nicht gesagt, als wer gh angemeldet ist"));
+});
+
+// ---- A GitHub project's views ----
+
+// Project 7 with GitHub's views in their order: its board, a roadmap, a
+// table and a board of the current iteration, as GitHub names them.
+const SWITCH_VIEWS = [{}, { number: 4, name: "Plan", layout: "roadmap", filter: null, column: null }, { number: 5, name: "Liste", layout: "table", column: null }, { number: 7, name: "Jetzt", filter: "iteration:@current" }];
+const withViews = (views, extra = {}) => (number) => ok(JSON.stringify(number === 7 ? projectJson({ views, ...extra }) : defaultProject(number)));
+const filterOf = (call) => call.args.find((a) => a.startsWith("filter="))?.slice(7) ?? null;
+const itemCalls = (host) => host.open("gh").filter((c) => c.args.some((a) => a.includes("items(first")));
+
+test("UI: a project's tab switches between its views in row 2, in GitHub's order and by their names; v steps through them, a click picks one, and the view shown is remembered for its tab; a board reads its own filter, a table or a roadmap nothing", async () => {
+  const { b, cx, host } = await openBoard({ projectAnswer: withViews(SWITCH_VIEWS) });
+  const tabView = () => byId(b.render(), "tab-view");
+  assert.deepEqual(tabView().kids.map((k) => [k.with.id[0], texts(k)[0]]), [["tab-view-1", "Mine"], ["tab-view-4", "Plan"], ["tab-view-5", "Liste"], ["tab-view-7", "Jetzt"]]);
+  assert.deepEqual([b.view().id, b.tabViewOf(b.tab())], [MINE, 1], "the first view, at first");
+  assert.ok(hintKeys(b).includes("v"));
+  assert.ok(texts(b.render().kids.at(-1)).includes("Mine/Plan/Liste/Jetzt"), "the hint names the views");
+  await openMenu(b, cx);
+  assert.ok(menuEntries(b).some(([name, k]) => name === "Ansicht wechseln: Plan" && k === "v"));
+  await press(b, cx, "escape");
+  const asked = host.projectAsks.length;
+  await press(b, cx, "v");
+  assert.deepEqual([b.view().id, board.viewKind(b.view()), itemCalls(host).length], [`${MINE_TAB}:4`, "github roadmap", 0]);
+  assert.ok(texts(b.render()).includes("„Plan“: Roadmap-Ansicht folgt"));
+  await press(b, cx, "v");
+  assert.ok(texts(b.render()).includes("„Liste“: Tabellenansicht folgt"));
+  assert.equal(host.projectAsks.length, asked, "neither reads anything");
+  await press(b, cx, "v");
+  assert.equal(b.view().id, `${MINE_TAB}:7`);
+  assert.deepEqual(itemCalls(host).map(filterOf), ["iteration:@current"], "its own filter; it hides no column");
+  assert.equal(JSON.parse(memory.get(`projectView:${MINE_TAB}`)), 7);
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  await press(b, cx, "v");
+  assert.equal(b.view().id, MINE, "past the last, the first");
+  await click(b, cx, "tab-view-7");
+  assert.deepEqual([b.view().id, itemCalls(host).length], [`${MINE_TAB}:7`, 0], "a click; read a moment ago, it reads nothing");
+  await press(b, cx, "2");
+  assert.equal(byId(b.render(), "tab-view"), null, "a project with one view has no switch");
+  const again = await bootBoard({ projectAnswer: withViews(SWITCH_VIEWS), known: { [board.projectKey(MINE_TAB)]: board.projectMeta(board.parseGithubProject(projectJson({ views: SWITCH_VIEWS }), githubView())) }, stored: { [`projectView:${MINE_TAB}`]: 7 } });
+  assert.deepEqual([again.b.view().id, again.host.open("gh").map(filterOf)], [`${MINE_TAB}:7`, ["iteration:@current"]], "after a restart, the view chosen last");
+});
+
+test("UI: a project's views hide their columns each on its own, at their own place in this machine's settings", async () => {
+  const views = [{}, { number: 7, name: "Jetzt", filter: "is:open" }];
+  const { b, cx, host } = await openBoard({ projectAnswer: withViews(views) });
+  await press(b, cx, "v");
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  b.state(b.view().id).sel = { col: 1, key: "PVTI_rec4" };
+  await runCommand(b, cx, "Spalte ausblenden: Ready");
+  const own = [...PROJECTS, "7", "views", "7", "hide"];
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), projectsHere({ 7: { views: { 7: { hide: ["Ready"] } } } }));
+  assert.equal(b.origin(own), "dieser Rechner");
+  await settle();
+  assert.deepEqual(itemCalls(host).map(filterOf), ['is:open -status:"Ready"']);
+  assert.deepEqual([...b.state(MINE).hidden], ["Backlog", "Done"], "view 1 keeps its own");
+});
+
+test("UI: a project the board knows nothing of yet is named by its number, and its first read learns its views, named as GitHub names them, and reads the first one's items, or the one chosen last, in the same read", async () => {
+  const project = projectJson({ views: SWITCH_VIEWS });
+  const { b, host } = await bootBoard({ known: {}, projectAnswer: null });
+  assert.deepEqual([b.tab().name, b.view().id, b.view().layout, byId(b.render(), "tab-view")], ["Projekt 7", `${MINE_TAB}:first`, "board", null]);
+  assert.ok(texts(b.render()).some((t) => t.includes("Lädt")));
+  await host.answer("gh", ok(JSON.stringify(project)), "views(first");
+  assert.deepEqual([b.tab().name, b.view().id, b.views[`${MINE_TAB}:first`], b.views[MINE].loading], ["Mine", MINE, undefined, true], "the read goes on as the first view's");
+  assert.deepEqual(itemCalls(host).map(filterOf), ['assignee:@me -status:"Backlog","Done"'], "its items, with its hidden columns");
+  assert.ok(byId(b.render(), "tab-view"), "the switch");
+  assert.deepEqual(JSON.parse(memory.get(board.projectKey(MINE_TAB))), board.projectMeta(board.parseGithubProject(project, githubView())), "kept for the next start");
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.state(MINE).data.shape, "board");
+  assert.equal(host.calls.filter((c) => c.args.some((a) => a.includes("views(first") || a.includes("items(first"))).length, 2, "one read: the views, then the items");
+  const chosen = await bootBoard({ known: {}, projectAnswer: withViews(SWITCH_VIEWS), stored: { [`projectView:${MINE_TAB}`]: 7 } });
+  assert.deepEqual([chosen.b.view().id, chosen.host.open("gh").map(filterOf)], [`${MINE_TAB}:7`, ["iteration:@current"]], "the view chosen last, where the project has it");
+  const table = await bootBoard({ known: {}, projectAnswer: withViews([{ layout: "table", column: null }]) });
+  assert.deepEqual([board.viewKind(table.b.view()), table.host.open("gh").length], ["github table", 0], "a first view that is a table reads no items");
+  await table.cx.fire();
+  assert.deepEqual([table.b.views[`${MINE_TAB}:first`], memory.has(board.savedKey(`${MINE_TAB}:first`)), memory.has(board.savedKey(MINE))], [undefined, false, false], "and leaves no state nor saved data of its own");
+  assert.ok(texts(table.b.render()).includes("„Mine“: Tabellenansicht folgt"));
+  const failed = await bootBoard({ known: {}, projectAnswer: () => ok(fixture("github-not-found.json")) });
+  assert.deepEqual([failed.b.view().id, failed.b.state(failed.b.view().id).error], [`${MINE_TAB}:first`, "Projekt 7 von sample-user nicht gefunden – „number“ in views.json prüfen"]);
+});
+
+test("UI: a read of a project's views whose tab views.json dropped meanwhile ends there: it reads no items and keeps nothing of the project", async () => {
+  const { b, cx, host } = await bootBoard({ known: {}, projectAnswer: null });
+  host.config = withoutMine();
+  await press(b, cx, "r");
+  assert.equal(b.tabs().some((t) => t.id === MINE_TAB), false);
+  const seen = logged.length;
+  await host.answer("gh", ok(JSON.stringify(projectJson())), (args) => args.includes("number=7") && args.some((a) => a.includes("views(first")));
+  assert.deepEqual(itemCalls(host).filter((c) => c.args.includes("number=7")), [], "no items");
+  assert.equal(memory.has(board.projectKey(MINE_TAB)), false, "nothing kept of it");
+  assert.deepEqual(logged.slice(seen).filter((line) => !line.startsWith("board: gh ")), [], "and nothing failed");
+});
+
+test("UI: a view GitHub no longer has is said where its read fails, and the tab shows and reads the project's first view", async () => {
+  const known = { [board.projectKey(MINE_TAB)]: { title: "Mine", url: null, views: [{ number: 1, name: "Mine", layout: "board", filter: "assignee:@me" }, { number: 2, name: "Alt", layout: "board", filter: "label:old" }] } };
+  const { b, host } = await bootBoard({ known, stored: { [`projectView:${MINE_TAB}`]: 2 } });
+  assert.equal(b.view().id, MINE);
+  assert.equal(b.notice?.text, "Ansicht 2 gibt es in „Mine“ nicht mehr; gezeigt wird „Mine“");
+  assert.equal(b.state(`${MINE_TAB}:2`).error, "Projekt „Mine“ hat keine Ansicht 2 mehr");
+  assert.deepEqual(itemCalls(host).map(filterOf), ['assignee:@me -status:"Backlog","Done"']);
+  assert.deepEqual(JSON.parse(memory.get(board.projectKey(MINE_TAB))).views.map((v) => v.number), [1]);
+});
+
+// A project whose views are a board (1) and a table (2), as the board knows
+// it, and GitHub's answer for it with both or (`table` false) the board's.
+const BOARD_AND_TABLE = { [board.projectKey(MINE_TAB)]: { title: "Mine", url: null, views: [{ number: 1, name: "Mine", layout: "board", filter: "assignee:@me" }, { number: 2, name: "Tab", layout: "table", filter: "" }] } };
+const boardAndTable = (table = true) => withViews([{}, ...(table ? [{ number: 2, name: "Tab", layout: "table", column: null }] : [])]);
+
+test("UI: a view GitHub no longer has is said also where its tab showed it without a read of its own: a table view, or the one remembered of a project the board knows no views of yet", async () => {
+  const said = "Ansicht 2 gibt es in „Mine“ nicht mehr; gezeigt wird „Mine“";
+  const table = await bootBoard({ known: BOARD_AND_TABLE, stored: { [`projectView:${MINE_TAB}`]: 2 }, projectAnswer: boardAndTable(false) });
+  await table.host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.deepEqual([table.b.view().id, table.b.notice?.text], [MINE, said], "a table view");
+  const unknown = await bootBoard({ known: {}, stored: { [`projectView:${MINE_TAB}`]: 2 }, projectAnswer: boardAndTable(false) });
+  await unknown.host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.deepEqual([unknown.b.view().id, unknown.b.notice?.text], [MINE, said], "a project the board knew no views of");
+  const none = await bootBoard({ known: {}, projectAnswer: boardAndTable(false) });
+  await none.host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.deepEqual([none.b.view().id, none.b.notice], [MINE, null], "nothing remembered, nothing to say");
+});
+
+test("UI: a failed read of the project's views drawn on a table view goes once a read of another of the tab's views learns the project", async () => {
+  const { b, cx, host } = await bootBoard({ known: BOARD_AND_TABLE, stored: { [`projectView:${MINE_TAB}`]: 2 }, projectAnswer: boardAndTable() });
+  host.projectAnswer = () => ({ code: 1, stdout: "", stderr: "HTTP 401: Bad credentials (https://api.github.com/graphql)\n" });
+  await press(b, cx, "r");
+  const error = b.learnError(b.view());
+  assert.ok(error && texts(b.render()).includes(error), "drawn on the table view");
+  host.projectAnswer = boardAndTable();
+  b.setTabView(1, cx);
+  await settle();
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  assert.equal(b.state(MINE).data.shape, "board", "the board view read");
+  b.setTabView(2, cx);
+  await settle();
+  assert.deepEqual([b.view().id, b.learnError(b.view()), texts(b.render()).includes(error)], [`${MINE_TAB}:2`, null, false]);
+});
+
+test("UI: a board whose view's filter finds nothing says so with the filter its query sent (with hidden columns, the terms that leave them out), which GitHub answers so also where it cannot read it", async () => {
+  const empty = boardPage(0, 0, null, { total: 0 });
+  const { b } = await openBoard({ answer: JSON.stringify(empty), projectAnswer: withViews([{ filter: "bogus:::((" }]) });
+  assert.ok(texts(b.render()).includes('Keine Einträge in den gezeigten Spalten für den Filter „bogus:::(( -status:"Backlog","Done"“ (auch einen Filter, den GitHub nicht versteht, beantwortet es so)'));
+  assert.ok(byId(b.render(), "hidden-columns"), "the hidden columns can be shown again");
+  const plain = await openBoard({ config: testConfig({ hide: [] }), answer: JSON.stringify(empty), projectAnswer: withViews([{ filter: "" }]) });
+  assert.ok(texts(plain.b.render()).includes("Keine Einträge"));
+});
+
+test("UI: on a project's table or roadmap view the start and r read only the project's views, so a view that became a board on GitHub reads its items", async () => {
+  for (const layout of ["table", "roadmap"]) {
+    const known = { [board.projectKey(MINE_TAB)]: { title: "Mine", url: null, views: [{ number: 1, name: "Mine", layout, filter: "" }] } };
+    const { b, cx, host } = await bootBoard({ known, projectAnswer: withViews([{ layout, column: null }]) });
+    assert.deepEqual([board.viewKind(b.view()), host.projectAsks, host.open("gh").length], [`github ${layout}`, [7], 0], layout);
+    host.projectAnswer = withViews([{}]);
+    await press(b, cx, "r");
+    assert.deepEqual([board.viewKind(b.view()), host.projectAsks.filter((n) => n === 7).length, itemCalls(host).map(filterOf)], ["github board", 2, ['assignee:@me -status:"Backlog","Done"']], layout);
+    await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+    assert.equal(b.state(MINE).data.shape, "board", layout);
+  }
+});
+
+test("UI: on a project's table view a failed read of the project's views, at the start or r, shows its error above the placeholder; the next read that succeeds clears it", async () => {
+  const known = { [board.projectKey(MINE_TAB)]: { title: "Mine", url: null, views: [{ number: 1, name: "Mine", layout: "table", filter: "" }] } };
+  const denied = () => ({ code: 1, stdout: "", stderr: "HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login\n" });
+  const { b, cx, host } = await bootBoard({ known, projectAnswer: denied });
+  const error = b.state(`${MINE_TAB}:first`).error;
+  assert.ok(error, "the read failed");
+  assert.deepEqual(texts(b.render()).filter((x) => x === error || x === "„Mine“: Tabellenansicht folgt"), [error, "„Mine“: Tabellenansicht folgt"], "at the start");
+  host.projectAnswer = withViews([{ layout: "table", column: null }]);
+  await press(b, cx, "r");
+  assert.equal(texts(b.render()).includes(error), false, "gone after a read that succeeds");
+  host.projectAnswer = denied;
+  await press(b, cx, "r");
+  assert.ok(texts(b.render()).includes(error), "after r");
+});
+
+test("UI: a project's views stand in GitHub's order, not their numbers': its first view is the one GitHub puts first", async () => {
+  const { b, cx } = await bootBoard({ known: {}, projectAnswer: withViews([{ number: 7, name: "Jetzt" }, { number: 1, name: "Mine" }]) });
+  assert.equal(b.view().id, `${MINE_TAB}:7`);
+  assert.deepEqual(texts(byId(b.render(), "tab-view")), ["Jetzt", "Mine"]);
+  await press(b, cx, "v");
+  assert.equal(b.view().id, MINE);
+});
+
+test("UI: the status menu, its key's hint, its entry in the command menu and the detail panel's button name the field of the view's columns: „Iteration ändern“ on a board by iteration, „Status ändern“ on one by Status", async () => {
+  const items = json("github-board.json");
+  items.data.repositoryOwner.projectV2.items.nodes.forEach((n) => (n.fieldValueByName = { iterationId: "it-2", title: "Iteration 2" }));
+  const { b, cx } = await openBoard({ answer: JSON.stringify(items), projectAnswer: withViews([{ column: "Iteration" }]) });
+  const hint = () => texts(b.render().kids.at(-1).kids.find((h) => texts(h)[0] === "s"));
+  assert.deepEqual(hint(), ["s", "Iteration"]);
+  assert.ok((await openMenu(b, cx)).some(([name, key]) => name === "Iteration ändern…" && key === "s"));
+  await press(b, cx, "escape");
+  await press(b, cx, "s");
+  assert.equal(texts(byId(b.render(), "status-menu"))[0], "Iteration ändern · Enter · Esc");
+  await press(b, cx, "escape");
+  await press(b, cx, "enter");
+  assert.ok(texts(detailPanel(b)).includes("Iteration s"));
+  const status = await openBoard();
+  assert.deepEqual(texts(status.b.render().kids.at(-1).kids.find((h) => texts(h)[0] === "s")), ["s", "Status"]);
+});
+
+test("UI: what the board knows of a project lasts while its tab does: a read of views.json without the project drops it, unless views.json has problems", async () => {
+  const { b, cx, host } = await openBoard();
+  assert.ok(memory.has(board.projectKey(MINE_TAB)));
+  const broken = JSON.parse(withoutMine());
+  broken.sources.github.prs.sections = "none";
+  host.config = JSON.stringify(broken);
+  await press(b, cx, "r");
+  assert.ok(memory.has(board.projectKey(MINE_TAB)), "kept while views.json has problems");
+  host.config = withoutMine();
+  await press(b, cx, "r");
+  assert.deepEqual([memory.has(board.projectKey(MINE_TAB)), memory.has(board.projectKey(OTHER_TAB))], [false, true]);
+  assert.equal(board.readProjectMeta({ title: "T", views: [{ number: 1, name: "V", layout: "kanban", filter: "" }] }), null, "an entry of another form is none");
+  assert.deepEqual(board.goneProjects([board.projectKey(MINE_TAB), "project:gone", "tab:x"], new Set([MINE_TAB])), ["project:gone"]);
 });
 
 // ---- The board button (mods/board-button/) ----
@@ -9814,7 +10388,7 @@ const azAssigned = (id, who) => ok(JSON.stringify({ id, fields: { "System.State"
 test("a GitHub card names its assignees by name where the account has one, else by login, and keeps their logins and its content's id; the filter and „nur meine“ go by login too", () => {
   const data = json("github-board.json");
   data.data.repositoryOwner.projectV2.items.nodes[0].content.assignees.nodes = [{ login: "robin-example", name: "Robin Example" }, { login: "kim-sample", name: null }];
-  const card = board.parseGithubBoard(data, githubView(), HIDDEN).columns.flatMap((c) => c.cards).find((c) => c.key === "PVTI_rec1");
+  const card = board.parseGithubBoard(data, githubView(), HIDDEN, [], planOf()).columns.flatMap((c) => c.cards).find((c) => c.key === "PVTI_rec1");
   assert.deepEqual([card.assignees, card.assigneeLogins], [["Robin Example", "kim-sample"], ["robin-example", "kim-sample"]]);
   assert.equal(board.findCard(githubBoard(), "PVTI_rec1").card.contentId, "I_sample3000");
   assert.equal(board.findCard(casesBoard(), "PVTI_case2").card.contentId, null, "a draft's is not read");
@@ -9822,7 +10396,7 @@ test("a GitHub card names its assignees by name where the account has one, else 
   assert.equal(board.matches(card, "Robin"), true);
   assert.equal(board.isMine(card, "robin-example"), true);
   assert.equal(board.isMine(card, "Robin Example"), false);
-  const args = board.githubBoardArgs(githubView(), HIDDEN);
+  const args = board.githubBoardArgs(githubView(), planOf(), HIDDEN);
   const query = args.find((a) => a.startsWith("query="));
   for (const kind of ["Issue", "PullRequest"]) assert.match(query, new RegExp(`\\.\\.\\. on ${kind} \\{ id number `), kind);
   assert.equal(query.split("assignees(first: 5) { nodes { login name } }").length - 1, 3, "an issue's, a pull request's and a draft's assignees by login and name");
@@ -9953,7 +10527,7 @@ test("UI: a on a GitHub card opens the picker: Ich, niemand, then the repo's ass
 });
 
 test("UI: an assignment GitHub refuses goes back with the error; one without a clear answer reads the board again and says who it has then; a pull request takes its own mutation", async () => {
-  const { b, cx, host, st } = await openBoard({ answer: fixture("github-board-cases.json") });
+  const { b, cx, host, st } = await openBoard({ fixture: "github-board-cases.json" });
   await clickCard(b, cx, "PVTI_case1");
   await press(b, cx, "a");
   await host.answer("gh", ok(fixture("github-assignable.json")), isAssignableCall);
@@ -9977,7 +10551,7 @@ test("UI: an assignment GitHub refuses goes back with the error; one without a c
 });
 
 test("UI: a picker whose people cannot be read says what failed, in the dialog and as a toast, and offers what needs no list (on GitHub niemand); the next a asks again; a draft, an item without access and a PR list take no a", async () => {
-  const { b, cx, host } = await openBoard({ answer: fixture("github-board-cases.json") });
+  const { b, cx, host } = await openBoard({ fixture: "github-board-cases.json" });
   await clickCard(b, cx, "PVTI_case4");
   await press(b, cx, "a");
   await host.answer("gh", { code: 1, stdout: "", stderr: "error connecting to api.github.com\n" }, isAssignableCall);
@@ -10081,7 +10655,7 @@ test("a person is named by name, else by login, in every source alike: an empty 
   assert.deepEqual(board.membersFor(board.parseMemberList(members), null).people, [{ login: "kim.sample@example.com", name: "Kim.Sample@example.com" }]);
   const data = json("github-board.json");
   data.data.repositoryOwner.projectV2.items.nodes[0].content.assignees.nodes = [{ login: "kim-sample", name: "" }];
-  assert.deepEqual(board.findCard(board.parseGithubBoard(data, githubView(), HIDDEN), "PVTI_rec1").card.assignees, ["kim-sample"]);
+  assert.deepEqual(board.findCard(board.parseGithubBoard(data, githubView(), HIDDEN, [], planOf()), "PVTI_rec1").card.assignees, ["kim-sample"]);
 });
 
 test("Azure's members say the list may be cut only where az gave as many as it was asked for", () => {
@@ -11288,7 +11862,7 @@ test("UI: a pull request's row, a pull request's card and a draft read no relate
     const col = board.columnOf(b.navColumns(b.view()), key);
     assert.ok(col >= 0, key);
     cx.call((own) => b.choose(b.view(), { col, key }, own));
-    b.views.mine.detail = true;
+    b.views[MINE].detail = true;
     await cx.look();
     assert.equal(host.open("gh").length, 0, key);
     assert.equal(byId(detailPanel(b), "related-lines"), null, key);
@@ -11399,7 +11973,7 @@ test("UI: the details panel has the keyboard only for the item and view it took 
   // The view "other" shows the same project items under the same keys.
   await press(b, cx, "2");
   await host.answer("gh", ok(fixture("github-board.json")), isBoardCall);
-  const other = b.views.other;
+  const other = b.views[OTHER];
   assert.equal(other.sel.key, "PVTI_rec4");
   other.detail = true;
   assert.equal(b.panelOf(b.view()), null, "another view's details");
@@ -11428,7 +12002,7 @@ test("UI: in the details panel o opens a line; „Zeile auf dem Board“ selects
 });
 
 test("UI: „Zeile auf dem Board“ on a pull request's line whose card is on the board selects it and gives the keyboard back: a pull request has no related items", async () => {
-  const { b, cx, st, host } = await openBoard({ answer: fixture("github-board-cases.json") });
+  const { b, cx, st, host } = await openBoard({ fixture: "github-board-cases.json" });
   const issue = "PVTI_case4";
   cx.call((own) => b.choose(b.view(), { col: board.columnOf(b.navColumns(b.view()), issue), key: issue }, own));
   await press(b, cx, "enter");
@@ -11482,15 +12056,15 @@ test("an issue or pull request of a foreign repo is named with its owner whereve
   const nodes = data.data.repositoryOwner.projectV2.items.nodes;
   nodes.find((n) => n.id === "PVTI_rec2").content.repository = { nameWithOwner: "Other-Owner/lib" };
   nodes.find((n) => n.id === "PVTI_rec5").content.parent.repository = { nameWithOwner: "Other-Owner/epics" };
-  const columns = board.parseGithubBoard(data, githubView(), HIDDEN).columns;
+  const columns = board.parseGithubBoard(data, githubView(), HIDDEN, [], planOf()).columns;
   const card = (id) => columns.flatMap((c) => c.cards).find((c) => c.key === id);
   const names = (c) => [board.itemKey(c), board.parentLabel(c), board.partOfText(c)?.split(" ").slice(0, 3).join(" ")];
   assert.deepEqual(names(card("PVTI_rec2")), ["Other-Owner/lib#3001", "Other-Owner/lib#3002", `Teil von #3002`], "its parent in its own repo");
   assert.deepEqual(names(card("PVTI_rec5")), ["tender#3005", "Other-Owner/epics#3006", "Teil von Other-Owner/epics#3006"], "an own card's foreign parent");
   assert.equal(board.itemKey(card("PVTI_rec1")), "tender#3000");
   nodes.find((n) => n.id === "PVTI_rec1").content.repository = { nameWithOwner: "Sample-Org/api" };
-  const withOrg = board.githubViews(board.readConfig(JSON.stringify(twoContexts())).config).find((v) => v.id === "mine");
-  assert.equal(board.itemKey(board.parseGithubBoard(data, withOrg, HIDDEN).columns.flatMap((c) => c.cards).find((c) => c.key === "PVTI_rec1")), "api#3000",
+  const withOrg = board.viewsOf(board.readConfig(JSON.stringify(twoContexts())).config, knownGet()).find((v) => v.id === MINE);
+  assert.equal(board.itemKey(board.parseGithubBoard(data, withOrg, HIDDEN, [], planOf()).columns.flatMap((c) => c.cards).find((c) => c.key === "PVTI_rec1")), "api#3000",
     "one of another context's repo is not foreign");
   const answer = JSON.parse(relatedAnswer({ prs: [prNode(3050), { ...prNode(3051), repository: { nameWithOwner: "Other-Owner/lib" } }] }));
   answer.data.repository.issue.parent = parentNode(2900, "Other-Owner/epics");
@@ -12094,12 +12668,12 @@ test("UI: a level's read that ends after another view's panel opened leaves that
   await press(b, cx, "j");
   await press(b, cx, "enter");
   const other = () => [b.panel?.view, b.panel?.levels.map((l) => l.item.number)];
-  assert.deepEqual(other(), ["other", [3001]]);
+  assert.deepEqual(other(), [OTHER, [3001]]);
   await host.answer("gh", ok(relatedAnswer({ n: 1 })), (a) => isRelatedCall(a) && a.includes("number=3010"));
-  assert.deepEqual(other(), ["other", [3001]], "the first view's late read");
-  b.refresh(b.viewById("mine"), cx);
+  assert.deepEqual(other(), [OTHER, [3001]], "the first view's late read");
+  b.refresh(b.viewById(MINE), cx);
   await settle();
-  assert.deepEqual(other(), ["other", [3001]], "the first view's refresh");
+  assert.deepEqual(other(), [OTHER, [3001]], "the first view's refresh");
 });
 
 test("UI: r shows a level as its line above says now: a sub-issue that opened again shows open", async () => {
@@ -12666,7 +13240,7 @@ function catppuccinTheme() {
 
 // The themes the board draws with tints of their colors, by name.
 const TINTED = () => ({ "copper-dark": tintedCopper("dark"), "copper-light": tintedCopper("light"), "catppuccin-mocha": catppuccinTheme() });
-const colorsBoard = () => board.parseGithubBoard(json("github-board-colors.json"), githubView(), HIDDEN);
+const colorsBoard = () => parseBoard("github-board-colors.json");
 // The chips under `el` whose text is `text`, and the first of them.
 const chipsOf = (el, text) => (typeof el === "string" ? [] : [...(el.kids?.length === 1 && el.kids[0] === text ? [el] : []), ...(el.kids ?? []).flatMap((k) => chipsOf(k, text))]);
 const chipOf = (el, text) => chipsOf(el, text)[0] ?? null;
@@ -12694,7 +13268,7 @@ test("the copper themes' files set every color the tests of colors read, opaque,
 });
 
 test("a card carries its labels' colors and its issue type's color, which the board's query asks for", () => {
-  const doc = board.githubBoardArgs(githubView(), HIDDEN).find((a) => a.startsWith("query="));
+  const doc = board.githubBoardArgs(githubView(), planOf(), HIDDEN).find((a) => a.startsWith("query="));
   assert.equal(doc.match(/labels\(first: 10\) \{ nodes \{ name color \} \}/g).length, 2, "an issue's labels and a pull request's");
   assert.match(doc, /issueType \{ name color \}/);
   const b = colorsBoard();
@@ -12973,7 +13547,7 @@ test("a type's marker: an issue type in its color (in a copper theme as its sour
 });
 
 test("UI: the board draws labels and types as chips in their tones (an Epic by its title without its epic label's own chip), each column's head opaque on its chrome, also under a drag, each card's edge in its column's color, and a selected card on the theme's selected, which keeps its chips", async () => {
-  const { b, cx, host } = await openBoard({ answer: fixture("github-board-colors.json") });
+  const { b, cx, host } = await openBoard({ fixture: "github-board-colors.json" });
   const t = copperTheme("dark");
   host.theme = () => t;
   // A chip's look in a tone.
@@ -13020,7 +13594,7 @@ test("UI: the board draws labels and types as chips in their tones (an Epic by i
 });
 
 test("UI: on a theme without copper's colors a column a card is dragged over takes the theme's selected, and its head stays", async () => {
-  const { b, cx, host } = await openBoard({ answer: fixture("github-board-colors.json") });
+  const { b, cx, host } = await openBoard({ fixture: "github-board-colors.json" });
   const t = catppuccinTheme();
   host.theme = () => t;
   const heads = () => [0, 1, 2].map((ci) => byId(b.render(), `col-${ci}`).kids[0].with.bg[0]);
@@ -13063,7 +13637,7 @@ test("UI: a card counts the labels it draws no chip for after the third, and dra
   labels("PVTI_col3", ["epic", "a", "b", "c", "d"]);
   labels("PVTI_col1", ["a", "b", "c", "d"]);
   labels("PVTI_col2", ["a", "b", "c"]);
-  const { b, host } = await openBoard({ answer: JSON.stringify(data) });
+  const { b, host } = await openBoard({ fixture: "github-board-colors.json", answer: JSON.stringify(data) });
   host.theme = () => copperTheme("dark");
   const root = b.render();
   // The texts of every chip a card draws (chip's rounded(9), one text), in order.
@@ -13076,7 +13650,7 @@ test("UI: a card counts the labels it draws no chip for after the third, and dra
 });
 
 test("UI: the details name the type of an Epic by its title alone", async () => {
-  const { b, cx, host } = await openBoard({ answer: fixture("github-board-colors.json") });
+  const { b, cx, host } = await openBoard({ fixture: "github-board-colors.json" });
   host.theme = () => copperTheme("light");
   await clickCard(b, cx, "PVTI_col4");
   await clickCard(b, cx, "PVTI_col4");
@@ -13558,7 +14132,7 @@ test("UI: the Backlog whose read of the work item types fails says so and draws 
 });
 
 test("UI: a GitHub card with an issue type has a line across its top in the type's color; one without an issue type, an Epic by its title too, has none", async () => {
-  const { b, host } = await openBoard({ answer: fixture("github-board-colors.json") });
+  const { b, host } = await openBoard({ fixture: "github-board-colors.json" });
   const t = copperTheme("light");
   host.theme = () => t;
   const root = b.render();
@@ -14055,7 +14629,7 @@ test("UI: in the command menu ↑/↓, ctrl-j/k and ctrl-n/p mark a row, bare j 
   }
   const stopped = cx.stopped;
   for (const k of ["j", "k", "2", "q"]) await press(b, cx, k);
-  assert.deepEqual([m.at, cx.stopped, b.tab().id], [0, stopped, "github:mine"], "typed, not taken: no tab switched");
+  assert.deepEqual([m.at, cx.stopped, b.tab().id], [0, stopped, MINE_TAB], "typed, not taken: no tab switched");
   for (let i = 0; i < 30; i++) await press(b, cx, "down");
   assert.equal(m.at, menuEntries(b).length - 1, "down stops at the last row");
   await press(b, cx, "escape");
@@ -14141,13 +14715,13 @@ function effectOf(b, cx, host) {
 // testConfig with nine GitHub tabs: eight projects and the PR list.
 function nineTabs() {
   const config = JSON.parse(testConfig());
-  ghContext(config).projects = Array.from({ length: 8 }, (_, i) => ({ id: `v${i + 1}`, name: `V${i + 1}`, number: i + 1 }));
+  ghContext(config).projects = Array.from({ length: 8 }, (_, i) => ({ number: i + 1 }));
   ghContext(config).prs = { id: "v9", name: "V9" };
   config.sources.github.prs.sections = [{ name: "S", query: "is:pr author:@me" }];
   return JSON.stringify(config);
 }
 // A board on nine tabs, `shown` the one shown.
-const onNineTabs = (shown) => () => bootBoard({ config: nineTabs(), stored: { context: GITHUB_CONTEXT, [`tab:${GITHUB_CONTEXT}`]: `github:v${shown}` } });
+const onNineTabs = (shown) => () => bootBoard({ config: nineTabs(), stored: { context: GITHUB_CONTEXT, [`tab:${GITHUB_CONTEXT}`]: shown === 9 ? "github:v9" : `github:project:sample-user/${shown}` } });
 function nineContexts() {
   const config = JSON.parse(testConfig());
   config.sources.azure.contexts = Array.from({ length: 9 }, (_, i) => ({ project: `P${i + 1}` }));
@@ -14196,7 +14770,7 @@ const KEYED = {
   "tab-previous": { open: openBoard, key: ["["] },
   "context-next": { open: openBoard, key: ["}"] },
   "context-previous": { open: openBoard, key: ["{"] },
-  "team-view": { open: () => bootBoard({ stored: { context: AZURE_CONTEXT } }), key: ["v"] },
+  "tab-view": { open: () => bootBoard({ stored: { context: AZURE_CONTEXT } }), key: ["v"] },
   "move-left": { open: openBoard, key: ["h", { char: "H", modifiers: { shift: true } }] },
   "move-right": { open: openBoard, key: ["l", shiftL] },
   create: { open: openBacklog, key: ["n"] },
@@ -14384,9 +14958,7 @@ test("UI: the command menu runs an action only on what it opened for: after a re
 });
 
 test("UI: the command menu keeps groups apart by what they act on, also where a view is named „Board“", async () => {
-  const config = JSON.parse(testConfig());
-  ghProject(config, "mine").name = "Board";
-  const { b, cx } = await openBoard({ config: JSON.stringify(config) });
+  const { b, cx } = await openBoard({ projectAnswer: (number) => ok(JSON.stringify(projectJson({ number, views: [{ name: "Board" }] }))) });
   await openMenu(b, cx);
   assert.deepEqual(menuHeads(b), ["Issue tender#3004 · feat(api): page through long lists", "Board", "Board"], "the view's heading and the board's");
   b.modal.input.type("n");
@@ -14414,7 +14986,7 @@ test("the action table's couplings: a listed action has a name, a group, when an
     if (a.run && a.menu == null) assert.equal(a.id, "commands", `${a.id} is in the menu`);
   }
   const ran = board.ACTIONS.filter((a) => a.menu != null && a.group !== "board" && situations.some((full) => a.when(full))).map((a) => a.id);
-  assert.ok(["status", "fold-description", "line-board", "columns", "team-view"].every((id) => ran.includes(id)), "and each can run with it");
+  assert.ok(["status", "fold-description", "line-board", "columns", "tab-view"].every((id) => ran.includes(id)), "and each can run with it");
 });
 
 test("UI: the hint line while the details panel has the keyboard: each key once and what it does, in the table's order; no moves, z or /", async () => {
@@ -14529,7 +15101,7 @@ test("UI: an action of the top bar leaves the shown view's selection as it is, b
       cx.call((own) => b.modal.input.submit(own));
       await settle();
     }
-    assert.deepEqual([b.tab().id, st().sel.key, st().detail], ["github:other", "PVTI_rec4", true], how);
+    assert.deepEqual([b.tab().id, st().sel.key, st().detail], [OTHER_TAB, "PVTI_rec4", true], how);
   }
 });
 
@@ -14539,7 +15111,7 @@ test("UI: an action of the top bar leaves the shown view's selection as it is, b
 // (GITHUB_COLORS in sources/github.js).
 const GITHUB_TONES = { GRAY: "muted", BLUE: "ansi4", GREEN: "ansi2", YELLOW: "ansi3", ORANGE: "ansi11", RED: "ansi1", PINK: "ansi13", PURPLE: "ansi5" };
 
-const cardsBoard = () => board.parseGithubBoard(json("github-board-cards.json"), githubView(), HIDDEN);
+const cardsBoard = () => parseBoard("github-board-cards.json");
 const cardOf = (data, n) => data.columns.flatMap((c) => c.cards).find((c) => c.number === n);
 // The lines of the card or story `id` under `root`, in order: a card's
 // body's children (its first child is its edge), a story's own, without
@@ -14563,69 +15135,24 @@ function barOf(t, line) {
   return bar.kids.map((k) => (k.with.bg[0] === on ? "on" : k.with.bg[0] === t.border ? "rest" : k.with.bg[0]));
 }
 
-test("a board's query reads each item's priority by the field views.json names (a project's priorityField, „Priority“ by default), the milestone of an issue and a pull request, and an issue's parent with its title and repo; so do its later pages", () => {
-  const args = board.githubBoardArgs(githubView(), HIDDEN);
+test("a board's query reads each item's priority from the project's single-select field named „Priority“, where it has one, the milestone of an issue and a pull request, and an issue's parent with its title and repo; so do its later pages", () => {
+  const args = board.githubBoardArgs(githubView(), planOf(), HIDDEN);
   const doc = args.find((a) => a.startsWith("query="));
-  assert.ok(args.includes("priority=Priority"), "the default field name");
+  assert.ok(args.includes("priority=Priority"), "the field's name");
   assert.match(doc, /\$priority: String!/);
-  assert.match(doc, /priority: fieldValueByName\(name: \$priority\) \{ \.\.\. on ProjectV2ItemFieldSingleSelectValue \{ name color \} \}/);
+  assert.match(doc, /priority: fieldValueByName\(name: \$priority\) \{ \.\.\. on ProjectV2ItemFieldSingleSelectValue \{ optionId name color \} \}/, "its option too, which a sort by it ranks");
   assert.equal(doc.match(/milestone \{ title \}/g).length, 2, "of issues and pull requests");
   assert.match(doc, /parent \{ number title repository \{ nameWithOwner \} \}/);
-  const page = board.githubBoardPageArgs(githubView(), HIDDEN, "cursor", 100);
+  const page = board.githubBoardPageArgs(githubView(), planOf(), HIDDEN, "cursor", 100);
   assert.ok(page.includes("priority=Priority") && page.find((a) => a.startsWith("query=")).includes("priority: fieldValueByName(name: $priority)"), "a later page");
-  const viewWith = (project) => {
-    const read = board.validateConfig({ sources: { github: { contexts: [{ owner: "o", projects: [{ id: "a", name: "A", number: 1, ...project }], prs: SAMPLE_PRS }] } } });
-    return { ...read, view: read.config && board.githubViews(read.config)[0], errors: read.errors.filter((e) => e.startsWith("GitHub-Kontext")) };
-  };
-  const own = viewWith({ priorityField: "Prio" });
-  assert.deepEqual([own.errors, own.view.project.priorityField], [[], "Prio"]);
-  assert.ok(board.githubBoardArgs(own.view, new Set()).includes("priority=Prio"), "views.json's field name");
-  assert.equal(viewWith({}).view.project.priorityField, "Priority");
-  const where = "GitHub-Kontext 1 („o“), Project 1 („A“)";
-  for (const bad of [5, "", "  ", null]) {
-    assert.deepEqual(viewWith({ priorityField: bad }).errors, [`${where}: „priorityField“ muss Text sein`], String(bad));
+  const without = (fields) => board.githubBoardArgs(githubView(), planOf(projectJson({ fields })), HIDDEN);
+  const plain = projectFields().filter((f) => f.name !== "Priority");
+  for (const [label, fields] of [["none", plain], ["one that is no single-select field", [...plain, { __typename: "ProjectV2Field", id: "F_P", name: "Priority", dataType: "NUMBER" }]]]) {
+    const none = without(fields);
+    assert.deepEqual([none.some((a) => a.startsWith("priority=")), /\bpriority:|\$priority/.test(none.find((a) => a.startsWith("query=")))], [false, false], label);
   }
-  assert.deepEqual(viewWith({ field: 5, priorityField: 5 }).errors, ["„field“ muss Text sein", "„priorityField“ muss Text sein"].map((e) => `${where}: ${e}`));
-});
-
-test("a board's first page asks whether the project has the priority field as a single-select field; a field views.json names that it lacks is a warning of the board, the default one none, nor one GitHub's error at it already explains", () => {
-  const first = board.githubBoardArgs(githubView(), HIDDEN).find((a) => a.startsWith("query="));
-  assert.match(first, /priorityField: field\(name: \$priority\) \{ \.\.\. on ProjectV2SingleSelectField \{ id \} \}/);
-  assert.doesNotMatch(board.githubBoardPageArgs(githubView(), HIDDEN, "cursor", 100).find((a) => a.startsWith("query=")), /priorityField:/, "a later page does not");
-  const given = (priorityField) => board.githubViews(board.validateConfig({ sources: { github: { contexts: [{ owner: "o", projects: [{ id: "a", name: "A", number: 1, ...(priorityField ? { priorityField } : {}) }], prs: SAMPLE_PRS }] } } }).config)[0];
-  assert.deepEqual([given(null).project.priorityGiven, given("Prio").project.priorityGiven, given("Priority").project.priorityGiven], [false, true, true]);
-  const answer = (def) => {
-    const a = json("github-board-cards.json");
-    if (def !== undefined) a.data.repositoryOwner.projectV2.priorityField = def;
-    return a;
-  };
-  const warnings = (view, a, errors) => board.SHAPES.board.warnings(view, board.parseGithubBoard(a, view, new Set(), errors));
-  const warning = "Projekt „Sample“ hat kein Auswahlfeld „Prio“ („priorityField“ des Projects): die Karten zeigen keine Priorität";
-  for (const def of [undefined, null, {}]) {
-    assert.deepEqual(warnings(given("Prio"), answer(def)), [warning], `named, ${JSON.stringify(def)}`);
-    assert.deepEqual(warnings(given(null), answer(def)), [], `the default, ${JSON.stringify(def)}`);
-  }
-  assert.deepEqual(warnings(given("Prio"), answer({ id: "PVTSSF_prio" })), [], "the project has it");
-  const at = (path) => [{ message: "Something went wrong", path }];
-  assert.deepEqual(warnings(given("Prio"), answer(null), at(["repositoryOwner", "projectV2", "priorityField"])), [], "GitHub's error at the field");
-  assert.deepEqual(warnings(given("Prio"), answer(null), at(["repositoryOwner", "projectV2", "items", "nodes", 0])), [warning], "an error elsewhere");
-});
-
-test("UI: a board whose views.json names a priority field the project lacks says so above its columns; with the default name it says nothing, and where GitHub's error at the field explains it, only that", async () => {
-  const config = JSON.parse(testConfig());
-  ghProject(config, "mine").priorityField = "Prio";
-  const named = await openBoard({ config: JSON.stringify(config), answer: fixture("github-board-cards.json") });
-  const warning = "Projekt „Sample“ hat kein Auswahlfeld „Prio“ („priorityField“ des Projects): die Karten zeigen keine Priorität";
-  assert.deepEqual(named.st().warnings, [warning]);
-  assert.ok(texts(named.b.render()).includes(warning));
-  assert.ok(named.host.calls[0].args.includes("priority=Prio"));
-  const plain = await openBoard({ answer: fixture("github-board-cards.json") });
-  assert.deepEqual(plain.st().warnings, []);
-  const failed = json("github-board-cards.json");
-  failed.data.repositoryOwner.projectV2.priorityField = null;
-  failed.errors = [{ message: "Something went wrong", path: ["repositoryOwner", "projectV2", "priorityField"] }];
-  const unread = await openBoard({ config: JSON.stringify(config), answer: JSON.stringify(failed) });
-  assert.deepEqual(unread.st().warnings, ["Something went wrong"], "GitHub's own error, no second word on it");
+  assert.equal(board.parseGithubBoard(json("github-board-cards.json"), githubView(), HIDDEN, [], planOf(projectFor(CARDS_OPTIONS, { fields: plain }))).columns.flatMap((c) => c.cards).some((c) => c.priority), false,
+    "no priority on a card then, whatever an answer holds");
 });
 
 test("a GitHub card carries its priority as its option's name and its color's tone (GitHub's named colors as a status's), its milestone, and its parent's title and repo; none of them where GitHub sends none", () => {
@@ -14641,7 +15168,7 @@ test("a GitHub card carries its priority as its option's name and its color's to
   const withPriority = (value) => {
     const answer = json("github-board-cards.json");
     answer.data.repositoryOwner.projectV2.items.nodes[0].priority = value;
-    return cardOf(board.parseGithubBoard(answer, githubView(), HIDDEN), 2217).priority;
+    return cardOf(board.parseGithubBoard(answer, githubView(), HIDDEN, [], planOf(projectFor(CARDS_OPTIONS))), 2217).priority;
   };
   for (const [color, tone] of Object.entries(tones)) assert.deepEqual(withPriority({ name: "Hoch", color }), { name: "Hoch", tone }, color);
   for (const value of [null, {}, { name: "", color: "RED" }, { color: "RED" }]) assert.equal(withPriority(value), null, JSON.stringify(value));
@@ -14929,7 +15456,7 @@ test("UI: the team's settings the Sprint reads beside its parents' query are kep
 });
 
 test("UI: a GitHub card's lines: its key with its priority at the right; its title; its milestone as a muted chip and its parent, cut short; its type and labels; its progress with a bar and the share done, then its session, „speichert …“ and its assignees, which end the chips' line where it has no progress; a card without them as compact as before", async () => {
-  const { b, cx, host } = await openBoard({ answer: fixture("github-board-cards.json") });
+  const { b, cx, host } = await openBoard({ fixture: "github-board-cards.json" });
   const t = copperTheme("dark");
   host.theme = () => t;
   host.spaceList = [...host.spaceList,
@@ -15116,7 +15643,7 @@ const LARGE_LABEL_TONES = {
   "5319e7": "ansi5", e99695: "ansi1", fbca04: "ansi3", "0e8a16": "ansi2", b60205: "ansi1", d93f0b: "ansi1", ff7f00: "ansi11", "1d76db": "ansi4",
 };
 const LARGE_COLORS = Object.keys(LARGE_LABEL_TONES);
-const LARGE_OPTIONS = [["opt-backlog", "Backlog", "GREEN"], ["opt-ready", "Ready", "BLUE"], ["opt-progress", "In progress", "YELLOW"], ["opt-review", "In review", "ORANGE"], ["opt-done", "Done", "PURPLE"]];
+const LARGE_STATUS = statusOptions([["opt-backlog", "Backlog", "GREEN"], ["opt-ready", "Ready", "BLUE"], ["opt-progress", "In progress", "YELLOW"], ["opt-review", "In review", "ORANGE"], ["opt-done", "Done", "PURPLE"]]);
 const LARGE_SHOWN = ["opt-ready", "opt-progress", "opt-review"];
 
 // A board answer of `n` items in the shapes of github-board-cards.json,
@@ -15145,10 +15672,8 @@ function largeBoardAnswer(n) {
   });
   return JSON.stringify({
     data: {
-      viewer: { login: "sample-user" },
       repositoryOwner: { projectV2: { id: "PVT_sample", title: "Sample", url: "https://github.com/users/sample-user/projects/7",
-        field: { id: "PVTSSF_sample", name: "Status", options: LARGE_OPTIONS.map(([id, name, color]) => ({ id, name, color })) },
-        priorityField: { id: "PVTSSF_priority" }, h0: { totalCount: 40 }, h1: { totalCount: 120 },
+        h0: { totalCount: 40 }, h1: { totalCount: 120 },
         items: { totalCount: n, pageInfo: { hasNextPage: false, endCursor: "end" }, nodes } } },
     },
   });
@@ -15172,8 +15697,8 @@ function drawCost(b, host) {
 }
 
 test("UI: a full draw of a board of 300 cards (labels, types, priorities, milestones, parents, sub-issues up to 45) in columns whose lists herdr laid out 900 pixels high converts 6 to 100 colors to OKLCH and makes 300 to 1500 elements, in copper-dark and catppuccin-mocha, each draw on a new theme object as herdr gives it", async () => {
-  const { b, host } = await openBoard({ answer: largeBoardAnswer(300) });
-  assert.equal(b.views.mine.data.columns.filter((c) => !c.hidden).reduce((n, c) => n + c.cards.length, 0), 300);
+  const { b, host } = await openBoard({ answer: largeBoardAnswer(300), statusOptions: LARGE_STATUS });
+  assert.equal(b.views[MINE].data.columns.filter((c) => !c.hidden).reduce((n, c) => n + c.cards.length, 0), 300);
   for (const ci of [0, 1, 2]) Object.assign(handleOf(b, ci), { width: 300, height: 900 });
   for (const [name, t] of [["copper-dark", copperTheme("dark")], ["catppuccin-mocha", catppuccinTheme()]]) {
     host.theme = () => ({ ...t });
@@ -15183,6 +15708,104 @@ test("UI: a full draw of a board of 300 cards (labels, types, priorities, milest
       assert.ok(cost.elements >= 300 && cost.elements <= 1500, `${name}, draw ${draw}: ${cost.elements} elements`);
     }
   }
+});
+
+// largeBoardAnswer's items, each with a Size (XS to L, by another turn than
+// their columns', every fifth none), and its project with a view that bands its cards by Size.
+const SIZES = ["XS", "S", "M", "L"];
+function largeLanes(n) {
+  const answer = JSON.parse(largeBoardAnswer(n));
+  answer.data.repositoryOwner.projectV2.items.nodes.forEach((node, i) => {
+    if (i % 5) node.v0 = { optionId: `opt-size-${SIZES[(i % 7) % 4]}`, name: SIZES[(i % 7) % 4] };
+  });
+  const text = JSON.stringify(answer);
+  return { answer: text, project: () => ok(JSON.stringify(projectFor(LARGE_STATUS, { views: [{ lane: "Size" }] }))) };
+}
+const lanesHandle = (b) => board.keptOf(b, "lanes").scroll;
+
+test("UI: a full draw of a board of 300 cards in swimlanes whose list herdr laid out 900 pixels high keeps to the same cost: 6 to 100 OKLCH conversions, 300 to 1500 elements", async () => {
+  const { answer, project } = largeLanes(300);
+  const { b, host } = await openBoard({ answer, projectAnswer: project });
+  assert.equal(b.state(MINE).data.lanes.length, 5);
+  b.render();
+  Object.assign(lanesHandle(b), { width: 900, height: 900 });
+  for (const [name, t] of [["copper-dark", copperTheme("dark")], ["catppuccin-mocha", catppuccinTheme()]]) {
+    host.theme = () => ({ ...t });
+    for (const draw of [1, 2]) {
+      const cost = drawCost(b, host);
+      assert.ok(cost.conversions >= 6 && cost.conversions <= 100, `${name}, draw ${draw}: ${cost.conversions} conversions`);
+      assert.ok(cost.elements >= 300 && cost.elements <= 1500, `${name}, draw ${draw}: ${cost.elements} elements`);
+    }
+  }
+});
+
+test("UI: a board with swimlanes draws the columns' heads once and below them, scrolling as one, each band's head and rows; only the rows about its window whole; h/l keep the band, and the list scrolls to the row of the card chosen", async () => {
+  const { answer, project } = largeLanes(60);
+  const { b, cx, host, st } = await openBoard({ answer, projectAnswer: project });
+  const root = () => b.render();
+  assert.deepEqual(texts(byId(root(), "lane-heads")).filter((t) => !/^\d+$/.test(t)), ["Ready", "In progress", "In review"]);
+  const lanes = byId(root(), "lanes");
+  assert.deepEqual(lanes.kids.filter((k) => k.with.id?.[0]?.startsWith("lane-")).map((k) => texts(k)[0]), ["XS", "S", "M", "L", "Ohne Size"]);
+  assert.equal(byId(root(), "columns"), null, "no columns of their own");
+  Object.assign(lanesHandle(b), { width: 900, height: 300, y: 3000 });
+  const drawn = byId(root(), "lanes").kids;
+  const hasCard = (el) => String(el?.with?.id?.[0] ?? "").startsWith("card-") || (el?.kids ?? []).some(hasCard);
+  const whole = drawn.filter(hasCard).length;
+  const frames = drawn.filter((k) => !k.with.id && !hasCard(k) && k.with.h).length;
+  assert.ok(whole > 0 && frames > 0 && whole + frames + 5 === drawn.length, `${whole} rows whole, ${frames} as frames, of ${drawn.length}`);
+  assert.equal(hasCard(drawn[1]), false, "the rows far above the window are frames");
+  const first = st().sel.key;
+  assert.equal(board.findCard(st().data, first).card.lane, st().data.lanes[0].id, "the first card: the first band's");
+  host.scrolled.splice(0);
+  await press(b, cx, "l");
+  const now = board.findCard(st().data, st().sel.key);
+  assert.deepEqual([now.column.name, now.card.lane], ["In progress", st().data.lanes[0].id], "the same band in the next column");
+  assert.equal(host.scrolled.at(-1).handle, lanesHandle(b), "the bands' list scrolls");
+  const rows = board.laneRows(st().data.lanes, b.navColumns(b.view()));
+  assert.equal(host.scrolled.at(-1).row, rows.findIndex((r) => !r.head && r.cards[1]?.key === st().sel.key));
+  const [left, right] = b.navColumns(b.view()).map((c) => c.shown);
+  const start = left.find((c, i) => right[i] && right[i].lane !== c.lane && right.some((r) => r.lane === c.lane));
+  assert.ok(start, "a card whose row in the next column is another band's");
+  b.choose(b.view(), { col: 0, key: start.key }, cx);
+  await press(b, cx, "l");
+  assert.deepEqual([board.findCard(st().data, st().sel.key).column.name, board.findCard(st().data, st().sel.key).card.lane], ["In progress", start.lane], "it keeps its band, not its place in the column");
+});
+
+test("UI: in a band a card's measure goes by the height its layout took for that card, not by its row's: a card shorter than its row's highest asks no draw at its own height", async () => {
+  const { answer, project } = largeLanes(60);
+  const { b, cx } = await openBoard({ answer, projectAnswer: project });
+  b.render();
+  Object.assign(lanesHandle(b), { width: 900, height: 900 });
+  const cols = b.navColumns(b.view());
+  const row = board.laneRows(b.state(MINE).data.lanes, cols).find((r) => !r.head && r.cards[0] && r.cards[1]);
+  const [tall, short] = row.cards;
+  const width = (900 - 12 * 2) / 3;
+  const sized = (card, height) => notifies(cx, (own) => byId(b.render(), `card-${card.key}`).with.on_size_change[0]({ width, height }, own));
+  assert.equal(sized(tall, 400), 1, "far off its guess: one draw");
+  assert.equal(sized(short, board.cardHeightGuess(short, width)), 0, "its own guess, in a row 400 high: none");
+});
+
+test("UI: on a board with swimlanes a card dragged onto a column's head, or onto its cell in another band, moves to that column and keeps its band", async () => {
+  const { answer, project } = largeLanes(60);
+  const { b, cx, st, host } = await openBoard({ answer, projectAnswer: project });
+  const cols = () => b.navColumns(b.view());
+  const [ready, progress, review] = cols().map((c) => c.id);
+  const card = cols()[0].shown[0];
+  await mouse(b, cx, `card-${card.key}`, "on_mouse_down");
+  byId(b.render(), "col-1").with.on_hover[0](true, cx);
+  await mouse(b, cx, "col-1", "on_mouse_up");
+  const moved = board.findCard(st().data, card.key);
+  assert.deepEqual([moved.column.id, moved.card.lane], [progress, card.lane], "onto the head: its column, its own band");
+  assert.ok(host.open("gh").some((c) => c.args.includes(`option=${progress}`)));
+  const other = cols()[0].shown.find((c) => c.lane !== card.lane);
+  const rows = board.laneRows(st().data.lanes, cols());
+  const at = rows.findIndex((r) => !r.head && r.lane.id !== other.lane);
+  assert.notEqual(ready, review);
+  await mouse(b, cx, `card-${other.key}`, "on_mouse_down");
+  await mouse(b, cx, `cell-${at}-2`, "on_mouse_up");
+  const there = board.findCard(st().data, other.key);
+  assert.deepEqual([there.column.id, there.card.lane], [review, other.lane], "onto another band's cell: that cell's column, its own band");
+  assert.ok(host.open("gh").some((c) => c.args.includes(`option=${review}`)));
 });
 
 test("memo answers each key once, by the first argument without a key; without a key a function whose length (its parameters before the first with a default or a rest) is above one is refused", () => {
@@ -15219,10 +15842,8 @@ function listsOf(b) {
 }
 function wideBoard(n, { none = false } = {}) {
   const data = json("github-board.json");
-  const project = data.data.repositoryOwner.projectV2;
-  project.field.options = Array.from({ length: n }, (_, i) => ({ id: `opt-${i}`, name: `Spalte ${i}`, color: "GRAY" }));
-  project.items.nodes.forEach((node, i) => (node.fieldValueByName = none && i === 0 ? null : { optionId: `opt-${i % n}`, name: "x" }));
-  return JSON.stringify(data);
+  data.data.repositoryOwner.projectV2.items.nodes.forEach((node, i) => (node.fieldValueByName = none && i === 0 ? null : { optionId: `opt-${i % n}`, name: "x" }));
+  return { answer: JSON.stringify(data), statusOptions: Array.from({ length: n }, (_, i) => ({ id: `opt-${i}`, name: `Spalte ${i}`, color: "GRAY" })) };
 }
 const bandTimers = (cx) => cx.every.filter((f) => f.ms === board.BAND_MS).length;
 // One look of the copy's BAND_MS timer → how often it asked for a draw.
@@ -15242,7 +15863,7 @@ const G = { char: "G", modifiers: { shift: true } };
 // LIST_H high and measured each card drawn whole `card` high, until no
 // other card is drawn whole.
 async function longBoard({ card = 100, zoom = 1 } = {}) {
-  const opened = await openBoard({ answer: largeBoardAnswer(300) });
+  const opened = await openBoard({ answer: largeBoardAnswer(300), statusOptions: LARGE_STATUS });
   const { b, cx, host } = opened;
   host.theme = () => copperTheme("dark");
   if (zoom !== 1) host.settings = () => ({ zoom });
@@ -15443,7 +16064,7 @@ test("UI: a column's band stays where it stood across a refresh and a switch to 
   await host.answer("gh", ok(largeBoardAnswer(300)), isBoardCall);
   assert.deepEqual(wholeAt(cardList(b, 0)), there, "after a refresh");
   await click(b, cx, "tab-github:prs");
-  await click(b, cx, "tab-github:mine");
+  await click(b, cx, `tab-${MINE_TAB}`);
   assert.deepEqual(wholeAt(cardList(b, 0)), there, "after a switch to the PR list and back");
 });
 
@@ -15456,8 +16077,10 @@ test("UI: a column that takes over a state another column held draws its top who
   const others = b.shapeState.board.pool.length - 3;
   board.columnsKept(b, Array.from({ length: others }, (_, i) => `other-${i}`));
   host.scrolled.splice(0);
+  const renamed = largeBoardAnswer(300).replaceAll("opt-ready", "opt-renamed");
+  host.projectAnswer = () => ok(JSON.stringify(projectFor(LARGE_STATUS.map((o) => (o.id === "opt-ready" ? { ...o, id: "opt-renamed" } : o)))));
   await press(b, cx, "r");
-  await host.answer("gh", ok(largeBoardAnswer(300).replaceAll("opt-ready", "opt-renamed")), isBoardCall);
+  await host.answer("gh", ok(renamed), isBoardCall);
   const drawn = cardList(b, 0);
   assert.equal(b.navColumns(b.view())[0].id, "opt-renamed");
   assert.equal(board.keptOf(b, "opt-renamed").scroll, list, "the state of the column it replaces, used longest ago");
@@ -15476,23 +16099,23 @@ test("UI: a board column keeps its list's ScrollHandle by its id, not its place:
   await press(b, cx, "r");
   await host.answer("gh", ok(boardWith((nodes) => (nodes.find((n) => n.id === "PVTI_rec1").fieldValueByName = null))), isBoardCall);
   const after = listsOf(b);
-  assert.equal(Object.keys(after)[0], board.NO_STATUS, "Ohne Status in front");
+  assert.equal(Object.keys(after)[0], board.NO_VALUE, "Ohne Status in front");
   assert.deepEqual(Object.fromEntries(Object.keys(before).map((id) => [id, after[id].y])), offsets, "each column where it stood");
   for (const id of Object.keys(before)) assert.equal(after[id], before[id], `${id}: its own handle`);
   assert.equal(new Set(Object.values(after)).size, Object.keys(after).length, "Ohne Status one of its own");
 });
 
 test("UI: a board that shows more columns than keep their own state: those that hold one keep it, by id, when a column comes in front, and that one shares one of theirs, the same at every draw", async () => {
-  const { b, cx, host } = await openBoard({ answer: wideBoard(24) });
+  const { b, cx, host } = await openBoard(wideBoard(24));
   const before = listsOf(b);
   assert.equal(new Set(Object.values(before)).size, 24, "24 columns, each its own");
   Object.values(before).forEach((handle, i) => (handle.y = 10 * (i + 1)));
   await press(b, cx, "r");
-  await host.answer("gh", ok(wideBoard(24, { none: true })), isBoardCall);
+  await host.answer("gh", ok(wideBoard(24, { none: true }).answer), isBoardCall);
   const after = listsOf(b);
-  assert.equal(Object.keys(after)[0], board.NO_STATUS);
+  assert.equal(Object.keys(after)[0], board.NO_VALUE);
   for (const id of Object.keys(before)) assert.equal(after[id], before[id], `${id}: its own handle`);
-  assert.ok(Object.values(before).includes(after[board.NO_STATUS]), "Ohne Status shares one");
+  assert.ok(Object.values(before).includes(after[board.NO_VALUE]), "Ohne Status shares one");
   assert.deepEqual(listsOf(b), after, "and again at the next draw");
 });
 
@@ -15531,7 +16154,7 @@ test("a board column's kept state (columnsKept): one of the SCROLLS made at the 
 });
 
 test("UI: a card's measure asks one draw where it is more than 2 pixels off the height its draw took or the column's cards changed width, and its height is the frame's once it leaves the band", async () => {
-  const fresh = await openBoard({ answer: largeBoardAnswer(300) });
+  const fresh = await openBoard({ answer: largeBoardAnswer(300), statusOptions: LARGE_STATUS });
   Object.assign(handleOf(fresh.b, 0), { width: 300, height: LIST_H });
   const card = fresh.b.navColumns(fresh.b.view())[0].shown[0];
   assert.equal(notifies(fresh.cx, (own) => cardList(fresh.b, 0).kids[0].with.on_size_change[0]({ width: 300, height: board.cardHeightGuess(card, 300) }, own)), 0,
@@ -15593,9 +16216,9 @@ test("UI: on a herdr whose ScrollHandle reads nothing back (before 0.1.18) every
   console.log = (...a) => logged.push(a.join(" "));
   let opened;
   try {
-    await openBoard({ answer: largeBoardAnswer(300) });
+    await openBoard({ answer: largeBoardAnswer(300), statusOptions: LARGE_STATUS });
     assert.deepEqual(logged, [], "a herdr that reads it back: nothing");
-    opened = await openBoard({ answer: largeBoardAnswer(300), oldScroll: true });
+    opened = await openBoard({ answer: largeBoardAnswer(300), statusOptions: LARGE_STATUS, oldScroll: true });
   } finally {
     console.log = log;
   }
@@ -15664,7 +16287,7 @@ test("the band's sums: a handle read, a window herdr has not laid out yet as VIE
 
 test("UI: each draw takes its colors from the theme it draws in, after a switch of the theme too: label chips by their color's hue, priorities, column dots and card edges, through copper-dark, catppuccin-mocha, copper-light, copper-dark without copper's colors and copper-dark again", async () => {
   const answer = largeBoardAnswer(30);
-  const { b, host } = await openBoard({ answer });
+  const { b, host } = await openBoard({ answer, statusOptions: LARGE_STATUS });
   const nodes = JSON.parse(answer).data.repositoryOwner.projectV2.items.nodes;
   const copperName = (tone) => Object.entries(board.COPPER_HUES).find(([, slot]) => slot === tone)?.[0] ?? "neutral";
   const themes = [["copper-dark", copperTheme("dark"), true], ["catppuccin-mocha", catppuccinTheme(), false], ["copper-light", copperTheme("light"), true],
@@ -15693,12 +16316,12 @@ test("UI: each draw takes its colors from the theme it draws in, after a switch 
       }
       const priority = node.priority && byId(card, "priority");
       if (priority) assert.equal(chipLook(priority)[0], text(copper ? GITHUB_TONES[node.priority.color] : board.chipTone(GITHUB_TONES[node.priority.color])), `${name}: ${node.id} priority`);
-      const [, , color] = LARGE_OPTIONS.find(([id]) => id === node.fieldValueByName.optionId);
+      const { color } = LARGE_STATUS.find((o) => o.id === node.fieldValueByName.optionId);
       assert.equal(card.kids[0].with.bg[0], text(GITHUB_TONES[color]), `${name}: ${node.id} edge`);
     }
     assert.ok(labels > 30, `${name}: ${labels} label chips`);
     const dots = LARGE_SHOWN.map((id) => byId(root, `col-${LARGE_SHOWN.indexOf(id)}`).kids[0].kids[0].with.bg[0]);
-    assert.deepEqual(dots, LARGE_SHOWN.map((id) => text(GITHUB_TONES[LARGE_OPTIONS.find(([o]) => o === id)[2]])), `${name}: column dots`);
+    assert.deepEqual(dots, LARGE_SHOWN.map((id) => text(GITHUB_TONES[LARGE_STATUS.find((o) => o.id === id).color])), `${name}: column dots`);
   }
 });
 
@@ -16501,7 +17124,7 @@ test("UI: a card shows its first session as a chip: a sure one by its agent's st
 });
 
 test("UI: the board reads the Claude sessions when it starts, every CLAUDE_MS while it shows, when it comes to show and when the focus or a space's tabs change, not while hidden; a render reads none and makes the sessions index once, whatever its cards", async () => {
-  const { b, cx, host } = await openBoard({ answer: largeBoardAnswer(300) });
+  const { b, cx, host } = await openBoard({ answer: largeBoardAnswer(300), statusOptions: LARGE_STATUS });
   const reads = () => host.claudeReads.length;
   const claudeTimer = async () => {
     for (const fn of cx.every.filter((f) => f.ms === board.CLAUDE_MS)) fn(cx);
@@ -16557,7 +17180,7 @@ test("a progress bar is 6 high, each of its segments as high by the bar's stretc
 
 // testConfig's views as the board reads them, and the saved entry of the
 // view `id` for `data` read at `at` (its hidden columns by default).
-const testView = (id) => board.viewsOf(board.readConfig(testConfig()).config).find((v) => v.id === id);
+const testView = (id) => board.viewsOf(board.readConfig(testConfig()).config, knownGet()).find((v) => v.id === id);
 const savedFor = (id, data, at, { hidden = board.hiddenColumns(testView(id), null), warnings = [] } = {}) =>
   board.savedText(testView(id), hidden, { data, warnings }, at);
 const savedOf = (id) => board.readSaved(memory.get(board.savedKey(id)) ?? "", testView(id), board.hiddenColumns(testView(id), null));
@@ -16580,7 +17203,7 @@ const isMineCall = (args) => isBoardCall(args) && !isOtherCall(args);
 
 test("UI: a view draws its saved state at once, with its age beside the turning ↻, and the read that follows replaces it and saves its own after the draw", async () => {
   const at = realNow() - 5 * MIN;
-  const { b, cx, host, st } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
+  const { b, cx, host, st } = await bootBoard({ raw: { [board.savedKey(MINE)]: savedFor(MINE, savedBoard(), at) } });
   let root = b.render();
   assert.deepEqual([st().saved, st().loading, allCards(st().data).some((c) => c.title === "Gespeicherter Titel")], [true, true, true], "drawn before gh answers");
   assert.ok(byId(root, "columns"), "its columns, not „Lädt …“");
@@ -16590,16 +17213,16 @@ test("UI: a view draws its saved state at once, with its age beside the turning 
   root = b.render();
   assert.deepEqual([st().saved, allCards(st().data).some((c) => c.title === "Gespeicherter Titel")], [false, false], "replaced by the read");
   assert.deepEqual([ageOf(root), byId(root, "reading"), refreshSpins(root)], ["Stand vor 0 s", null, false]);
-  assert.equal(savedOf("mine").at, at, "the entry before stays until after the draw");
+  assert.equal(savedOf(MINE).at, at, "the entry before stays until after the draw");
   await cx.fire();
-  const saved = savedOf("mine");
+  const saved = savedOf(MINE);
   assert.equal(saved.at, st().at, "saved with its read's time");
   assert.equal(allCards(saved.data).length, allCards(st().data).length);
 });
 
 test("UI: a read that fails keeps the saved state, its age and says why; a write against the saved state is refused, also while its read runs, and one whose read failed starts it again", async () => {
   const at = realNow() - 5 * MIN;
-  const { b, cx, host, st } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
+  const { b, cx, host, st } = await bootBoard({ raw: { [board.savedKey(MINE)]: savedFor(MINE, savedBoard(), at) } });
   await press(b, cx, "l", shiftL);
   assert.equal(b.notice?.text, board.SAVED_WRITE);
   assert.deepEqual(host.open("gh").map((c) => isBoardCall(c.args)), [true], "no move, only the read under way");
@@ -16616,7 +17239,7 @@ test("UI: a read that fails keeps the saved state, its age and says why; a write
 });
 
 test("the saved state: an entry is a view's only while its form and hidden columns are the same; one the store would take more than SAVED_MAX bytes for is none, counted as the store counts, and a board at its limit of 1000 items fits; gone views' entries are named", () => {
-  const view = testView("mine");
+  const view = testView(MINE);
   const hidden = board.hiddenColumns(view, null);
   const text = board.savedText(view, hidden, { data: githubBoard(), warnings: ["w"] }, 5);
   assert.deepEqual(Object.keys(board.readSaved(text, view, hidden)), ["data", "warnings", "at"]);
@@ -16639,20 +17262,21 @@ test("the saved state: an entry is a view's only while its form and hidden colum
   const items = answer.data.repositoryOwner.projectV2.items;
   const base = items.nodes;
   items.nodes = Array.from({ length: 1000 }, (_, i) => ({ ...base[i % base.length], id: `PVTI_${i}` }));
-  assert.ok(board.savedText(view, hidden, { data: board.parseGithubBoard(answer, view, hidden), warnings: [] }, 1), "1000 cards");
+  assert.ok(board.savedText(view, hidden, { data: board.parseGithubBoard(answer, view, hidden, [], planOf(projectFor(CARDS_OPTIONS))), warnings: [] }, 1), "1000 cards");
   assert.equal(board.savedKey("mine"), "board:data:mine");
   assert.deepEqual(board.goneSaved(["board:data:mine", "board:data:gone", "data:gone", "source", "hidden:gone"], new Set(["mine"])), ["board:data:gone"]);
 });
 
-test("the saved state of each shipped view signs as SAVED_VERSION 2 has it; where its settings lie, its tab's folders and views and the repos a PR tab turns off are no form of it", () => {
-  const sigs = board.viewsOf(board.readConfig(shippedConfig()).config).map((v) => {
+test("the saved state of each shipped view signs as SAVED_VERSION 3 has it, a project's view once the board knows it; where its settings lie, its tab's folders and views and the repos a PR tab turns off are no form of it", () => {
+  const known = { get: () => ({ title: "P", url: null, views: [{ number: 1, name: "Board", layout: "board", filter: "" }] }) };
+  const sigs = board.viewsOf(board.readConfig(shippedConfig()).config, known).map((v) => {
     const text = board.savedText(v, board.hiddenColumns(v), { data: { shape: "board" }, warnings: [] }, 1);
     return [board.viewKind(v), createHash("sha256").update(JSON.parse(text).sig).digest("hex").slice(0, 16)];
   });
   assert.deepEqual(sigs, [
-    ["github board", "c995e695b2e71e6f"], ["github list", "098435fa8999a710"],
-    ["azure sprint", "004ef2983447382d"], ["azure backlog", "a61d22581005819c"], ["azure prs", "4415b7935e74085e"],
-    ["azure sprint", "55745f95f598d4fc"], ["azure backlog", "27f11693b2ad59b3"], ["azure prs", "c655667baec66a6c"],
+    ["github board", "b1c229c54cb1f210"], ["github list", "34e1bece88ff07f1"],
+    ["azure sprint", "65b422051eac227c"], ["azure backlog", "5d90583d3f0e4a8c"], ["azure prs", "b5340eab381a464d"],
+    ["azure sprint", "93ef5e022ce1eac3"], ["azure backlog", "65eb3bf5a8507200"], ["azure prs", "fdeaf359f18da938"],
   ]);
   const view = githubView();
   const text = board.savedText(view, HIDDEN, { data: githubBoard(), warnings: [] }, 1);
@@ -16682,7 +17306,7 @@ test("what each shape keeps in its saved data is the form SAVED_VERSION names: a
     board: githubBoard(), prs: board.parseGithubList(json("github-list.json"), testView("prs")), sprint: sprintData(), backlog: backlogData(),
   };
   assert.deepEqual({ version: board.SAVED_VERSION, ...Object.fromEntries(Object.entries(shapes).map(([k, d]) => [k, print(d)])) },
-    { version: 2, board: "180d63b68cc0", prs: "a995da7f9b5f", sprint: "e4b71886155b", backlog: "fd167b2a10f0" });
+    { version: 3, board: "34406265ae07", prs: "a995da7f9b5f", sprint: "e4b71886155b", backlog: "fd167b2a10f0" });
 });
 
 test("UI: a PR tab's repos turned off apply to a saved state it draws and to a read that ends after the switch", async () => {
@@ -16705,7 +17329,7 @@ test("UI: on start the entries of views views.json no longer has are dropped; a 
   logged.length = 0;
   const prs = board.parseGithubList(json("github-list.json"), testView("prs"));
   const { b, cx, host, st } = await bootBoard({ raw: {
-    "board:data:gone": "{}", "board:data:prs": savedFor("prs", prs, at), "board:data:mine": savedFor("mine", savedBoard(), at, { hidden: new Set(["Done"]) }),
+    "board:data:gone": "{}", "board:data:prs": savedFor("prs", prs, at), [board.savedKey(MINE)]: savedFor(MINE, savedBoard(), at, { hidden: new Set(["Done"]) }),
   } });
   assert.deepEqual([memory.has("board:data:gone"), memory.has("board:data:prs")], [false, true]);
   assert.deepEqual([st().data, st().loading], [null, true], "not its data");
@@ -16714,12 +17338,12 @@ test("UI: on start the entries of views views.json no longer has are dropped; a 
   assert.equal(b.state("prs").data.shape, "prs", "and come after it");
   const huge = boardPage(0, 6, null);
   for (const n of huge.data.repositoryOwner.projectV2.items.nodes) n.content.title = "x".repeat(200000);
-  memory.set("board:data:mine", savedFor("mine", savedBoard(), at));
+  memory.set(board.savedKey(MINE), savedFor(MINE, savedBoard(), at));
   await host.answer("gh", ok(JSON.stringify(huge)));
   assert.equal(st().data.shape, "board", "drawn");
   await cx.fire();
-  assert.equal(memory.has("board:data:mine"), false, "not saved, and the older entry gone");
-  assert.ok(logged.includes(`board: board:data:mine not saved: more than ${board.SAVED_MAX} bytes`), logged.join("\n"));
+  assert.equal(memory.has(board.savedKey(MINE)), false, "not saved, and the older entry gone");
+  assert.ok(logged.includes(`board: ${board.savedKey(MINE)} not saved: more than ${board.SAVED_MAX} bytes`), logged.join("\n"));
 });
 
 test("UI: a views.json with problems drops no saved entry, not even those of the views it leaves out; read without them it drops the gone views' entries", async () => {
@@ -16739,7 +17363,7 @@ test("UI: a views.json with problems drops no saved entry, not even those of the
 test("UI: an entry the store refuses drops the one before, and herdr's log names its key and the store's reason", async () => {
   const at = realNow() - MIN;
   logged.length = 0;
-  const { cx, host } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
+  const { cx, host } = await bootBoard({ raw: { [board.savedKey(MINE)]: savedFor(MINE, savedBoard(), at) } });
   const store = globalThis.localStorage;
   const setItem = store.setItem;
   store.setItem = (k, v) => {
@@ -16752,32 +17376,32 @@ test("UI: an entry the store refuses drops the one before, and herdr's log names
   } finally {
     store.setItem = setItem;
   }
-  assert.equal(memory.has("board:data:mine"), false);
-  assert.ok(logged.includes("board: board:data:mine not saved: store value `board:data:mine` is 9 bytes, over the limit"), logged.join("\n"));
+  assert.equal(memory.has(board.savedKey(MINE)), false);
+  assert.ok(logged.includes(`board: ${board.savedKey(MINE)} not saved: store value \`board:data:mine\` is 9 bytes, over the limit`), logged.join("\n"));
 });
 
 test("UI: a saved entry the board cannot draw is dropped and said in herdr's log; the view reads as if it had none, on start, on a switch to its tab and among the other views' saved states", async () => {
   const at = realNow() - MIN;
   logged.length = 0;
-  const other = board.parseGithubBoard(json("github-board.json"), testView("other"), board.hiddenColumns(testView("other"), null));
+  const other = board.parseGithubBoard(json("github-board.json"), testView(OTHER), board.hiddenColumns(testView(OTHER), null), [], planOf());
   const { b, cx, host, st } = await bootBoard({ raw: {
-    "board:data:mine": savedFor("mine", { shape: "board", meta: {}, columns: [{ id: "c", name: "C", hidden: false }] }, at),
-    "board:data:prs": savedFor("prs", { shape: "prs" }, at), "board:data:other": savedFor("other", other, at),
+    [board.savedKey(MINE)]: savedFor(MINE, { shape: "board", meta: {}, columns: [{ id: "c", name: "C", hidden: false }] }, at),
+    "board:data:prs": savedFor("prs", { shape: "prs" }, at), [board.savedKey(OTHER)]: savedFor(OTHER, other, at),
   } });
-  assert.deepEqual([st().data, st().saved, st().at, st().sel, memory.has("board:data:mine")], [null, false, 0, null, false]);
-  assert.ok(logged.some((l) => l.startsWith("board: board:data:mine dropped: ")), logged.join("\n"));
+  assert.deepEqual([st().data, st().saved, st().at, st().sel, memory.has(board.savedKey(MINE))], [null, false, 0, null, false]);
+  assert.ok(logged.some((l) => l.startsWith(`board: ${board.savedKey(MINE)} dropped: `)), logged.join("\n"));
   assert.deepEqual(host.open("gh").map((c) => isMineCall(c.args)), [true], "and is read");
   assert.ok(byId(b.render(), "loading"));
   await press(b, cx, "3");
   assert.deepEqual([b.state("prs").data, memory.has("board:data:prs")], [null, false]);
   assert.equal(host.open("gh").filter((c) => isListCall(c.args)).length, 1, "the switch reads it");
   await cx.fire();
-  assert.equal(b.state("other").saved, true, "the next view's saved state still comes");
+  assert.equal(b.state(OTHER).saved, true, "the next view's saved state still comes");
 });
 
 test("UI: a GitHub board without data draws each page as it comes, with its warnings, says which page it reads, and the „Nur die ersten“ note waits for the last", async () => {
   const config = JSON.parse(testConfig());
-  ghProject(config, "mine").limit = 150;
+  ghProject(config, 7).limit = 150;
   const { b, host, st } = await bootBoard({ config: JSON.stringify(config) });
   assert.equal(readingOf(b.render()), "lädt …", "the pages are not known before the first");
   const first = boardPage(0, 3, "c1", { total: 9 });
@@ -16788,9 +17412,9 @@ test("UI: a GitHub board without data draws each page as it comes, with its warn
   assert.ok(texts(root).includes("Ein Fehler der ersten Seite"), "with its warnings");
   assert.equal(readingOf(root), "lädt … Seite 2 von 2");
   assert.equal(texts(root).some((x) => x.startsWith("Nur die ersten")), false, "no note before the last page");
-  assert.equal(texts(byId(root, "tab-github:mine")).includes("…"), false, "the tab counts what is drawn");
+  assert.equal(texts(byId(root, `tab-${MINE_TAB}`)).includes("…"), false, "the tab counts what is drawn");
   const page = (total) => boardPage(0, 3, "c1", { total });
-  assert.deepEqual([board.boardPages(page(250), testView("mine"), 10), board.boardPages(page(250), { limit: 150 }, 2), board.boardPages(page(0), testView("mine"), 10)], [3, 2, 1],
+  assert.deepEqual([board.boardPages(page(250), testView(MINE), 10), board.boardPages(page(250), { limit: 150 }, 2), board.boardPages(page(0), testView(MINE), 10)], [3, 2, 1],
     "the pages by the count GitHub names, no more than the calls; a page more than it names counts as one more");
   await host.answer("gh", ok(JSON.stringify(boardPage(3, 6, "c2", { first: false, total: 9 }))), isBoardCall);
   root = b.render();
@@ -16801,14 +17425,14 @@ test("UI: a GitHub board without data draws each page as it comes, with its warn
 test("UI: a refresh over a board read since the start, by r or by the timer, draws its pages only once all came: the chosen card of a later page, its open details and the counts stay; the top right names the page", async () => {
   for (const how of ["r", "timer"]) {
     const config = JSON.parse(testConfig());
-    ghProject(config, "mine").limit = 150;
+    ghProject(config, 7).limit = 150;
     const { b, cx, host, st } = await bootBoard({ config: JSON.stringify(config) });
     await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1", { total: 6 }))), isBoardCall);
     await host.answer("gh", ok(JSON.stringify(boardPage(3, 6, null, { first: false, total: 6 }))), isBoardCall);
     const late = allCards(st().data)[5].key;
     b.choose(b.view(), { col: board.columnOf(b.navColumns(b.view()), late), key: late }, cx);
     st().detail = true;
-    const count = () => texts(byId(b.render(), "tab-github:mine")).at(-1);
+    const count = () => texts(byId(b.render(), `tab-${MINE_TAB}`)).at(-1);
     const before = count();
     if (how === "r") await press(b, cx, "r");
     else {
@@ -16826,7 +17450,7 @@ test("UI: a refresh over a board read since the start, by r or by the timer, dra
 
 test("UI: a board whose later page fails shows what it showed before the read, not its first page", async () => {
   const at = realNow() - MIN;
-  const { host, st } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
+  const { host, st } = await bootBoard({ raw: { [board.savedKey(MINE)]: savedFor(MINE, savedBoard(), at) } });
   await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
   assert.equal(allCards(st().data).length, 3);
   await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, isBoardCall);
@@ -16835,10 +17459,10 @@ test("UI: a board whose later page fails shows what it showed before the read, n
 
 test("UI: a board whose later page fails selects again in what it showed before: a card there, or none where it showed nothing, the choice and the details gone", async () => {
   const saved = savedBoard();
-  const first = new Set(allCards(board.parseGithubBoard(boardPage(0, 3, "c1"), githubView(), HIDDEN)).map((c) => c.key));
+  const first = new Set(allCards(board.parseGithubBoard(boardPage(0, 3, "c1"), githubView(), HIDDEN, [], planOf())).map((c) => c.key));
   for (const c of saved.columns) c.cards = c.cards.filter((card) => !first.has(card.key));
   const fail = { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" };
-  const over = await bootBoard({ raw: { "board:data:mine": savedFor("mine", saved, realNow() - MIN) } });
+  const over = await bootBoard({ raw: { [board.savedKey(MINE)]: savedFor(MINE, saved, realNow() - MIN) } });
   await over.host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
   assert.ok(first.has(over.st().sel.key), "the first page's card selected");
   await over.host.answer("gh", fail, isBoardCall);
@@ -16860,10 +17484,10 @@ test("UI: what a load draws on its way counts only while it runs: a late part or
   let live = null;
   loader.load = async (view, options) => {
     live = options.live;
-    return { data: board.parseGithubBoard(json("github-board.json"), view, options.hiddenFor(view)), warnings: [] };
+    return { data: board.parseGithubBoard(json("github-board.json"), view, options.hiddenFor(view), [], planOf()), warnings: [] };
   };
   await press(b, cx, "2");
-  const other = b.state("other");
+  const other = b.state(OTHER);
   assert.deepEqual([other.loading, other.data.shape], [false, "board"]);
   const drawn = other.data;
   let built = 0;
@@ -16880,26 +17504,26 @@ test("UI: a load builds what it would draw on its way only where that is drawn: 
   let [loads, built] = [0, 0];
   loader.load = async (view, options) => {
     loads++;
-    const result = () => ({ data: board.parseGithubBoard(json("github-board.json"), view, options.hiddenFor(view)), warnings: [] });
+    const result = () => ({ data: board.parseGithubBoard(json("github-board.json"), view, options.hiddenFor(view), [], planOf()), warnings: [] });
     options.live.partial(() => (built++, result()));
     return result();
   };
   await press(b, cx, "2");
-  assert.deepEqual([loads, built, b.state("other").loading], [1, 1, false], "over nothing");
+  assert.deepEqual([loads, built, b.state(OTHER).loading], [1, 1, false], "over nothing");
   await press(b, cx, "r");
-  assert.deepEqual([loads, built, b.state("other").loading], [2, 1, false], "over this session's read");
+  assert.deepEqual([loads, built, b.state(OTHER).loading], [2, 1, false], "over this session's read");
 });
 
 test("UI: a saved entry that fails to draw leaves the view's state as it was before: one that fails once the selection moved, a Sprint's that dropped the chosen sprint", async () => {
   const sprintId = "azure:team:Example Project/Example Team:sprint";
-  const other = board.parseGithubBoard(json("github-board.json"), testView("other"), board.hiddenColumns(testView("other"), null));
-  for (const [id, entry] of [["other", other], [sprintId, { shape: "sprint", meta: { gone: { id: "s", name: "S" } } }]]) {
+  const other = board.parseGithubBoard(json("github-board.json"), testView(OTHER), board.hiddenColumns(testView(OTHER), null), [], planOf());
+  for (const [id, entry] of [[OTHER, other], [sprintId, { shape: "sprint", meta: { gone: { id: "s", name: "S" } } }]]) {
     logged.length = 0;
     const { b, cx } = await bootBoard({ raw: { [board.savedKey(id)]: savedFor(id, entry, realNow() - MIN) } });
     const st = b.state(id);
     const before = { warnings: ["vorher"], at: 7, sel: { col: 0, key: "k" }, picked: "k", detail: true, sprint: { id: "s", name: "S" } };
     Object.assign(st, before);
-    if (id === "other") b.scrollToSelection = () => { throw new Error("kein Platz"); };
+    if (id === OTHER) b.scrollToSelection = () => { throw new Error("kein Platz"); };
     await cx.fire();
     assert.ok(logged.some((l) => l.startsWith(`board: ${board.savedKey(id)} dropped: `)), logged.join("\n"));
     assert.deepEqual([st.data, st.saved, st.warnings, st.at, st.sel, st.picked, st.detail, st.sprint],
@@ -17138,7 +17762,7 @@ test("UI: a view read or restored in the background scrolls none of the shown vi
   await cx.fire();
   assert.ok(b.state("prs").sel?.key, "the PR list's saved state, its first row selected");
   await host.answer("gh", ok(fixture("github-board.json")), isOtherCall);
-  assert.ok(b.state("other").sel?.key, "the other board read, its first card selected");
+  assert.ok(b.state(OTHER).sel?.key, "the other board read, its first card selected");
   await cx.fire();
   await host.answer("gh", ok(fixture("github-list.json")), isListCall);
   assert.equal(b.state("prs").saved, false, "the PR list read");
@@ -17147,7 +17771,7 @@ test("UI: a view read or restored in the background scrolls none of the shown vi
 
 test("UI: each tab shows the age of what it draws: two saved tabs their own, a prefetched one its read's, and a new board the saved ones'", async () => {
   const { b, cx, host } = await bootBoard({ raw: {
-    "board:data:mine": savedFor("mine", savedBoard(), realNow() - 10 * MIN), "board:data:prs": savedFor("prs", board.parseGithubList(json("github-list.json"), testView("prs")), realNow() - 20 * MIN),
+    [board.savedKey(MINE)]: savedFor(MINE, savedBoard(), realNow() - 10 * MIN), "board:data:prs": savedFor("prs", board.parseGithubList(json("github-list.json"), testView("prs")), realNow() - 20 * MIN),
   } });
   assert.equal(ageOf(b.render()), "Stand vor 10 min");
   await cx.fire();
@@ -17169,7 +17793,7 @@ test("UI: each tab shows the age of what it draws: two saved tabs their own, a p
   again.init({}, fakeCx());
   await settle();
   advance(MIN);
-  assert.deepEqual([again.state("mine").saved, ageOf(again.render())], [true, "Stand vor 3 min"], "after a restart: the saved read's age");
+  assert.deepEqual([again.state(MINE).saved, ageOf(again.render())], [true, "Stand vor 3 min"], "after a restart: the saved read's age");
 });
 
 test("UI: the Azure Sprint asks for the taskboard once the sprint is known and the query once its areas and the backlog's order field are too, in any order of answers; it draws before its parents outside it and the team's settings beside them", async () => {
@@ -17261,9 +17885,12 @@ test("each gh, az and sh run logs one line: what it ran for, its view and how lo
   await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
   await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, isBoardCall);
   const ms = (line) => Number(line.match(/ (\d+) ms /)[1]);
-  assert.match(logged[0], /^board: gh board-page-1 \d+ ms ok view=mine$/);
+  const view = MINE.replace(/[/]/g, "\\/");
+  assert.match(logged[0], new RegExp(`^board: gh board-page-1 \\d+ ms ok view=${view}$`));
   assert.ok(ms(logged[0]) >= 1234 && ms(logged[0]) < 1234 + 5000, logged[0]);
-  assert.match(logged[1], /^board: gh board-page-2 \d+ ms exit 1 view=mine$/);
+  assert.match(logged[1], new RegExp(`^board: gh board-page-2 \\d+ ms exit 1 view=${view}$`));
+  await bootBoard();
+  assert.ok(logged.some((l) => new RegExp(`^board: gh project \\d+ ms ok view=${view}$`).test(l)), "the read of the project's views");
   const { host: az } = await bootBoard({ stored: { context: AZURE_CONTEXT }, which: found });
   await az.answer("az", new Error("boom"), AZ.iteration);
   await az.answer("az", ok(fixture("azure-sprint-areas.json")), AZ.areas);
@@ -17299,10 +17926,10 @@ test("UI: „Lädt …“ in an empty view has a spinner before it; the ↻ turn
 test("UI: ↻ with hidden columns the storage kept since moves them into this machine's settings and reads the shown view, the ↻ turning", async () => {
   const { b, cx, host, st } = await openBoard();
   assert.equal(host.open("gh").length, 0);
-  memory.set("hidden:mine", JSON.stringify({ hide: ["Ready"], show: ["Done"] }));
+  memory.set(board.hiddenKey(MINE), JSON.stringify({ hide: ["Ready"], show: ["Done"] }));
   await click(b, cx, "refresh");
   assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), mineHidden(["Backlog", "Ready"]));
-  assert.equal(memory.has("hidden:mine"), false);
+  assert.equal(memory.has(board.hiddenKey(MINE)), false);
   assert.equal(host.open("gh").filter((c) => isMineCall(c.args)).length, 1, "the shown view is read");
   assert.deepEqual([st().loading, refreshSpins(b.render())], [true, true]);
 });

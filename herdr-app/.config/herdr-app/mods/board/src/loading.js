@@ -9,17 +9,16 @@
 export const SAVED_MAX = 1000000;
 export const SAVED_PREFIX = "board:data:";
 // Raised when what a shape draws from changes, so that no older data is drawn.
-export const SAVED_VERSION = 2;
+export const SAVED_VERSION = 3;
 export const savedKey = (id) => `${SAVED_PREFIX}${id}`;
 
 // Data read for other hidden columns, another form of the view or another
-// organisation, project or team of its tab is not its data; where its
+// organisation, project or team of its Azure tab is not its data; where its
 // settings lie, the rest of its tab and the repos a PR tab hides (it reads
-// them all) are not its form. A GitHub view has no tab and signs without
-// one.
+// them all) are not its form. A GitHub view signs without its tab.
 const savedSig = (view, hidden) => {
   const { settingsPath, tab, hideRepos, ...form } = view;
-  const reads = tab ? [{ org: tab.org, project: tab.project, team: tab.team }] : [];
+  const reads = view.source === "azure" && tab ? [{ org: tab.org, project: tab.project, team: tab.team }] : [];
   return JSON.stringify([SAVED_VERSION, form, ...reads, [...hidden].sort()]);
 };
 
@@ -56,8 +55,10 @@ export const goneSaved = (keys, ids) => keys.filter((k) => k.startsWith(SAVED_PR
 
 // A load's live: partial(result) draws result() ({ data, warnings }) before
 // the end, calling it at once or not at all; page(n, of) names the page
-// under way.
-export const NO_LIVE = { partial() {}, page() {} };
+// under way; project(meta) hands the board what a GitHub project's read
+// learnt of it (Board.learnProject) and gives the view to read on as the
+// board shows it now (null: the one loaded; false: none, the read ends).
+export const NO_LIVE = { partial() {}, page() {}, project: () => null };
 
 export const refreshDue = (st, now, every) => now - st.tried >= every;
 

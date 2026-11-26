@@ -13,22 +13,23 @@
 //   last.
 //   - github: { contexts: [{ owner, projects?: [...], prs: {...} }], prs: {
 //     sections, limit? } }, a context per owner (a user or an
-//     organisation). A project is a tab with
-//     its board: { id, name, number, field? ("Status"), priorityField?
-//     ("Priority"), filter? (a Projects filter such as "assignee:@me"),
-//     hide?: [column names], limit? (the most items it reads, 1000), start?
-//     }; its columns are the options of that single-select field, a card's
-//     priority its option of the single-select field priorityField names
-//     (none where the project has no such field; one views.json names that
-//     the project lacks is a warning). A context's prs is its PR tab: { id,
+//     organisation). A project is a tab with its views: { number, limit?
+//     (the most items a view reads, 1000), start?, views?: { "<number of
+//     the view>": { hide?: [column names] } } }, its tab's id its owner's
+//     and its number (projectTabId); its name, its views (in GitHub's
+//     order) and their layout, filter, column field, swimlane field and
+//     sort keys come from GitHub (githubProjectArgs), a card's priority
+//     from the project's single-select field "Priority" (none without
+//     one). An entry with id, name, field, filter, priorityField or hide
+//     has the form before and is left out. A context's prs is its PR tab: { id,
 //     name? ("PRs"), hideRepos?: ["<owner>/<repo>"] (repos turned off),
 //     start? }. The PR tabs of all contexts share github's prs: sections:
 //     [{ name, query, tone? }], one GitHub search for pull requests per
 //     section, as written, read once for all of them; limit? (per search,
 //     50, at most 100); tone is one of SECTION_TONES (shared.js), and
 //     without one a section takes the next of SECTION_TONE_ORDER by its
-//     place that no other section sets. A tab's id is its own among all
-//     contexts' (readGithub in config.js).
+//     place that no other section sets. A PR tab's id is its own among all
+//     contexts' PR tabs (readGithub in config.js).
 //   - azure: { org (https://dev.azure.com/<org>), repoFolders?, contexts: [{
 //     project, teams?: [{ team, views?: ["sprint", "backlog"] (both when
 //     missing), repoFolders? }] }] }, a context per project: a tab per team,
@@ -50,19 +51,24 @@
 // old part is not read: the board says where its views and teams go now.
 //
 // This machine's settings (settings.js; README, "herdr app") lie over
-// views.json and are read with it. Hidden columns are a view's hide,
-// views.json's or this machine's settings'; hiding or showing one writes it
-// into the settings. They are left out of the query and of the board. A PR
+// views.json and are read with it. Hidden columns are a view's hide (a
+// project's view's, under its project's views), views.json's or this
+// machine's settings'; hiding or showing one writes it into the settings.
+// They are left out of the query and of the board. A PR
 // tab's repos turned off (hideRepos) are written the same way; their pull
 // requests are read and not shown.
 // GitHub's queries also ask for the login gh runs as, which "nur meine"
 // compares with.
 //
-// Calls: a GitHub board view costs one gh call per refresh for each page of
-// up to 100 items it reads (GitHub's most), at most as many as full pages of
-// its limit take: ten for the 1000 by default (each item's priority,
-// milestone and parent, with its title and repo, and the first page's look
-// at the priority field add no connection and so no points; see below); the
+// Calls: a GitHub board view costs one gh call per refresh for its
+// project's views and fields (githubProjectArgs: its views, PROJECT_VIEWS,
+// and their three field lists each, so about two points), then one for each
+// page of up to 100 items it reads (GitHub's most), at most as many as full
+// pages of its limit take: ten for the 1000 by default (each item's
+// priority, milestone and parent, with its title and repo, and the values of
+// the fields its view sorts and bands by, read by name, add no connection
+// and so no points; see below); a table or roadmap view reads no items, and
+// on the start and r only its project's views; the
 // PR tabs of all contexts one together (a refresh of one refreshes them
 // all), one more per THREAD_IDS (100) pull requests in them with
 // more than FIRST_THREADS (10) review threads, one for the unread
@@ -397,13 +403,14 @@ export function ageLabel(iso, now) {
 
 // View kinds, "<source> <layout>" (viewKind), and what the board shows for
 // a view of each: `shape`, how its data is drawn and walked (ui/shapes/),
-// or for a view whose source reads nothing for it yet the `text` it shows.
-// A new view kind is: an entry here; its loading in its source's module
-// (make<Source>().views[layout]); for a GitHub view, what views.json may say
-// about it (VIEW_KINDS in config.js); for an Azure team view, its entry in
-// TEAM_VIEWS (config.js); and for a new way to draw, a shape.
+// or for a view whose source reads nothing for it yet the `text` it shows
+// (text(view)). A new view kind is: an entry here; its loading in its
+// source's module (make<Source>().views[layout]); for an Azure team view,
+// its entry in TEAM_VIEWS (config.js); and for a new way to draw, a shape.
+// A GitHub project's views take their layout from GitHub; what views.json
+// says of a GitHub tab follows its entry kind in ENTRY_KINDS (config.js).
 
-// A view's kind: the key of KINDS (and of VIEW_KINDS for a GitHub view).
+// A view's kind: the key of KINDS.
 export const viewKind = (v) => `${v.source} ${v.layout}`;
 
 // What every view carries with its defaults, fresh for each view: the
@@ -412,10 +419,12 @@ export const viewDefaults = () => ({ hide: [], start: {} });
 
 export const KINDS = {
   "github board": { shape: "board" },
+  "github table": { text: (view) => `„${view.name}“: Tabellenansicht folgt` },
+  "github roadmap": { text: (view) => `„${view.name}“: Roadmap-Ansicht folgt` },
   "github list": { shape: "prs" },
   "azure sprint": { shape: "sprint" },
   "azure backlog": { shape: "backlog" },
-  "azure prs": { text: "PR-Ansicht folgt" },
+  "azure prs": { text: () => "PR-Ansicht folgt" },
 };
 
 // A view's entry in KINDS (null for a kind it does not have).
@@ -436,9 +445,12 @@ export const ORIGIN = { machine: "dieser Rechner", base: `${CONFIG_NAME}.json`, 
 
 export const pathText = (path) => `„${path.join(".")}“`;
 const pathKey = (path) => JSON.stringify(path);
-const hasName = (entry, key) => isObject(entry) && isText(entry[key]);
+// A name is a text, or a number (a project's), which a path names as its
+// digits.
+const hasName = (entry, key) => isObject(entry) && (isText(entry[key]) || Number.isInteger(entry[key]));
+const sameName = (own, name) => String(own) === String(name);
 
-export const entryByName = (list, name, key) => list.find((e) => hasName(e, key) && e[key] === name);
+export const entryByName = (list, name, key) => list.find((e) => hasName(e, key) && sameName(e[key], name));
 
 function child(node, key, path, nameKeyAt) {
   if (Array.isArray(node)) {
@@ -495,7 +507,7 @@ function mergeAt(base, over, path, out) {
       continue;
     }
     let own = value;
-    if (isObject(value) && Object.hasOwn(value, nameKey) && value[nameKey] !== name) {
+    if (isObject(value) && Object.hasOwn(value, nameKey) && !sameName(value[nameKey], name)) {
       out.errors.push(`${pathText([...path, name, nameKey])}: der Name des Eintrags ändert sich nur in ${ORIGIN.base}`);
       own = Object.fromEntries(Object.entries(value).filter(([key]) => key !== nameKey));
     }
@@ -599,11 +611,11 @@ const GONE_OPEN = "gibt es nicht mehr: „Öffnen in“ im Startdialog wählt de
 const GONE_STATUS = "„startColumn“ gibt es nicht mehr: den Status setzt der Agent selbst";
 const TOP_KEYS = ["refreshMinutes", "start", "repos", "sources"];
 // What an old views.json, with its views at the top, is told.
-const OLD_SHAPE = "views.json hat noch die alte Form: die Ansichten stehen jetzt unter „sources“, die GitHub-Ansichten in " +
-  "„sources.github.contexts“, Azure in „sources.azure“ mit „org“ und „contexts“ (Kopf von mods/board/src/main.js)";
+const OLD_SHAPE = "views.json hat noch die alte Form: die Einträge von „views“ stehen jetzt unter „sources“, die von GitHub in " +
+  "„sources.github.contexts“, die von Azure in „sources.azure“ mit „org“ und „contexts“ (Kopf von mods/board/src/main.js)";
 // What a views.json from before the contexts is told.
-const BEFORE_CONTEXTS = "views.json hat noch die Form vor den Kontexten: die GitHub-Ansichten stehen jetzt je Besitzer in " +
-  "„sources.github.contexts“ ({ \"owner\", \"projects\": [die Boards, ohne „source“ und „layout“, „number“, „field“ und „priorityField“ statt „project“], " +
+const BEFORE_CONTEXTS = "views.json hat noch die Form vor den Kontexten: die Einträge von „sources.github.views“ stehen jetzt je Besitzer in " +
+  "„sources.github.contexts“ ({ \"owner\", \"projects\": [die Projects als { \"number\" }, ihre Ansichten von GitHub], " +
   "\"prs\": der PR-Tab, ohne „source“, „layout“, „sections“ und „limit“, die für alle PR-Tabs in „sources.github.prs“ stehen }), " +
   "die Azure-Teams je Projekt in „sources.azure.contexts“ ({ \"project\", \"teams\": [{ \"team\", \"views\" }] }; den PR-Tab hat jedes Projekt von selbst) " +
   "(Kopf von mods/board/src/main.js)";
@@ -621,10 +633,8 @@ function startProblems(start, where) {
   return out;
 }
 
-const textProblems = (v, keys) => keys.filter((k) => v[k] !== undefined && v[k] !== null && typeof v[k] !== "string").map((k) => `„${k}“ muss Text sein`);
-
-// Keys every GitHub tab may have; each kind adds its own (VIEW_KINDS).
-const COMMON_KEYS = ["id", "name", "hide", "start"];
+// Keys every GitHub entry may have; each entry kind adds its own (ENTRY_KINDS).
+const COMMON_KEYS = ["start"];
 
 // The most items a board reads, and its default limit: ten of GitHub's
 // pages (PAGE).
@@ -657,81 +667,122 @@ function sectionsWithTones(sections) {
   return sections.map((s) => ({ name: s.name, query: s.query, tone: s.tone ?? order[next++ % order.length] }));
 }
 
-// Per GitHub view kind ("github <layout>", viewKind; its entry in KINDS,
-// kinds/index.js, says how it shows): the tab of a context it is (a
-// project's board, or the context's PR list), its own keys, what is wrong
-// with them, and its fields with their defaults filled in (`owner`: the
-// context's; `shared`: the PR sections of sources.github.prs).
-const VIEW_KINDS = {
-  "github board": {
-    keys: ["number", "field", "priorityField", "filter", "limit"],
+// A project's keys of the form before its views came from GitHub, and what
+// such a project is told; it is left out.
+const PROJECT_BEFORE = ["id", "name", "field", "filter", "priorityField", "hide"];
+const PROJECT_SHAPE = "{ \"number\" }, dazu „limit“, „start“ und je Ansicht „views“: { \"<Nummer der Ansicht>\": { \"hide\": [...] } }";
+const projectBefore = (keys) =>
+  `${keys.map((k) => `„${k}“`).join(", ")} ${keys.length > 1 ? "stammen" : "stammt"} aus der Form vor den Ansichten von GitHub: ein Project ist jetzt ${PROJECT_SHAPE}; ` +
+  "Name, Ansichten, Filter, Spalten und Priorität kommen von GitHub (Kopf von mods/board/src/main.js)";
+
+// A project's per-view keys: { "<view number>": { hide } }, its hidden
+// board columns, which GitHub's API does not give.
+const VIEW_NUMBER = /^[1-9][0-9]*$/;
+function projectViewsProblems(views) {
+  if (views === undefined) return [];
+  if (!isObject(views) || !Object.keys(views).every((n) => VIEW_NUMBER.test(n))) {
+    return ["„views“ ist ein Objekt mit den Nummern der Ansichten als Schlüsseln, etwa { \"1\": { \"hide\": [\"Done\"] } }"];
+  }
+  return Object.entries(views).flatMap(([n, v]) => {
+    if (!isObject(v)) return [`„views.${n}“ muss ein Objekt sein`];
+    return [
+      ...Object.keys(v).filter((k) => k !== "hide").map((k) => `„views.${n}.${k}“ gibt es nicht`),
+      ...(v.hide === undefined || textList(v.hide) ? [] : [`„views.${n}.hide“ muss eine Liste von Texten sein`]),
+    ];
+  });
+}
+
+// Per kind of a GitHub context's entry (its `entryKind`: a project, whose
+// views come from GitHub, or the context's PR list, a view of kind "github
+// list"): its own keys, the keys of an older form that leave it out
+// (`before`), what is wrong with its keys, the key that names it (`name`;
+// `named`: whether a value of it names one; `nameIn`: whose entries it is
+// its own among, its context's or all contexts'), its place as an error
+// names it (`at`), its id and its settings' path, whether it needs the PR
+// sections of sources.github.prs (`needsShared`), and its fields with their
+// defaults filled in (`owner`: the context's; `shared`: those sections).
+const ENTRY_KINDS = {
+  project: {
+    keys: ["number", "limit", "views"],
+    before: PROJECT_BEFORE,
     problems(v) {
       const out = limitProblems(v.limit, BOARD_LIMIT);
       if (!(Number.isInteger(v.number) && v.number >= 1)) out.push("„number“ ist die Nummer des Projects, eine ganze Zahl ab 1");
-      out.push(...["field", "priorityField"].filter((k) => v[k] !== undefined && !isText(v[k])).map((k) => `„${k}“ muss Text sein`));
-      return [...out, ...textProblems(v, ["filter"])];
+      return [...out, ...projectViewsProblems(v.views)];
     },
-    defaults: (v, owner) => ({
-      project: {
-        owner, number: v.number, field: v.field ?? "Status", priorityField: v.priorityField ?? "Priority",
-        // A project may lack the default one: only a named one it lacks is told.
-        priorityGiven: v.priorityField !== undefined,
-      },
-      filter: v.filter ?? "",
-      limit: v.limit ?? BOARD_LIMIT,
-    }),
+    name: "number",
+    named: Number.isInteger,
+    nameIn: "context",
+    at: (v, j) => `Project ${j + 1}${Number.isInteger(v?.number) ? ` (${v.number})` : ""}`,
+    id: (v, owner) => projectTabId(owner, v.number),
+    settingsPath: (v, context) => [...context, "projects", String(v.number)],
+    defaults: (v, owner) => ({ owner, number: v.number, limit: v.limit ?? BOARD_LIMIT, start: v.start ?? {}, views: v.views ?? {} }),
   },
-  "github list": {
-    keys: ["hideRepos", ...SHARED_PRS_KEYS],
+  prs: {
+    keys: ["id", "name", "hide", "hideRepos", ...SHARED_PRS_KEYS],
+    before: [],
     problems: (v) => [
+      ...(isText(v.id) ? [] : ["„id“ fehlt"]),
+      ...(v.name === undefined || isText(v.name) ? [] : ["„name“ muss Text sein"]),
+      ...(v.hide === undefined || textList(v.hide) ? [] : ["„hide“ muss eine Liste von Texten sein"]),
       ...SHARED_PRS_KEYS.filter((k) => v[k] !== undefined).map((k) => `„${k}“ ${SHARED_PRS}`),
       ...(v.hideRepos === undefined || (textList(v.hideRepos) && v.hideRepos.every((r) => FULL_REPO.test(r)))
         ? []
         : ["„hideRepos“ ist eine Liste von Repos mit Besitzer, etwa [\"owner/repo\"]"]),
     ],
-    defaults: (v, _owner, shared) => ({ ...shared, hideRepos: v.hideRepos ?? [] }),
+    name: "id",
+    named: isText,
+    nameIn: "all",
+    at: () => "PR-Tab",
+    id: (v) => v.id,
+    settingsPath: (v, context) => [...context, "prs"],
+    needsShared: true,
+    defaults: (v, _owner, shared) => ({
+      ...viewDefaults(), ...(v.hide && { hide: v.hide }), ...(v.start && { start: v.start }),
+      layout: "list", name: v.name ?? PRS_NAME, ...shared, hideRepos: v.hideRepos ?? [],
+    }),
   },
 };
 
 const PRS_NAME = "PRs";
 
-function tabProblems(v, layout) {
+function tabProblems(v, entryKind) {
   if (!isObject(v)) return ["muss ein Objekt sein"];
-  const kind = VIEW_KINDS[viewKind({ source: "github", layout })];
+  const kind = ENTRY_KINDS[entryKind];
+  const before = kind.before.filter((k) => Object.hasOwn(v, k));
+  if (before.length) return [projectBefore(before)];
   const out = [];
-  if (!isText(v.id)) out.push("„id“ fehlt");
-  if (layout === "board" && !isText(v.name)) out.push("„name“ fehlt");
-  else if (v.name !== undefined && !isText(v.name)) out.push("„name“ muss Text sein");
   for (const key of Object.keys(v)) {
     if (key === "startColumn") out.push(GONE_STATUS);
     else if (!COMMON_KEYS.includes(key) && !kind.keys.includes(key)) out.push(`„${key}“ gibt es nicht`);
   }
-  if (v.hide !== undefined && !textList(v.hide)) out.push("„hide“ muss eine Liste von Texten sein");
   return [...out, ...kind.problems(v), ...startProblems(v.start, "start")];
 }
 
-function normalizeView(v, layout, owner, shared) {
-  const context = [...GITHUB_CONTEXTS, owner];
-  const settingsPath = layout === "board" ? [...context, "projects", v.id] : [...context, "prs"];
-  const common = { ...viewDefaults(), id: v.id, name: v.name ?? PRS_NAME, source: "github", layout, settingsPath };
-  if (v.hide !== undefined) common.hide = v.hide;
-  if (v.start !== undefined) common.start = v.start;
-  return { ...common, ...VIEW_KINDS[viewKind(common)].defaults(v, owner, shared) };
+// A project's tab id: its owner's and its number, which name it on GitHub.
+export const projectTabId = (owner, number) => `github:project:${owner}/${number}`;
+
+function normalizeTab(v, entryKind, owner, shared) {
+  const kind = ENTRY_KINDS[entryKind];
+  const common = { entryKind, id: kind.id(v, owner), source: "github", settingsPath: kind.settingsPath(v, [...GITHUB_CONTEXTS, owner]) };
+  return { ...common, ...kind.defaults(v, owner, shared) };
 }
 
 const GITHUB_CONTEXT_KEYS = ["owner", "projects", "prs"];
 const GITHUB_CONTEXTS = ["sources", "github", "contexts"];
 const AZURE_CONTEXTS = ["sources", "azure", "contexts"];
 
-const LIST_NAMES = [[GITHUB_CONTEXTS, "owner"], [AZURE_CONTEXTS, "project"], [[...GITHUB_CONTEXTS, "*", "projects"], "id"]];
+const LIST_NAMES = [[GITHUB_CONTEXTS, "owner"], [AZURE_CONTEXTS, "project"], [[...GITHUB_CONTEXTS, "*", "projects"], "number"]];
 export const nameKeyAt = (path) => LIST_NAMES.find(([at]) => at.length === path.length && at.every((k, i) => k === "*" || k === path[i]))?.[1] ?? null;
 
-// sources.github → { github: { contexts: [{ owner, views }] } or null,
-// errors }. A context or a tab with problems is left out and each problem is
-// listed; a tab's id is the first tab's of all contexts that has it. Each
-// view carries `owners` (repoOwnership, kinds/list.js), folded. The PR tabs
-// all take the sections of sources.github.prs (readSharedPrs); without
-// valid ones there are none.
+// sources.github → { github: { contexts: [{ owner, tabs }] } or null,
+// errors }: tabs are the context's projects (entryKind "project", whose
+// views GitHub names: contexts.js) and its PR list (entryKind "prs", layout
+// "list"). A context or a tab with problems is left out and each problem is
+// listed; a project's number is the first of its context's that has it, a
+// PR tab's id the first of all contexts' PR tabs. Each tab carries `owners`
+// (repoOwnership, kinds/list.js), folded. The PR tabs all take the sections
+// of sources.github.prs (readSharedPrs); without valid ones there are none.
 function readGithub(raw) {
   if (!isObject(raw)) return { github: null, errors: ["„sources.github“ muss ein Objekt sein"] };
   const errors = Object.keys(raw).filter((k) => !["contexts", "views", "prs"].includes(k)).map((k) => `„sources.github.${k}“ gibt es nicht`);
@@ -742,7 +793,7 @@ function readGithub(raw) {
   const wanted = raw.prs !== undefined || list.some((a) => isObject(a) && a.prs !== undefined);
   const { shared, errors: sharedErrors } = wanted ? readSharedPrs(raw.prs) : { shared: null, errors: [] };
   errors.push(...sharedErrors);
-  const ids = new Set();
+  const names = { all: new Set() };
   const contexts = [];
   list.forEach((a, i) => {
     const where = `GitHub-Kontext ${i + 1}${isText(a?.owner) ? ` („${a.owner}“)` : ""}`;
@@ -754,25 +805,29 @@ function readGithub(raw) {
     if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
     if (a.projects !== undefined && !Array.isArray(a.projects)) errors.push(`${where}: „projects“ ist eine Liste von Projects`);
     if (a.prs === undefined) errors.push(`${where}: „prs“ fehlt: der PR-Tab, der letzte Tab des Kontexts, mit „id“`);
-    const tabs = [
-      ...(Array.isArray(a.projects) ? a.projects : []).map((p, j) => ({ v: p, layout: "board", at: `Project ${j + 1}${isText(p?.name) ? ` („${p.name}“)` : ""}` })),
-      ...(a.prs === undefined ? [] : [{ v: a.prs, layout: "list", at: "PR-Tab" }]),
+    const entries = [
+      ...(Array.isArray(a.projects) ? a.projects : []).map((v) => ({ v, entryKind: "project" })),
+      ...(a.prs === undefined ? [] : [{ v: a.prs, entryKind: "prs" }]),
     ];
-    const views = [];
-    for (const { v, layout, at } of tabs) {
-      const tab = tabProblems(v, layout);
-      if (!tab.length && ids.has(v.id)) tab.push(`„id“ ${v.id} gibt es schon`);
-      if (isObject(v) && isText(v.id)) ids.add(v.id);
-      if (tab.length) errors.push(...tab.map((p) => `${where}, ${at}: ${p}`));
-      else if (layout === "board" || shared) views.push(normalizeView(v, layout, a.owner, shared));
-    }
-    if (views.length) contexts.push({ owner: a.owner, views });
+    const tabs = [];
+    names.context = new Set();
+    entries.forEach(({ v, entryKind }, j) => {
+      const kind = ENTRY_KINDS[entryKind];
+      const problems = tabProblems(v, entryKind);
+      const seen = names[kind.nameIn];
+      const name = v?.[kind.name];
+      if (!problems.length && seen.has(name)) problems.push(`„${kind.name}“ ${name} gibt es schon`);
+      if (kind.named(name)) seen.add(name);
+      if (problems.length) errors.push(...problems.map((p) => `${where}, ${kind.at(v, j)}: ${p}`));
+      else if (!kind.needsShared || shared) tabs.push(normalizeTab(v, entryKind, a.owner, shared));
+    });
+    if (tabs.length) contexts.push({ owner: a.owner, tabs });
   });
-  const withPrs = contexts.filter((c) => c.views.some((v) => v.layout === "list")).map((c) => foldedName(c.owner));
+  const withPrs = contexts.filter((c) => c.tabs.some((t) => t.entryKind === "prs")).map((c) => foldedName(c.owner));
   for (const c of contexts) {
     const tabOwner = foldedName(c.owner);
     const owners = { tabOwner, otherOwners: withPrs.filter((o) => o !== tabOwner) };
-    c.views = c.views.map((v) => ({ ...v, owners }));
+    c.tabs = c.tabs.map((t) => ({ ...t, owners }));
   }
   return { github: contexts.length ? { contexts } : null, errors };
 }
@@ -925,11 +980,41 @@ export function readConfig(text, settingsRead = null) {
   const moving = settingsForContexts(raw, settings);
   if (moving?.problems) return unused(named(moving.problems));
   if (moving) return { ...unused([`${name} hat noch die Form vor den Kontexten und ist nicht umgestellt; ${MOVE_AGAIN}`]), moving };
-  const { merged, errors: unmatched, origin } = mergeSettings(raw, settings, nameKeyAt);
+  const { settings: applied, errors: before } = withoutProjectsBefore(settings);
+  const { merged, errors: unmatched, origin } = mergeSettings(raw, applied, nameKeyAt);
   const read = validateConfig(merged);
   const added = read.errors.filter((e) => !alone.errors.includes(e));
-  if (added.length) return unused(named([...unmatched, ...added]));
-  return { ...read, errors: [...read.errors, ...named(unmatched)], settings, origin };
+  if (added.length) return unused(named([...before, ...unmatched, ...added]));
+  return { ...read, errors: [...read.errors, ...named([...before, ...unmatched])], settings: applied, origin };
+}
+
+// This machine's settings of a project in the form before its views came
+// from GitHub: an entry named by its id, or one by its number with keys of
+// that form. Each is named and left out of what applies; it stays in the
+// file. Lists set whole are left to the check of views.json.
+const VIEW_HIDE_PATH = "„sources.github.contexts.<owner>.projects.<Nummer>.views.<Nummer der Ansicht>.hide“";
+const BEFORE_VIEWS = `gilt nicht, aus der Form vor den Ansichten von GitHub: ein Project heißt jetzt nach seiner Nummer, die ausgeblendeten Spalten stehen je Ansicht in ${VIEW_HIDE_PATH}; bitte von Hand übertragen`;
+// What a GitHub view's settings from before the contexts are told where no
+// PR tab has their id.
+const PROJECT_NO_ID = `ein Project hat keine „id“ mehr, seine ausgeblendeten Spalten stehen je Ansicht in ${VIEW_HIDE_PATH}; bitte von Hand übertragen`;
+function withoutProjectsBefore(settings) {
+  const contexts = settings.sources?.github?.contexts;
+  if (!isObject(contexts)) return { settings, errors: [] };
+  const errors = [];
+  let next = settings;
+  for (const [owner, context] of Object.entries(contexts)) {
+    const projects = isObject(context) ? context.projects : undefined;
+    if (!isObject(projects)) continue;
+    const at = [...GITHUB_CONTEXTS, owner, "projects"];
+    for (const [name, project] of Object.entries(projects)) {
+      const keys = VIEW_NUMBER.test(name) ? (isObject(project) ? PROJECT_BEFORE.filter((k) => Object.hasOwn(project, k)) : []).map((k) => [name, k]) : [[name]];
+      for (const path of keys) {
+        errors.push(`${pathText([...at, ...path])} ${BEFORE_VIEWS}`);
+        next = withSetting(next, [...at, ...path], undefined, () => null);
+      }
+    }
+  }
+  return { settings: next, errors };
 }
 
 export const MOVE_AGAIN = "das nächste Lesen (r) versucht es noch einmal";
@@ -979,33 +1064,25 @@ export function validateConfig(raw) {
   return { config: azure || github ? { refreshMinutes, start, repos, azure, github } : null, errors };
 }
 
-export const githubViews = (config) => (config?.github?.contexts ?? []).flatMap((c) => c.views);
-
 export const hidePath = (view) => [...view.settingsPath, "hide"];
 export const repoHidePath = (view) => [...view.settingsPath, "hideRepos"];
 
 const viewPath = (...id) => ["sources", "github", "views", ...id];
 const SHARED_PRS_PATH = ["sources", "github", "prs"];
 
-// The keys of a GitHub view of the form before the contexts that its tab
+// The keys of a GitHub PR view of the form before the contexts that its tab
 // holds as they were (value), those that are the PR tabs' together now
-// (shared: a list's sections and limit), and those it says through its
-// context: its source, its layout and its project's owner.
-function tabSettings(value, layout, owner) {
+// (shared: its sections and limit), and those it says through its context:
+// its source and its layout.
+function tabSettings(value, owner) {
   if (!isObject(value)) return { problem: "ist kein Objekt" };
-  const kind = VIEW_KINDS[viewKind({ source: "github", layout })];
+  const kind = ENTRY_KINDS.prs;
   const out = {};
   const shared = {};
   for (const [key, v] of Object.entries(value)) {
-    if ((key === "source" && v === "github") || (key === "layout" && v === layout)) continue;
-    if (layout === "list" && SHARED_PRS_KEYS.includes(key)) shared[key] = v;
-    else if (key === "project" && layout === "board" && isObject(v)) {
-      for (const [inner, w] of Object.entries(v)) {
-        if (inner === "owner" && w === owner) continue;
-        if (!kind.keys.includes(inner) || inner === "filter") return { problem: `„project.${inner}“ hat im Kontext ${owner} keinen Platz` };
-        out[inner] = w;
-      }
-    } else if (COMMON_KEYS.includes(key) || kind.keys.includes(key)) out[key] = v;
+    if ((key === "source" && v === "github") || (key === "layout" && v === "list")) continue;
+    if (SHARED_PRS_KEYS.includes(key)) shared[key] = v;
+    else if (COMMON_KEYS.includes(key) || kind.keys.includes(key)) out[key] = v;
     else return { problem: `„${key}“ hat im Kontext ${owner} keinen Platz` };
   }
   return { value: out, shared };
@@ -1034,23 +1111,24 @@ export function settingsForContexts(raw, settings) {
   if (teams) problems.push(cannot(AZURE_CONTEXTS, "die Teams stehen jetzt je Projekt in „sources.azure.contexts“ ({ \"project\", \"teams\" }); bitte von Hand übertragen"));
   if (views !== undefined && !isObject(views)) problems.push(cannot(viewPath(), "hier eine ganze Liste; bitte von Hand nach „sources.github.contexts“ übertragen"));
   if (sources.github?.contexts !== undefined && !isObject(sources.github.contexts)) problems.push(cannot(GITHUB_CONTEXTS, "hier eine ganze Liste"));
-  const tabs = new Map((config.github?.contexts ?? []).flatMap((c) => c.views.map((v) => [v.id, { view: v, owner: c.owner }])));
+  // Only a PR tab's id stands in views.json, so only a PR tab takes a view's settings.
+  const tabs = new Map((config.github?.contexts ?? []).flatMap((c) => c.tabs.filter((t) => t.entryKind === "prs").map((t) => [t.id, { entry: t, owner: c.owner }])));
   let next = isObject(views) ? withSetting(settings, viewPath(), undefined, nameKeyAt) : settings;
   const moved = [];
   for (const [id, value] of Object.entries(isObject(views) ? views : {})) {
     const from = viewPath(id);
     const tab = tabs.get(id);
     if (!tab) {
-      problems.push(cannot(from, `${CONFIG_NAME}.json hat keinen Tab mit „id“ „${id}“`));
+      problems.push(cannot(from, `${CONFIG_NAME}.json hat keinen PR-Tab mit „id“ „${id}“; ${PROJECT_NO_ID}`));
       continue;
     }
-    const kept = tabSettings(value, tab.view.layout, tab.owner);
+    const kept = tabSettings(value, tab.owner);
     if (kept.problem) {
       problems.push(cannot(from, kept.problem));
       continue;
     }
     const moves = Object.entries(kept.shared).map(([key, v]) => ({ at: [...from, key], to: [...SHARED_PRS_PATH, key], v, shared: true }));
-    if (Object.keys(kept.value).length || !moves.length) moves.unshift({ at: from, to: tab.view.settingsPath, v: kept.value, shared: false });
+    if (Object.keys(kept.value).length || !moves.length) moves.unshift({ at: from, to: tab.entry.settingsPath, v: kept.value, shared: false });
     for (const { at, to, v, shared } of moves) {
       const there = valueAt(next, to, nameKeyAt);
       if (there !== undefined && !(shared && JSON.stringify(there) === JSON.stringify(v))) {
@@ -1263,8 +1341,9 @@ export function storedHiddenList(view, stored) {
 
 // `entryOf(view)`: what the store holds for the view, undefined for nothing.
 // → { moves: [{ view, list }], drop: [view] }: an entry is dropped where it
-// is no stored hide, its view no board, this machine sets the view's hide
-// already, or it changes nothing.
+// is no stored hide, its view no board or one without settings of its own
+// (settingsPath null), this machine sets the view's hide already, or it
+// changes nothing.
 export function storedHiddenMoves(views, entryOf, originAt) {
   const moves = [];
   const drop = [];
@@ -1272,7 +1351,7 @@ export function storedHiddenMoves(views, entryOf, originAt) {
     const entry = entryOf(view);
     if (entry === undefined) continue;
     const stored = readStoredHidden(entry);
-    const list = stored && view.layout === "board" && originAt(hidePath(view)) !== ORIGIN.machine ? storedHiddenList(view, stored) : null;
+    const list = stored && view.layout === "board" && view.settingsPath && originAt(hidePath(view)) !== ORIGIN.machine ? storedHiddenList(view, stored) : null;
     if (list && !sameNames(list, view.hide)) moves.push({ view, list });
     else drop.push(view);
   }
@@ -1287,8 +1366,9 @@ export function sameNames(a, b) {
 
 export const hiddenColumns = (view) => new Set(view.hide);
 
-// Whether a column can be hidden: one with a target (an option of the
-// view's field); the column without status is always shown.
+// Whether a column can be hidden: one with a target (an option or an
+// iteration of the view's column field); the column without a value is
+// always shown.
 export const hideable = (column) => Boolean(column?.target);
 
 // null for a column that cannot be hidden.
@@ -1397,6 +1477,38 @@ export function withHidden(board, hidden) {
 export function shownColumns(board, filter, mine = false) {
   const all = showsAll(filter, mine);
   return (board?.columns ?? []).filter((c) => !c.hidden).map((c) => ({ ...c, shown: all ? c.cards : c.cards.filter((card) => shows(card, filter, mine, board.viewer)) }));
+}
+
+// The rows of a board with swimlanes (data.lanes), as it draws them: per
+// swimlane that shows a card, its head and then its rows, the n-th of which
+// holds the n-th card the swimlane has in each column (null where it has
+// fewer). `columns` are the shown ones (shownColumns).
+export function laneRows(lanes, columns) {
+  const rows = [];
+  for (const lane of lanes) {
+    const cells = columns.map((c) => c.shown.filter((card) => card.lane === lane.id));
+    const count = cells.reduce((n, cards) => n + cards.length, 0);
+    if (!count) continue;
+    rows.push({ head: true, lane, count });
+    const depth = Math.max(...cells.map((cards) => cards.length));
+    for (let r = 0; r < depth; r++) rows.push({ head: false, lane, cards: cells.map((cards) => cards[r] ?? null) });
+  }
+  return rows;
+}
+
+// Keyboard movement on a board with swimlanes: up and down within the
+// column, through its swimlanes in their order (navigate); left and right
+// to the next column's card in the same swimlane and row, else its swimlane's
+// last there, else as navigate goes.
+export function laneNavigate(columns, sel, dir) {
+  if (dir !== "left" && dir !== "right") return navigate(columns, sel, dir);
+  const from = columns[sel?.col];
+  const card = from?.shown.find((c) => c.key === sel?.key);
+  const to = Math.min(Math.max((sel?.col ?? 0) + (dir === "left" ? -1 : 1), 0), columns.length - 1);
+  if (!card || !columns[to]) return navigate(columns, sel, dir);
+  const row = from.shown.filter((c) => c.lane === card.lane).indexOf(card);
+  const there = columns[to].shown.filter((c) => c.lane === card.lane);
+  return there.length ? { col: to, key: there[Math.min(row, there.length - 1)].key } : navigate(columns, sel, dir);
 }
 
 // ==== src/kinds/states.js ====
@@ -1614,17 +1726,44 @@ export function startRow(rows, now) {
 // A team view's name, as the switch shows it.
 export const teamViewName = (id) => TEAM_VIEWS.find((v) => v.id === id)?.name ?? id;
 
-// The id of a GitHub view's tab.
+// The name of a tab's view `id` as its switch shows it: a team's, or a
+// project's as GitHub names it.
+export const tabViewName = (tab, id) => (tab.kind === "project" ? tab.meta?.views.find((v) => v.number === id)?.name ?? String(id) : teamViewName(id));
+
+// The id of a GitHub PR tab.
 export const githubTabId = (viewId) => `github:${viewId}`;
 
-const githubTab = (v) => ({ id: githubTabId(v.id), source: "github", kind: "view", name: v.name, view: v });
+// What the board knows of a project from its last read, by its tab's id
+// (`known.get(id)`: { title, url, views: [{ number, name, layout, filter }]
+// in GitHub's order, layout "board", "table" or "roadmap" }, null before
+// any): Board.learnProject keeps it.
+export const NO_PROJECTS = { get: () => null };
+
+// Where the store keeps what the board knows of a project, by its tab's id,
+// and the keys of the projects whose tabs (`tabs`, their ids) are gone.
+export const PROJECT_PREFIX = "project:";
+export const projectKey = (id) => `${PROJECT_PREFIX}${id}`;
+export const goneProjects = (keys, tabs) => keys.filter((k) => k.startsWith(PROJECT_PREFIX) && !tabs.has(k.slice(PROJECT_PREFIX.length)));
+
+// A project's tab, its views.json entry as `entry`: named as GitHub names
+// the project, its views GitHub's (their numbers) once the board knows
+// them.
+function projectTab(entry, known) {
+  const meta = known.get(entry.id);
+  return { id: entry.id, source: "github", kind: "project", name: meta?.title ?? `Projekt ${entry.number}`, entry, meta, views: (meta?.views ?? []).map((v) => v.number) };
+}
+
+// A PR tab: its entry is its view, as GitHub's "list".
+const githubPrsTab = (entry) => ({ id: githubTabId(entry.id), source: "github", kind: "view", name: entry.name, view: entry });
+
+const githubTab = (entry, known) => (entry.entryKind === "project" ? projectTab(entry, known) : githubPrsTab(entry));
 
 // The sources in the switch's order, each with its contexts in views.json's.
 export const SOURCES = [
   {
     id: "github",
     name: "GitHub",
-    contexts: (config) => (config?.github?.contexts ?? []).map((c) => ({ id: `github:${c.owner}`, name: c.owner, tabs: c.views.map(githubTab) })),
+    contexts: (config, known) => (config?.github?.contexts ?? []).map((c) => ({ id: `github:${c.owner}`, name: c.owner, tabs: c.tabs.map((t) => githubTab(t, known)) })),
   },
   {
     id: "azure",
@@ -1634,15 +1773,19 @@ export const SOURCES = [
 ];
 
 // The contexts of a config, in the switch's order: { id, source, name,
-// tabs }, a tab { id, source, kind: "team" | "prs" | "view", name, … } (a
-// team's fields, a project's, or the GitHub view as `view`).
-export const contextsOf = (config) => SOURCES.flatMap((s) => s.contexts(config).map((c) => ({ ...c, source: s.id })));
+// tabs }, a tab { id, source, kind: "team" | "prs" | "project" | "view",
+// name, … } (a team's fields, an Azure project's, a GitHub project's
+// views.json entry as `entry` with what the board knows of it, `known`, as
+// `meta`, or the GitHub PR view as `view`).
+export const contextsOf = (config, known = NO_PROJECTS) => SOURCES.flatMap((s) => s.contexts(config, known).map((c) => ({ ...c, source: s.id })));
 
-// Whether a tab has a switch between views: a team with more than one.
-export const hasViewSwitch = (tab) => tab?.kind === "team" && tab.views.length > 1;
+// Whether a tab shows one of its own views (`views`): a team or a
+// project; and whether it has a switch between them, more than one.
+export const hasViews = (tab) => tab?.kind === "team" || tab?.kind === "project";
+export const hasViewSwitch = (tab) => hasViews(tab) && tab.views.length > 1;
 
-// The hint line's name for a team's switch: its views' names, "Sprint/Backlog".
-export const viewSwitchHint = (tab) => tab.views.map(teamViewName).join("/");
+// The hint line's name for a tab's switch: its views' names, "Sprint/Backlog".
+export const viewSwitchHint = (tab) => tab.views.map((v) => tabViewName(tab, v)).join("/");
 
 // The index `by` places on from `at` in a list `length` long, round past
 // its end to its start and back: the next or previous tab, context or view.
@@ -1652,32 +1795,61 @@ export const stepIndex = (length, at, by) => (at + by + length) % length;
 // among the tabs, the shown context among the contexts.
 export const shownIndex = (list, shown) => list.findIndex((x) => x.id === shown?.id);
 
-// The view a team tab shows after `shown`, one of its views.
-export const teamViewAfter = (tab, shown) => tab.views[stepIndex(tab.views.length, tab.views.indexOf(shown), 1)];
+// The view a team's or a project's tab shows after `shown`, one of its
+// views.
+export const tabViewAfter = (tab, shown) => tab.views[stepIndex(tab.views.length, tab.views.indexOf(shown), 1)];
 
 // The entry of `list` whose id is `id`, else the first; null in an empty
 // list. A remembered choice that views.json no longer has falls back so.
 export const pick = (list, id) => list.find((x) => x.id === id) ?? list[0] ?? null;
 
-// The view a team tab shows: the remembered one where it has it, else its
-// first.
-export const teamView = (tab, remembered) => (tab.views.includes(remembered) ? remembered : tab.views[0]);
+// The view a team's or a project's tab shows: the remembered one where it
+// has it, else its first (null for a project whose views are not known yet).
+export const tabView = (tab, remembered) => (tab.views.includes(remembered) ? remembered : tab.views[0] ?? null);
 
-// The view a tab shows (a team: its view `teamViewId`): a GitHub view as
-// views.json has it, an Azure one { id, source: "azure", layout: "sprint" |
-// "backlog" | "prs", name, tab, hide, start }. Its kind is viewKind(view).
-export function viewOf(tab, teamViewId) {
+// The id of the view that reads a project's views (projectView without
+// one shown).
+export const firstViewId = (tab) => `${tab.id}:first`;
+
+// A project's view as the board shows it: { id, source: "github", layout,
+// name, tab, address: { owner, number, view } (the project's and the
+// view's number on GitHub), limit, start, hide (this view's hidden
+// columns), settingsPath (the view's own, under the project's), owners },
+// for `shown`, one of its tab's meta.views. Without one, the view whose
+// read learns the project's views and then reads the view `wanted` (the
+// one remembered, where the project still has it) or else the first: a
+// board with address.view null that hides nothing and has no settings of
+// its own (settingsPath null).
+export function projectView(tab, shown, wanted = null) {
+  const p = tab.entry;
+  const common = { source: "github", tab, limit: p.limit, start: p.start, owners: p.owners };
+  const address = (view) => ({ owner: p.owner, number: p.number, view });
+  if (!shown) return { ...common, id: firstViewId(tab), layout: "board", name: tab.name, address: address(null), wanted, hide: [], settingsPath: null };
+  const settingsPath = [...p.settingsPath, "views", String(shown.number)];
+  return { ...common, id: `${tab.id}:${shown.number}`, layout: shown.layout, name: shown.name, address: address(shown.number), hide: p.views[shown.number]?.hide ?? [], settingsPath };
+}
+
+// The view a tab shows (a team or a project: its view `viewId`): a GitHub
+// PR view as views.json has it, a project's (projectView), an Azure one {
+// id, source: "azure", layout: "sprint" | "backlog" | "prs", name, tab,
+// hide, start }. Its kind is viewKind(view).
+export function viewOf(tab, viewId) {
   if (tab.kind === "view") return tab.view;
+  if (tab.kind === "project") {
+    const shown = tab.meta?.views.find((v) => v.number === viewId);
+    return shown ? projectView(tab, shown) : projectView(tab, null, viewId ?? null);
+  }
   if (tab.kind === "team") {
-    return { id: `${tab.id}:${teamViewId}`, source: "azure", layout: teamViewId, name: teamViewName(teamViewId), tab, ...viewDefaults() };
+    return { id: `${tab.id}:${viewId}`, source: "azure", layout: viewId, name: teamViewName(viewId), tab, ...viewDefaults() };
   }
   return { id: tab.id, source: "azure", layout: "prs", name: tab.name, tab, ...viewDefaults() };
 }
 
-// Every view of a context or a config: one per tab, one per view of a
-// team.
-export const contextViews = (context) => context.tabs.flatMap((t) => (t.kind === "team" ? t.views.map((v) => viewOf(t, v)) : [viewOf(t)]));
-export const viewsOf = (config) => contextsOf(config).flatMap(contextViews);
+// Every view of a context or a config: one per tab, one per view of a team
+// or of a project (a project the board knows no views of: the view that
+// learns them).
+export const contextViews = (context) => context.tabs.flatMap((t) => (hasViews(t) && t.views.length ? t.views.map((v) => viewOf(t, v)) : [viewOf(t, null)]));
+export const viewsOf = (config, known = NO_PROJECTS) => contextsOf(config, known).flatMap(contextViews);
 
 // The first context of `source`, which a source alone names.
 export const firstContextOf = (contexts, source) => contexts.find((c) => c.source === source) ?? null;
@@ -1922,17 +2094,16 @@ export async function call(tool, args, on, timeout, { write = false, paths = nul
 export const SAVED_MAX = 1000000;
 export const SAVED_PREFIX = "board:data:";
 // Raised when what a shape draws from changes, so that no older data is drawn.
-export const SAVED_VERSION = 2;
+export const SAVED_VERSION = 3;
 export const savedKey = (id) => `${SAVED_PREFIX}${id}`;
 
 // Data read for other hidden columns, another form of the view or another
-// organisation, project or team of its tab is not its data; where its
+// organisation, project or team of its Azure tab is not its data; where its
 // settings lie, the rest of its tab and the repos a PR tab hides (it reads
-// them all) are not its form. A GitHub view has no tab and signs without
-// one.
+// them all) are not its form. A GitHub view signs without its tab.
 const savedSig = (view, hidden) => {
   const { settingsPath, tab, hideRepos, ...form } = view;
-  const reads = tab ? [{ org: tab.org, project: tab.project, team: tab.team }] : [];
+  const reads = view.source === "azure" && tab ? [{ org: tab.org, project: tab.project, team: tab.team }] : [];
   return JSON.stringify([SAVED_VERSION, form, ...reads, [...hidden].sort()]);
 };
 
@@ -1969,8 +2140,10 @@ export const goneSaved = (keys, ids) => keys.filter((k) => k.startsWith(SAVED_PR
 
 // A load's live: partial(result) draws result() ({ data, warnings }) before
 // the end, calling it at once or not at all; page(n, of) names the page
-// under way.
-export const NO_LIVE = { partial() {}, page() {} };
+// under way; project(meta) hands the board what a GitHub project's read
+// learnt of it (Board.learnProject) and gives the view to read on as the
+// board shows it now (null: the one loaded; false: none, the read ends).
+export const NO_LIVE = { partial() {}, page() {}, project: () => null };
 
 export const refreshDue = (st, now, every) => now - st.tried >= every;
 
@@ -4024,26 +4197,194 @@ export function repoSwitches(data, visible) {
 
 // ==== src/sources/github.js ====
 
-// GitHub: the queries for a Projects v2 board and a pull request list, their
-// parsing, the status mutation, what gh's answers and failures mean, and the
-// source as the board uses it (makeGithub).
+// GitHub: the queries for a Projects v2 project (its views and fields) and
+// a view's items, a pull request list, their parsing, the column mutation,
+// what gh's answers and failures mean, and the source as the board uses it
+// (makeGithub).
 
 // Theme colors for GitHub's named colors: a Projects v2 option's and an
 // issue type's (IssueTypeColor), which share the names.
 const GITHUB_COLORS = {
   GRAY: "muted", BLUE: "ansi4", GREEN: "ansi2", YELLOW: "ansi3", ORANGE: "ansi11", RED: "ansi1", PINK: "ansi13", PURPLE: "ansi5",
 };
-export const NO_STATUS = "none";
+// The id of the column and of the swimlane of the cards without a value,
+// outside the ids of the others (a lane's is `v:` and its value's key).
+export const NO_VALUE = "none";
 
-// A filter term on the project field: GitHub's filters take the field's name
-// in lower case, spaces as dashes, and values in quotes.
+// A filter term on a project's field: GitHub's filters take the field's name
+// in lower case, spaces as dashes, and values in quotes (measured for
+// Status only).
 const fieldKey = (field) => field.toLowerCase().replace(/\s+/g, "-");
 const quoted = (value) => `"${value.replace(/"/g, "")}"`;
 
-const ITEM_FIELDS = `
-  id
-  fieldValueByName(name: $field) { ... on ProjectV2ItemFieldSingleSelectValue { optionId name } }
-  priority: fieldValueByName(name: $priority) { ... on ProjectV2ItemFieldSingleSelectValue { name color } }
+// GitHub's layouts of a project's view, as the board names them (viewKind).
+const LAYOUTS = { BOARD_LAYOUT: "board", TABLE_LAYOUT: "table", ROADMAP_LAYOUT: "roadmap" };
+
+// How many of a project's fields and views a read takes (GitHub keeps at
+// most 50 fields a project), and of a view's sort keys; a view groups by
+// one field at most, for its columns and for its swimlanes.
+export const PROJECT_FIELDS = 50;
+export const PROJECT_VIEWS = 50;
+export const SORT_KEYS = 5;
+
+const FIELD_REF = "... on ProjectV2FieldCommon { id name }";
+
+// One GraphQL request for a project as its views show it: its fields (with
+// their options and iterations) and its views in GitHub's order, each with
+// its layout, filter, column field, swimlane field and sort keys; and the
+// login gh runs as. The header of main.js says what it costs.
+export const PROJECT_QUERY = `query($login: String!, $number: Int!) {
+  viewer { login }
+  repositoryOwner(login: $login) {
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        id title url
+        fields(first: ${PROJECT_FIELDS}) { nodes {
+          ... on ProjectV2FieldCommon { id name dataType }
+          ... on ProjectV2SingleSelectField { options { id name color } }
+          ... on ProjectV2IterationField { configuration { iterations { id title startDate } completedIterations { id title startDate } } }
+        } }
+        views(first: ${PROJECT_VIEWS}, orderBy: { field: POSITION, direction: ASC }) { nodes {
+          number name layout filter
+          verticalGroupByFields(first: 1) { nodes { ${FIELD_REF} } }
+          groupByFields(first: 1) { nodes { ${FIELD_REF} } }
+          sortByFields(first: ${SORT_KEYS}) { nodes { direction field { ${FIELD_REF} } } }
+        } }
+      }
+    }
+  }
+}`;
+
+export const githubProjectArgs = (view) => ["api", "graphql", "-f", `query=${PROJECT_QUERY}`, "-f", `login=${view.address.owner}`, "-F", `number=${view.address.number}`];
+
+const PROJECT_PATH = ["repositoryOwner", "projectV2"];
+
+// A field's iterations in their order, the completed ones first, each with
+// whether it is completed.
+function iterationsOf(config) {
+  const of = (list, completed) => (Array.isArray(list) ? list : []).filter((i) => typeof i?.id === "string").map((i) => ({ id: i.id, title: i.title ?? i.id, startDate: i.startDate ?? "", completed }));
+  return [...of(config?.completedIterations, true), ...of(config?.iterations, false)].sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
+}
+
+function projectField(node) {
+  const field = { id: node.id, name: node.name, type: node.dataType ?? null };
+  if (Array.isArray(node.options)) field.options = node.options.map((o) => ({ id: o.id, name: o.name, color: o.color ?? null }));
+  if (node.configuration) field.iterations = iterationsOf(node.configuration);
+  return field;
+}
+
+const fieldIdsOf = (conn) => (Array.isArray(conn?.nodes) ? conn.nodes : []).map((n) => n?.id).filter(Boolean);
+
+function parseViewNode(node) {
+  return {
+    number: node.number,
+    name: node.name ?? `Ansicht ${node.number}`,
+    layout: LAYOUTS[node.layout] ?? "table",
+    filter: typeof node.filter === "string" ? node.filter : "",
+    column: fieldIdsOf(node.verticalGroupByFields)[0] ?? null,
+    lane: fieldIdsOf(node.groupByFields)[0] ?? null,
+    sorts: (Array.isArray(node.sortByFields?.nodes) ? node.sortByFields.nodes : [])
+      .filter((s) => s?.field?.id)
+      .map((s) => ({ field: s.field.id, direction: s.direction === "DESC" ? "DESC" : "ASC" })),
+  };
+}
+
+// gh's answer for githubProjectArgs (and its GraphQL errors) → the project
+// as its views show it: { id, title, url, viewer, fields: [{ id, name, type
+// (GitHub's dataType), options? (a single-select field's), iterations? (an
+// iteration field's, in their order) }], views: [{ number, name, layout
+// ("board", "table" or "roadmap"), filter, column, lane (a field's id, or
+// null), sorts: [{ field, direction }] }] }. A project that is not there is
+// explained by the error at its path.
+export function parseGithubProject(json, view, errors = []) {
+  const { owner, number } = view.address;
+  const ownerNode = json?.data?.repositoryOwner;
+  const why = (e) => firstLine(e.message);
+  if (!ownerNode) {
+    const e = errorAt(errors, ["repositoryOwner"]);
+    throw new BoardError(e && e.type !== "NOT_FOUND" ? `GitHub: ${why(e)}` : `GitHub kennt „${owner}“ nicht`);
+  }
+  const project = ownerNode.projectV2;
+  if (!project) {
+    const e = errorAt(errors, PROJECT_PATH);
+    if (e?.type === "NOT_FOUND") throw new BoardError(`Projekt ${number} von ${owner} nicht gefunden – „number“ in ${CONFIG_NAME}.json prüfen`);
+    throw new BoardError(e ? `Projekt ${number} von ${owner}: ${why(e)}` : `Projekt ${number} von ${owner} nicht gefunden oder kein Zugriff`);
+  }
+  for (const part of ["fields", "views"]) {
+    if (Array.isArray(project[part]?.nodes)) continue;
+    const e = errorAt(errors, [...PROJECT_PATH, part]);
+    throw new BoardError(e ? `Projekt „${project.title}“: ${why(e)}` : `Projekt „${project.title}“ lieferte seine ${part === "fields" ? "Felder" : "Ansichten"} nicht`);
+  }
+  return {
+    id: project.id,
+    title: project.title,
+    url: project.url,
+    viewer: json.data.viewer?.login ?? null,
+    fields: project.fields.nodes.filter((n) => n?.id && typeof n.name === "string").map(projectField),
+    views: project.views.nodes.filter((n) => Number.isInteger(n?.number)).map(parseViewNode),
+  };
+}
+
+// What the board keeps of a project between reads (Board.learnProject): its
+// title, address and views, in GitHub's order, as the switch shows them;
+// and what the store holds of it read back so (null for anything else, as
+// for none).
+const metaView = (v) => ({ number: v.number, name: v.name, layout: v.layout, filter: v.filter });
+export const projectMeta = (project) => ({ title: project.title, url: project.url, views: project.views.map(metaView) });
+export function readProjectMeta(value) {
+  const views = value?.views;
+  if (typeof value?.title !== "string" || !Array.isArray(views)) return null;
+  const layouts = Object.values(LAYOUTS);
+  const valid = views.every((v) => Number.isInteger(v?.number) && typeof v.name === "string" && layouts.includes(v.layout) && typeof v.filter === "string");
+  return valid ? { title: value.title, url: typeof value.url === "string" ? value.url : null, views: views.map(metaView) } : null;
+}
+
+// The fields a board's columns can stand on, which a move sets.
+const COLUMN_TYPES = ["SINGLE_SELECT", "ITERATION"];
+
+// The field a board view without its own column field takes, as GitHub
+// does.
+const STATUS_FIELD = "Status";
+
+// The single-select field a card's priority comes from, where the project
+// has one by that name (GitHub's template field).
+export const PRIORITY_FIELD = "Priority";
+
+// How the board reads and draws the project view `shown` (one of
+// project.views) as a board: its column field (the view's, else "Status",
+// `ownColumn` false then), its swimlane field and sort keys where the board
+// can read them (`unreadable`: the names of those it cannot, a field of a
+// kind it does not read), the priority field, and the fields read by name
+// besides the column's and the priority's (`values`, each as the alias v<i>
+// of the items' query).
+export function boardPlan(project, shown) {
+  const byId = new Map(project.fields.map((f) => [f.id, f]));
+  const own = byId.get(shown.column);
+  const ownColumn = Boolean(own && COLUMN_TYPES.includes(own.type));
+  const column = ownColumn ? own : project.fields.find((f) => f.name === STATUS_FIELD && f.type === "SINGLE_SELECT") ?? null;
+  if (!column) throw new BoardError(`Ansicht „${shown.name}“ von „${project.title}“ hat kein Feld für ihre Spalten (ein Auswahl- oder Iterationsfeld)`);
+  const unreadable = [];
+  const usable = (field) => {
+    if (!field) return null;
+    if (readable(field)) return field;
+    unreadable.push(field.name);
+    return null;
+  };
+  const lane = usable(byId.get(shown.lane));
+  const sorts = shown.sorts.map((s) => ({ field: usable(byId.get(s.field)), direction: s.direction })).filter((s) => s.field);
+  const priority = project.fields.find((f) => f.name === PRIORITY_FIELD && f.type === "SINGLE_SELECT") ?? null;
+  const values = [...new Set([lane, ...sorts.map((s) => s.field)].filter((f) => f && readByName(f) && f !== column && f !== priority))];
+  return { project, shown, column, ownColumn, lane, sorts, priority, values, unreadable };
+}
+
+const VALUE_FIELDS = `
+    ... on ProjectV2ItemFieldSingleSelectValue { optionId name color }
+    ... on ProjectV2ItemFieldIterationValue { iterationId title startDate }
+    ... on ProjectV2ItemFieldNumberValue { number }
+    ... on ProjectV2ItemFieldDateValue { date }
+    ... on ProjectV2ItemFieldTextValue { text }`;
+
+const CONTENT_FIELDS = `
   content {
     __typename
     ... on Issue { id number title url issueType { name color } repository { nameWithOwner } author { login }
@@ -4055,29 +4396,41 @@ const ITEM_FIELDS = `
     ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login name } } }
   }`;
 
-// The view's filter with `term` added.
-const filterWith = (view, term) => [view.filter, term].filter(Boolean).join(" ");
-
-// The filter of a board's shown items: the view's, without the hidden
-// columns.
-function boardFilter(view, hidden) {
-  const names = [...hidden];
-  return filterWith(view, names.length ? `-${fieldKey(view.project.field)}:${names.map(quoted).join(",")}` : "");
+// An item's fields as the board's query reads them: the column field's
+// value (fieldValueByName), the priority's, the other fields' by name
+// (v<i>) and the content.
+function itemFields(plan) {
+  const priority = plan.priority ? "\n  priority: fieldValueByName(name: $priority) { ... on ProjectV2ItemFieldSingleSelectValue { optionId name color } }" : "";
+  const values = plan.values.map((_, i) => `\n  v${i}: fieldValueByName(name: $v${i}) {${VALUE_FIELDS} }`).join("");
+  return `
+  id
+  fieldValueByName(name: $column) {${VALUE_FIELDS} }${priority}${values}${CONTENT_FIELDS}`;
 }
 
-// The items a board's query reads: the page after `read` items, from the
-// cursor $after where `paged` (a page after the first; `read` may be 0
+const filterWith = (plan, term) => [plan.shown.filter, term].filter(Boolean).join(" ");
+
+// The filter of a board's shown items: the view's, with its hidden columns
+// left out.
+function boardFilter(plan, hidden) {
+  const names = [...hidden];
+  return filterWith(plan, names.length ? `-${fieldKey(plan.column.name)}:${names.map(quoted).join(",")}` : "");
+}
+
+// The items a board's query reads: the page after `count` items, from the
+// cursor $after where `paged` (a page after the first; `count` may be 0
 // there, after an empty first page), PAGE at most and no more than the
 // view's limit leaves, with whether more follow and where they start.
-function itemsSelection(view, read, paged) {
+function itemsSelection(view, plan, count, paged) {
   const after = paged ? ", after: $after" : "";
-  return `items(first: ${Math.min(PAGE, view.limit - read)}${after}, query: $filter) { totalCount pageInfo { hasNextPage endCursor } nodes { ${ITEM_FIELDS} } }`;
+  return `items(first: ${Math.min(PAGE, view.limit - count)}${after}, query: $filter) { totalCount pageInfo { hasNextPage endCursor } nodes {${itemFields(plan)} } }`;
 }
 
-// A board's query: its variables after the ones every page has, what it
-// reads besides the project (`head`), and what it reads of the project.
-const boardQuery = (vars, head, project) => `query($login: String!, $number: Int!, $field: String!, $priority: String!, $filter: String!${vars}) {
-${head}  repositoryOwner(login: $login) {
+// A board's query: its variables after the ones every page has, and what it
+// reads of the project.
+function boardQuery(plan, vars, project) {
+  const own = [...(plan.priority ? [", $priority: String!"] : []), ...plan.values.map((_, i) => `, $v${i}: String!`)].join("");
+  return `query($login: String!, $number: Int!, $column: String!, $filter: String!${own}${vars}) {
+  repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
         ${project}
@@ -4085,38 +4438,38 @@ ${head}  repositoryOwner(login: $login) {
     }
   }
 }`;
+}
 
-function boardArgs(view, hidden, doc) {
-  const { owner, number, field, priorityField } = view.project;
+function boardArgs(view, plan, hidden, doc) {
   return [
-    "api", "graphql", "-f", `query=${doc}`, "-f", `login=${owner}`, "-F", `number=${number}`, "-f", `field=${field}`, "-f", `priority=${priorityField}`,
-    "-f", `filter=${boardFilter(view, hidden)}`,
+    "api", "graphql", "-f", `query=${doc}`, "-f", `login=${view.address.owner}`, "-F", `number=${view.address.number}`, "-f", `column=${plan.column.name}`,
+    "-f", `filter=${boardFilter(plan, hidden)}`,
+    ...(plan.priority ? ["-f", `priority=${plan.priority.name}`] : []),
+    ...plan.values.flatMap((f, i) => ["-f", `v${i}=${f.name}`]),
   ];
 }
 
-// The hidden columns' counts (first: 0) are for the column menu.
-export function githubBoardArgs(view, hidden) {
+// The first page of a board's items, as boardPlan says to read them, and
+// the counts of its hidden columns (first: 0), for the column menu.
+export function githubBoardArgs(view, plan, hidden) {
   const names = [...hidden];
-  const key = fieldKey(view.project.field);
+  const key = fieldKey(plan.column.name);
   const counts = names.map((_, i) => `\n        h${i}: items(first: 0, query: $h${i}) { totalCount }`).join("");
   const vars = names.map((_, i) => `, $h${i}: String!`).join("");
-  const doc = boardQuery(vars, "  viewer { login }\n", `id title url
-        field(name: $field) { ... on ProjectV2SingleSelectField { id name options { id name color } } }
-        priorityField: field(name: $priority) { ... on ProjectV2SingleSelectField { id } }
-        ${itemsSelection(view, 0, false)}${counts}`);
-  return [...boardArgs(view, hidden, doc), ...names.flatMap((n, i) => ["-f", `h${i}=${filterWith(view, `${key}:${quoted(n)}`)}`])];
+  const doc = boardQuery(plan, vars, `id title url
+        ${itemsSelection(view, plan, 0, false)}${counts}`);
+  return [...boardArgs(view, plan, hidden, doc), ...names.flatMap((n, i) => ["-f", `h${i}=${filterWith(plan, `${key}:${quoted(n)}`)}`])];
 }
 
 // One GraphQL request for the page of a board's items after the cursor
-// `after`, `read` items read before it: the same items as the first page's
-// query, nothing else.
-export function githubBoardPageArgs(view, hidden, after, read) {
-  return [...boardArgs(view, hidden, boardQuery(", $after: String!", "", itemsSelection(view, read, true))), "-f", `after=${after}`];
+// `after`, `count` items read before it: the same items as the first page's
+// query, and the project's title.
+export function githubBoardPageArgs(view, plan, hidden, after, count) {
+  return [...boardArgs(view, plan, hidden, boardQuery(plan, ", $after: String!", `title ${itemsSelection(view, plan, count, true)}`)), "-f", `after=${after}`];
 }
 
 // Where a board's items stand in its answers.
-const ITEMS_PATH = ["repositoryOwner", "projectV2", "items"];
-const PRIORITY_FIELD_PATH = ["repositoryOwner", "projectV2", "priorityField"];
+const ITEMS_PATH = [...PROJECT_PATH, "items"];
 
 // The error that explains a page without its items: the deepest one on the
 // way to them (the owner's, the project's, the items' own), else the
@@ -4151,7 +4504,7 @@ export function addBoardPage(json, page, errors = []) {
   return json;
 }
 
-// The page after the board answer `json`, { after, read } (its cursor and
+// The page after the board answer `json`, { after, count } (its cursor and
 // how many items came before it), where GitHub says one follows and the
 // view's limit leaves room for it; else null. One that follows without a
 // cursor to start from fails.
@@ -4161,7 +4514,7 @@ export function nextBoardPage(json, view) {
   if (!Array.isArray(items?.nodes) || !items.pageInfo?.hasNextPage || items.nodes.length >= view.limit) return null;
   const after = items.pageInfo.endCursor;
   if (typeof after !== "string") throw new BoardError(`Projekt „${project.title}“: GitHub nannte nach ${items.nodes.length} Einträgen nicht, wo die nächsten beginnen`);
-  return { after, read: items.nodes.length };
+  return { after, count: items.nodes.length };
 }
 
 export function boardPages(json, view, calls) {
@@ -4199,7 +4552,7 @@ function githubPriority(value) {
 
 const foreignMark = (owners, repo, flag = "foreign") => (repoOwnership(repo, owners) === "foreign" ? { [flag]: true } : {});
 
-function githubCard(node, owners) {
+function githubCard(node, owners, plan) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
   return {
@@ -4228,10 +4581,9 @@ function githubCard(node, owners) {
     parentRepo: c.parent?.repository?.nameWithOwner ?? null,
     ...(c.parent ? foreignMark(owners, c.parent.repository?.nameWithOwner ?? repo, "parentForeign") : {}),
     milestone: c.milestone?.title ?? null,
-    priority: githubPriority(node.priority),
+    priority: plan.priority ? githubPriority(node.priority) : null,
     sub: c.subIssuesSummary?.total ? { total: c.subIssuesSummary.total, done: c.subIssuesSummary.completed } : null,
     branch: c.headRefName ?? null,
-    column: node.fieldValueByName?.optionId ?? NO_STATUS,
   };
 }
 
@@ -4243,81 +4595,187 @@ export function errorAt(errors, path) {
 // Every GraphQL error whose path starts with `path`.
 export const errorsAt = (errors, path) => (errors ?? []).filter((e) => Array.isArray(e.path) && path.every((p, i) => e.path[i] === p));
 
-export function parseGithubBoard(json, view, hidden, errors = []) {
-  const { owner, number, field: fieldName } = view.project;
-  const ownerNode = json?.data?.repositoryOwner;
-  const why = (e) => firstLine(e.message);
-  if (!ownerNode) {
-    const e = errorAt(errors, ["repositoryOwner"]);
-    throw new BoardError(e && e.type !== "NOT_FOUND" ? `GitHub: ${why(e)}` : `GitHub kennt „${owner}“ nicht`);
-  }
-  const project = ownerNode.projectV2;
-  if (!project) {
-    const e = errorAt(errors, ["repositoryOwner", "projectV2"]);
-    if (e?.type === "NOT_FOUND") throw new BoardError(`Projekt ${number} von ${owner} nicht gefunden – project.number in ${CONFIG_NAME}.json prüfen`);
-    throw new BoardError(e ? `Projekt ${number} von ${owner}: ${why(e)}` : `Projekt ${number} von ${owner} nicht gefunden oder kein Zugriff`);
-  }
-  const field = project.field;
-  if (!field?.options) {
-    const e = errorAt(errors, ["repositoryOwner", "projectV2", "field"]);
-    throw new BoardError(e ? `Projekt „${project.title}“: ${why(e)}` : `Projekt „${project.title}“ hat kein Auswahlfeld „${fieldName}“`);
-  }
-  if (!Array.isArray(project.items?.nodes)) {
-    const e = errorAt(errors, ITEMS_PATH);
-    throw new BoardError(e ? `Projekt „${project.title}“: ${why(e)}` : `Projekt „${project.title}“ lieferte keine Einträge`);
-  }
+const lower = (text) => String(text ?? "").toLowerCase();
+const textValue = (name) => (name ? { key: name, name, rank: lower(name) } : null);
+
+// Per type of a project's field, an item's value of it as the board groups
+// and sorts by it: { key (the value's own), name (as a column or swimlane
+// names it), rank (its place: a number, else a text compared as such) }, or
+// null for no value. `byName`: the items' query reads it by name
+// (fieldValueByName, `value`); of the others an item's card holds it. A
+// field of a type not here is one the board does not read.
+const VALUES = {
+  SINGLE_SELECT: {
+    byName: true,
+    of(field, value) {
+      const at = (field.options ?? []).findIndex((o) => (value?.optionId ? o.id === value.optionId : o.name === value?.name));
+      return at < 0 ? null : { key: field.options[at].id, name: field.options[at].name, rank: at };
+    },
+  },
+  ITERATION: {
+    byName: true,
+    of(field, value) {
+      const at = (field.iterations ?? []).findIndex((i) => i.id === value?.iterationId);
+      if (at >= 0) return { key: value.iterationId, name: field.iterations[at].title, rank: at };
+      return value?.iterationId ? { key: value.iterationId, name: value.title ?? value.iterationId, rank: -1 } : null;
+    },
+  },
+  NUMBER: { byName: true, of: (_f, value) => (typeof value?.number === "number" ? { key: String(value.number), name: String(value.number), rank: value.number } : null) },
+  DATE: { byName: true, of: (_f, value) => (typeof value?.date === "string" && value.date ? { key: value.date, name: value.date, rank: value.date } : null) },
+  TEXT: { byName: true, of: (_f, value) => textValue(typeof value?.text === "string" ? value.text : null) },
+  TITLE: { of: (_f, _v, card) => textValue(card.title) },
+  ASSIGNEES: { of: (_f, _v, card) => textValue(card.assignees.join(", ")) },
+  LABELS: { of: (_f, _v, card) => textValue(card.labels.join(", ")) },
+  MILESTONE: { of: (_f, _v, card) => textValue(card.milestone) },
+  REPOSITORY: { of: (_f, _v, card) => textValue(card.repo) },
+  PARENT_ISSUE: { of: (_f, _v, card) => (card.parent === null ? null : textValue(card.parentTitle ?? `#${card.parent}`)) },
+  ISSUE_TYPE: { of: (_f, _v, card) => textValue(card.type) },
+  SUB_ISSUES_PROGRESS: {
+    of: (_f, _v, card) => (card.sub ? { key: `${card.sub.done}/${card.sub.total}`, name: `${card.sub.done}/${card.sub.total}`, rank: card.sub.done / card.sub.total } : null),
+  },
+};
+const readable = (field) => Object.hasOwn(VALUES, field.type);
+const readByName = (field) => VALUES[field.type]?.byName === true;
+const valueOf = (field, value, card) => VALUES[field.type]?.of(field, value, card) ?? null;
+
+const byRank = (a, b) => (typeof a === "number" && typeof b === "number" ? a - b : String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0);
+
+// Two values by a sort key, those without one last whichever the direction.
+function bySort(a, b, direction) {
+  if (!a || !b) return Number(!a) - Number(!b);
+  const order = byRank(a.rank, b.rank);
+  return direction === "DESC" ? -order : order;
+}
+
+function nodeValue(plan, node, card, field) {
+  if (field === plan.column) return valueOf(field, node.fieldValueByName, card);
+  if (field === plan.priority) return valueOf(field, node.priority, card);
+  const at = plan.values.indexOf(field);
+  return valueOf(field, at >= 0 ? node[`v${at}`] : null, card);
+}
+
+function boardColumns(plan, hidden, answer, held) {
+  const field = plan.column;
   const names = [...hidden];
-  const columns = field.options.map((o) => ({
-    id: o.id,
-    name: o.name,
-    color: GITHUB_COLORS[o.color] ?? "muted",
-    hidden: hidden.has(o.name),
-    count: hidden.has(o.name) ? project[`h${names.indexOf(o.name)}`]?.totalCount ?? null : 0,
+  const base = field.type === "ITERATION"
+    ? field.iterations.filter((i) => !i.completed || held.has(i.id) || hidden.has(i.title)).map((i) => ({ id: i.id, name: i.title, color: "muted" }))
+    : field.options.map((o) => ({ id: o.id, name: o.name, color: GITHUB_COLORS[o.color] ?? "muted" }));
+  return base.map((c) => ({
+    ...c,
+    hidden: hidden.has(c.name),
+    count: hidden.has(c.name) ? answer[`h${names.indexOf(c.name)}`]?.totalCount ?? null : 0,
     target: true,
     cards: [],
   }));
-  const byId = new Map(columns.map((c) => [c.id, c]));
-  const cards = project.items.nodes.map((node) => githubCard(node, view.owners)).map((c) => (byId.has(c.column) ? c : { ...c, column: NO_STATUS }));
-  if (cards.some((c) => c.column === NO_STATUS)) {
-    const none = { id: NO_STATUS, name: "Ohne Status", color: "dim", hidden: false, count: 0, target: false, cards: [] };
-    columns.unshift(none);
-    byId.set(NO_STATUS, none);
+}
+
+// A board's swimlanes: one per value of the swimlane field its cards hold,
+// in the field's order (a single-select's options, an iteration's
+// iterations, else by value), the cards without one last.
+const laneId = (value) => (value ? `v:${value.key}` : NO_VALUE);
+function boardLanes(plan, cards) {
+  if (!plan.lane) return null;
+  const seen = new Map();
+  for (const card of cards) if (card.laneValue && !seen.has(card.laneValue.key)) seen.set(card.laneValue.key, card.laneValue);
+  const lanes = [...seen.values()].sort((a, b) => byRank(a.rank, b.rank)).map((v) => {
+    const option = plan.lane.options?.find((o) => o.id === v.key);
+    return { id: laneId(v), name: v.name, color: option ? GITHUB_COLORS[option.color] ?? "muted" : "muted" };
+  });
+  if (cards.some((c) => !c.laneValue)) lanes.push({ id: NO_VALUE, name: `Ohne ${plan.lane.name}`, color: "dim" });
+  return lanes;
+}
+
+// gh's answers for a board (githubBoardArgs and its pages, joined by
+// addBoardPage; and the GraphQL errors that came with them), read as
+// boardPlan says (`plan`) → the board shape's data (ui/shapes/board.js):
+// columns from the column field, each card in its column (one without a
+// value in a column "Ohne <field>" before them, which takes no card), in
+// its swimlane's order and then by the view's sort keys (those without a
+// value last; unsorted, GitHub's order), and the swimlanes where the view
+// has a swimlane field.
+export function parseGithubBoard(json, view, hidden, errors, plan) {
+  const { project, shown } = plan;
+  const items = json?.data?.repositoryOwner?.projectV2?.items;
+  if (!Array.isArray(items?.nodes)) {
+    const e = errorAt(errors, ITEMS_PATH) ?? errorAt(errors, PROJECT_PATH);
+    throw new BoardError(e ? `Projekt „${project.title}“: ${firstLine(e.message)}` : `Projekt „${project.title}“ lieferte keine Einträge`);
   }
-  for (const card of cards) {
-    const col = byId.get(card.column);
-    col.cards.push(card);
+  const answer = json.data.repositoryOwner.projectV2;
+  const cards = items.nodes.filter(Boolean).map((node) => {
+    const card = githubCard(node, view.owners, plan);
+    const column = nodeValue(plan, node, card, plan.column);
+    const laneValue = plan.lane ? nodeValue(plan, node, card, plan.lane) : null;
+    return { card, column: column?.key ?? null, laneValue, keys: plan.sorts.map((s) => nodeValue(plan, node, card, s.field)) };
+  });
+  const columns = boardColumns(plan, hidden, answer, new Set(cards.map((c) => c.column)));
+  const byId = new Map(columns.map((c) => [c.id, c]));
+  const lanes = boardLanes(plan, cards);
+  const laneAt = new Map((lanes ?? []).map((l, i) => [l.id, i]));
+  const ordered = cards
+    .map((c, i) => ({ ...c, i, lane: laneId(c.laneValue) }))
+    .sort((a, b) => {
+      if (lanes) {
+        const lane = laneAt.get(a.lane) - laneAt.get(b.lane);
+        if (lane) return lane;
+      }
+      for (const [k, s] of plan.sorts.entries()) {
+        const order = bySort(a.keys[k], b.keys[k], s.direction);
+        if (order) return order;
+      }
+      return a.i - b.i;
+    });
+  if (ordered.some((c) => !byId.has(c.column))) {
+    const none = { id: NO_VALUE, name: `Ohne ${plan.column.name}`, color: "dim", hidden: false, count: 0, target: false, cards: [] };
+    columns.unshift(none);
+    byId.set(NO_VALUE, none);
+  }
+  for (const c of ordered) {
+    const col = byId.get(byId.has(c.column) ? c.column : NO_VALUE);
+    col.cards.push({ ...c.card, column: col.id, ...(lanes ? { lane: c.lane } : {}) });
     if (!col.hidden) col.count++;
   }
   return {
     shape: "board",
     meta: {
       projectId: project.id,
-      fieldId: field.id,
+      fieldId: plan.column.id,
+      fieldName: plan.column.name,
+      fieldType: plan.column.type,
+      ownColumn: plan.ownColumn,
       title: project.title,
       url: project.url,
-      lacksPriorityField: !project.priorityField?.id && !errorAt(errors, PRIORITY_FIELD_PATH),
+      view: shown.number,
+      filter: shown.filter,
+      query: boardFilter(plan, hidden),
+      unreadable: plan.unreadable,
     },
     columns,
-    total: project.items.totalCount,
-    limited: project.items.pageInfo.hasNextPage,
-    viewer: json?.data?.viewer?.login ?? null,
-    read: project.items.nodes.length,
+    lanes,
+    total: items.totalCount,
+    limited: items.pageInfo?.hasNextPage ?? false,
+    viewer: project.viewer,
+    count: items.nodes.length,
   };
 }
 
 // The mutation's field, and the path its own GraphQL errors carry.
 const MOVE_FIELD = "updateProjectV2ItemFieldValue";
 export const MOVE_PATH = [MOVE_FIELD];
-export const MOVE_MUTATION = `mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
-  ${MOVE_FIELD}(input: { projectId: $project, itemId: $item, fieldId: $field, value: { singleSelectOptionId: $option } }) {
+const moveMutation = (value) => `mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+  ${MOVE_FIELD}(input: { projectId: $project, itemId: $item, fieldId: $field, value: { ${value}: $option } }) {
     projectV2Item { id }
   }
 }`;
+// A column of a single-select field is an option, one of an iteration
+// field an iteration.
+export const MOVE_MUTATION = moveMutation("singleSelectOptionId");
+export const MOVE_ITERATION_MUTATION = moveMutation("iterationId");
 
-// gh arguments that set a card's field to a column's option.
+// gh arguments that set a card's column field to a column's option or
+// iteration.
 export function githubMoveArgs(meta, card, column) {
   return [
-    "api", "graphql", "-f", `query=${MOVE_MUTATION}`, "-f", `project=${meta.projectId}`, "-f", `item=${card.itemId}`,
+    "api", "graphql", "-f", `query=${meta.fieldType === "ITERATION" ? MOVE_ITERATION_MUTATION : MOVE_MUTATION}`, "-f", `project=${meta.projectId}`, "-f", `item=${card.itemId}`,
     "-f", `field=${meta.fieldId}`, "-f", `option=${column.id}`,
   ];
 }
@@ -5058,22 +5516,45 @@ export function makeGithub(paths) {
     },
     views: {
       board: {
-        // The first page, then each next one, one call each, until GitHub
-        // has no more, the view's limit is read, or as many calls ran as
-        // full pages would take to read it.
+        // The project with its views and fields (githubProjectArgs), which
+        // the board learns (live.project); then, of the view it shows (the
+        // view's own, or for the view that learns them the one it wants,
+        // else the first), the first page of items and each next one, one
+        // call each, until GitHub has no more, the view's limit is read, or
+        // as many calls ran as full pages would take to read it. A view of
+        // another layout reads no items. Both reads are one load, so that the
+        // view's state, progress, error and saved data stay those of one read;
+        // the board, which knows what shows, names the view it goes on with.
         async load(view, { hiddenFor, live = NO_LIVE }) {
-          const hidden = hiddenFor(view);
-          const { json, warnings, errors } = await gh(paths, githubBoardArgs(view, hidden), what(view, "board-page-1"));
-          const calls = Math.ceil(view.limit / PAGE);
-          const pages = boardPages(json, view, calls);
-          for (let call = 1, next = nextBoardPage(json, view); next && call < calls; call++, next = nextBoardPage(json, view)) {
-            live.partial(() => ({ data: { ...parseGithubBoard(json, view, hidden, errors), partial: true }, warnings: [...warnings] }));
+          // The hidden columns as the load starts: a change since reads again.
+          let hidden = hiddenFor(view);
+          const head = await gh(paths, githubProjectArgs(view), what(view, "project"));
+          const project = parseGithubProject(head.json, view, head.errors);
+          const meta = projectMeta(project);
+          const { wanted = null } = view;
+          const number = view.address.view ?? (project.views.some((v) => v.number === wanted) ? wanted : project.views[0]?.number);
+          const shown = project.views.find((v) => v.number === number);
+          if (!shown) {
+            const why = view.address.view === null ? "hat keine Ansichten" : `hat keine Ansicht ${view.address.view} mehr`;
+            throw Object.assign(new BoardError(`Projekt „${project.title}“ ${why}`), { project: meta });
+          }
+          const learnt = live.project(meta);
+          if (learnt === false || shown.layout !== "board") return { data: { shape: "placeholder" }, warnings: head.warnings };
+          const now = learnt ?? view;
+          const plan = boardPlan(project, shown);
+          if (now !== view) hidden = hiddenFor(now);
+          const { json, warnings, errors } = await gh(paths, githubBoardArgs(now, plan, hidden), what(now, "board-page-1"));
+          warnings.unshift(...head.warnings);
+          const calls = Math.ceil(now.limit / PAGE);
+          const pages = boardPages(json, now, calls);
+          for (let call = 1, next = nextBoardPage(json, now); next && call < calls; call++, next = nextBoardPage(json, now)) {
+            live.partial(() => ({ data: { ...parseGithubBoard(json, now, hidden, errors, plan), partial: true }, warnings: [...warnings] }));
             live.page(call + 1, Math.max(call + 1, pages));
-            const page = await gh(paths, githubBoardPageArgs(view, hidden, next.after, next.read), what(view, `board-page-${call + 1}`));
+            const page = await gh(paths, githubBoardPageArgs(now, plan, hidden, next.after, next.count), what(now, `board-page-${call + 1}`));
             addBoardPage(json, page.json, page.errors);
             warnings.push(...page.warnings);
           }
-          return { data: parseGithubBoard(json, view, hidden, errors), warnings };
+          return { data: parseGithubBoard(json, now, hidden, errors, plan), warnings };
         },
         async move(view, data, card, column) {
           checkMoveResult((await gh(paths, githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH, ...what(view, "move") })).json, card);
@@ -5689,7 +6170,9 @@ export function typeTone(t, item) {
 
 // What lasts across reloads beside this machine's settings (settings.js):
 // the shown context ("context"), each context's tab ("tab:<context>"),
-// each team's view ("teamView:<tab>"), "nur meine" ("mine"), a Sprint's
+// each team's view ("teamView:<tab>"), each GitHub project's view
+// ("projectView:<tab>") and what the board knows of the project
+// ("project:<tab>", Board.learnProject), "nur meine" ("mine"), a Sprint's
 // folded stories ("folded:<view>", readStoredFolds), the repo a
 // view's work item last started in ("repo:<view>", ui/modals/start.js) and
 // each view's last good data ("board:data:<view>", loading.js). A full or
@@ -7348,10 +7831,10 @@ export function hintsOf(c) {
 
 const tabsOf = (c) => c.b.tabs();
 const tabAt = (c) => shownIndex(tabsOf(c), c.b.tab());
-const contextsNow = (c) => contextsOf(c.b.config);
+const contextsNow = (c) => c.b.contexts();
 const contextAt = (c) => shownIndex(contextsNow(c), c.b.context());
 
-const nextView = (c) => teamViewAfter(c.b.tab(), c.b.teamViewOf(c.b.tab()));
+const nextView = (c) => tabViewAfter(c.b.tab(), c.b.tabViewOf(c.b.tab()));
 
 // Whether the shown view has items to move over (none: the placeholder).
 const walks = (c) => Boolean(c.shape?.dirs.length);
@@ -7468,9 +7951,9 @@ export const ACTIONS = [
   },
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(contextAction),
   {
-    id: "team-view", group: "view", name: (c) => `Ansicht wechseln: ${teamViewName(nextView(c))}`, key: "v", menu: 25, bar: true,
+    id: "tab-view", group: "view", name: (c) => `Ansicht wechseln: ${tabViewName(c.b.tab(), nextView(c))}`, key: "v", menu: 25, bar: true,
     when: (c) => Boolean(c.view) && hasViewSwitch(c.b.tab()), takes: () => true,
-    run: (b, c, cx) => b.nextTeamView(cx),
+    run: (b, c, cx) => b.nextTabView(cx),
     hint: (c) => (hasViewSwitch(c.b.tab()) ? viewSwitchHint(c.b.tab()) : null),
   },
   moveAction("move-left", "H", -1, "Nach links verschieben"),
@@ -7482,10 +7965,10 @@ export const ACTIONS = [
     hint: (c) => (c.shape?.create ? "neu" : null),
   },
   {
-    id: "status", group: "item", name: "Status ändern…", key: "s", menu: 3,
+    id: "status", group: "item", name: (c) => `${c.b.statusField(c.view)} ändern…`, key: "s", menu: 3,
     when: (c) => has(c, "openStatusMenu") && Boolean(c.item), takes: (c) => has(c, "openStatusMenu"),
     run: (b, c, cx) => b.openStatusMenu(c.view, cx),
-    hint: (c) => (c.shape?.openStatusMenu ? "Status" : null),
+    hint: (c) => (c.shape?.openStatusMenu ? c.b.statusField(c.view) : null),
   },
   {
     id: "assign", group: "item", name: "Zuweisen…", key: "a", menu: 4,
@@ -8720,9 +9203,9 @@ export const sessionsModal = {
 // ==== src/ui/modals/status.js ====
 
 // The status menu: the columns a card may go to, or the states an item may
-// take, picked with j/k and Enter, a digit, or a click. A shape with columns
-// or states opens it (openStatusMenu) as b.modal = { kind: "status", view,
-// key, targets, at }.
+// take, picked with j/k and Enter, a digit, or a click; named after what it
+// sets (Board.statusField). A shape with columns or states opens it
+// (openStatusMenu) as b.modal = { kind: "status", view, key, targets, at }.
 
 // Moves the card to the target at `i`, or does what the view's shape does
 // with a pick (pickStatus).
@@ -8740,7 +9223,7 @@ export const statusModal = {
       id: "status",
       rowId: "status",
       width: 280,
-      title: "Status ändern",
+      title: `${b.statusField(m.view)} ändern`,
       at: m.at,
       pick: (i, cx) => pickTarget(b, m, i, cx),
       rows: m.targets.map((c) => [
@@ -9049,15 +9532,17 @@ export function revealCard(s, at, content, top, height) {
 // ==== src/ui/shapes/board.js ====
 
 // The board shape: a view's data as columns of cards, which a card moves
-// between (H/L, the status menu, a drag). A hidden column is not drawn: the
-// command menu's "Spalte ausblenden" hides the selected one, the line below
-// the columns names the hidden ones and a click on a name shows it again;
-// the command menu's "Spalten…" opens the column menu (modals/columns.js).
-// The data: { shape: "board", meta, columns: [{ id, name, color, hidden,
-// count, target, cards }], total, limited, viewer, read, partial (while
-// later pages are still to come) } (parseGithubBoard). View fields it
-// reads: id, source, layout, hide (the columns hidden by default) and
-// project.priorityField.
+// between (H/L, the status menu, named after the column field, a drag),
+// with swimlanes across them where the data has them. A hidden column is
+// not drawn: the command menu's "Spalte ausblenden" hides the selected one,
+// the line below the columns names the hidden ones and a click on a name
+// shows it again; the command menu's "Spalten…" opens the column menu
+// (modals/columns.js). The data: { shape: "board", meta, columns: [{ id,
+// name, color, hidden, count, target, cards }], lanes ([{ id, name,
+// color }], each card's `lane` one of them; null without), total, limited,
+// viewer, count, partial (while later pages are still to come) }
+// (parseGithubBoard). View fields it reads: id, source, layout, name and
+// hide (the columns hidden by default).
 
 // How the board finds and changes its cards' assignees (actions/assign.js).
 const BOARD_ASSIGN = { find: (data, key) => findCard(data, key)?.card ?? null, withItem: withCard, where: "auf dem Board" };
@@ -9069,8 +9554,9 @@ const SCROLLS = 24;
 const boardState = (b) => b.shapeState.board;
 const columnLeft = (kept) => leftBand(kept.band, scrollOf(kept.scroll));
 
-// By id, not place: a column coming in front (Ohne Status) must not hand its
-// neighbours their state; a state passed on starts anew, scrolled to the top.
+// By id, not place: a column coming in front (the no-value column, „Ohne
+// <field>“) must not hand its neighbours their state; a state passed on
+// starts anew, scrolled to the top.
 function columnKept(b, id) {
   const st = boardState(b);
   let kept = st.byId.get(id);
@@ -9113,6 +9599,8 @@ export const boardShape = {
   columnCount: (b, st) => shownColumns(st.data, b.filterText, b.mine).length,
   selected: (b, st) => findCard(st.data, st.sel?.key)?.card ?? null,
   scrollTo(b, view, sel, row) {
+    const st = b.state(view.id);
+    if (st.data?.lanes) return scrollToLaneCard(b, view, st, sel);
     const col = b.navColumns(view)[sel.col];
     const kept = columnKept(b, col.id);
     if (boardState(b).windowed) {
@@ -9132,8 +9620,9 @@ export const boardShape = {
     const cols = shownColumns(data, b.filterText, b.mine);
     return { shown: cols.reduce((n, c) => n + c.shown.length, 0), total: cols.reduce((n, c) => n + c.cards.length, 0) };
   },
-  render: (b, t, mono, view, st) => (st.data.columns.length ? drawBoard(b, t, mono, view, st) : div().p(20).text_color(t.muted).child("Keine Einträge")),
+  render: (b, t, mono, view, st) => (st.data.columns.length ? drawBoard(b, t, mono, view, st) : div().p(20).text_color(t.muted).child(emptyText(st.data))),
   dirs: ["up", "down", "left", "right"],
+  navigate: (b, view, st, dir) => (st.data?.lanes ? laneNavigate : navigate)(b.navColumns(view), st.sel, dir),
   loads: true,
   // H/L: the selected card one column on (`by` 1) or back (-1), hidden
   // columns too.
@@ -9146,9 +9635,8 @@ export const boardShape = {
   received: (data, st) => applyMoves(data, st.moves),
   warnings: (view, data) => [
     ...unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
-    ...(view.project.priorityGiven && data.meta.lacksPriorityField
-      ? [`Projekt „${data.meta.title}“ hat kein Auswahlfeld „${view.project.priorityField}“ („priorityField“ des Projects): die Karten zeigen keine Priorität`]
-      : []),
+    ...(data.meta.ownColumn === false ? [`Ansicht „${view.name}“ nennt kein Feld für ihre Spalten: das Board nimmt „${data.meta.fieldName}“, wie GitHub`] : []),
+    ...(data.meta.unreadable ?? []).map((n) => `Ansicht „${view.name}“ sortiert oder gruppiert nach „${n}“, einem Feld, das das Board nicht liest: es ordnet ohne`),
   ],
   settle: (b, view, due, data, cx) =>
     tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, BOARD_ASSIGN)], cx),
@@ -9156,7 +9644,9 @@ export const boardShape = {
   moveTo: (b, view, key, columnId, cx) => moveCardTo(b, view, key, columnId, {}, cx),
   toggleColumn: (b, view, col, cx) => toggleBoardColumn(b, view, col, cx),
   openStatusMenu: (b, view) => openBoardStatusMenu(b, view),
-  // The detail panel's rows of a card: its column as a pill, and Status s.
+  statusField: (b, view) => b.state(view.id).data?.meta?.fieldName ?? null,
+  // The detail panel's rows of a card: its column as a pill, and the button
+  // of the status menu ("<field> s").
   detailParts(b, t, view, item) {
     const st = b.state(view.id);
     const column = st.data ? findCard(st.data, item.key)?.column : null;
@@ -9166,33 +9656,66 @@ export const boardShape = {
     };
     return {
       chips: [statusPill(t, column.name, column.color, openStatus)],
-      buttons: [button(t, "act-status", "Status s", false, openStatus)],
+      buttons: [button(t, "act-status", `${b.statusField(view)} s`, false, openStatus)],
     };
   },
 };
 
 const CARD_GAP = 6;
+const COLUMN_GAP = 12;
+
+// A card's height as a layout takes it: as measured at its list's card
+// width, else guessed for a list `width` wide.
+function heightOf(b, kept, card, width) {
+  const m = boardState(b).heights.get(card.key);
+  return m && (m.width === kept.cardWidth || !kept.cardWidth) ? m.height : cardHeightGuess(card, width);
+}
 
 function columnLayout(b, col, kept, listWidth) {
-  const measured = boardState(b).heights;
-  const heights = col.shown.map((card) => {
-    const m = measured.get(card.key);
-    return m && (m.width === kept.cardWidth || !kept.cardWidth) ? m.height : cardHeightGuess(card, listWidth);
-  });
+  const heights = col.shown.map((card) => heightOf(b, kept, card, listWidth));
   return { heights, ...rowTops(heights, CARD_GAP) };
 }
 
 const MEASURE_SLACK = 2;
 
-function cardMeasure(b, kept, layout, card, i) {
+// A drawn card's measure, against the height its layout took for it.
+function cardMeasure(b, kept, card, height) {
   return (size, cx) => {
-    const height = unzoomed(size.height);
+    const measured = unzoomed(size.height);
     const width = unzoomed(size.width);
-    boardState(b).heights.set(card.key, { height, width });
+    boardState(b).heights.set(card.key, { height: measured, width });
     const resized = Boolean(kept.cardWidth) && width !== kept.cardWidth;
     kept.cardWidth = width;
-    if (resized || Math.abs(height - layout.heights[i]) > MEASURE_SLACK) cx.notify();
+    if (resized || Math.abs(measured - height) > MEASURE_SLACK) cx.notify();
   };
+}
+
+// Where a dragged card drops: a column, or above swimlanes its head and its
+// cell in each band.
+const dropOn = (b, view, ci, col) => (el) => el
+  .on_hover((hovered, cx) => {
+    if (!b.drag) return;
+    if (hovered) b.over = ci;
+    else if (b.over === ci) b.over = null;
+    cx.notify();
+  })
+  .on_mouse_up("left", (_e, cx) => {
+    if (!b.drag) return;
+    cx.stop_propagation();
+    const { key, from } = b.drag;
+    b.endDrag(cx);
+    b.moveTo(view, key, col.id, cx);
+    if (from !== col.id) b.chooseDropped(view, key, cx);
+  });
+
+// What a board without a card says: with the filter its query sent (the
+// view's, and with columns hidden the terms that leave them out), which
+// GitHub answers with no items also where it cannot read it.
+function emptyText(data) {
+  const hidden = data.columns.some((c) => c.hidden);
+  const filter = hidden ? data.meta?.query : data.meta?.filter;
+  const where = hidden ? " in den gezeigten Spalten" : "";
+  return filter ? `Keine Einträge${where} für den Filter „${filter}“ (auch einen Filter, den GitHub nicht versteht, beantwortet es so)` : `Keine Einträge${where}`;
 }
 
 function drawBoard(b, t, mono, view, st) {
@@ -9200,7 +9723,7 @@ function drawBoard(b, t, mono, view, st) {
   const sessions = b.sessionsNow();
   const dragged = b.drag ? findCard(st.data, b.drag.key)?.card : null;
   const { windowed } = boardState(b);
-  const states = columnsKept(b, cols.map((c) => c.id));
+  const states = st.data.lanes ? [] : columnsKept(b, cols.map((c) => c.id));
   const columnEl = (col, ci) => {
     const filtered = col.cards.length - col.shown.length;
     const focusedCol = st.sel?.col === ci;
@@ -9230,20 +9753,7 @@ function drawBoard(b, t, mono, view, st) {
         // GPUI moved the list before the event reached its column.
         if (columnLeft(kept)) cx.notify();
       }))
-      .on_hover((hovered, cx) => {
-        if (!b.drag) return;
-        if (hovered) b.over = ci;
-        else if (b.over === ci) b.over = null;
-        cx.notify();
-      })
-      .on_mouse_up("left", (_e, cx) => {
-        if (!b.drag) return;
-        cx.stop_propagation();
-        const { key, from } = b.drag;
-        b.endDrag(cx);
-        b.moveTo(view, key, col.id, cx);
-        if (from !== col.id) b.chooseDropped(view, key, cx);
-      })
+      .map(dropOn(b, view, ci, col))
       .child(head)
       .child(
         v_flex()
@@ -9255,23 +9765,100 @@ function drawBoard(b, t, mono, view, st) {
           .track_scroll(kept.scroll)
           .children(col.shown.map((card, i) => {
             if (!layout) return whole(card, null);
-            return inBand(kept.band, layout.tops[i], layout.heights[i]) ? whole(card, cardMeasure(b, kept, layout, card, i)) : cardFrame(t, st, card, layout.heights[i]);
+            return inBand(kept.band, layout.tops[i], layout.heights[i]) ? whole(card, cardMeasure(b, kept, card, layout.heights[i])) : cardFrame(t, st, card, layout.heights[i]);
           }))
           .when(!col.shown.length, (el) => el.child(div().text_size(12).text_color(t.muted).child(filtered ? `keine Karten (${filtered} ausgeblendet)` : "keine Karten"))),
       );
   };
+  const body = () => {
+    if (!cols.length) return div().p(20).text_color(t.muted).child(`Alle Spalten sind ausgeblendet: ein Name unten oder „${b.actionName("columns")}“ im Befehlsmenü (${b.keyShown("commands")}) zeigt eine wieder`);
+    if (!st.data.partial && !st.data.columns.some((c) => c.cards.length)) return div().p(20).text_color(t.muted).child(emptyText(st.data));
+    if (st.data.lanes) return drawLanes(b, t, mono, view, st, cols, sessions, dragged);
+    return h_flex().id("columns").flex_1().min_h(0).gap(COLUMN_GAP).p(14).items_start().children(cols.map(columnEl));
+  };
   return v_flex()
     .flex_1()
     .min_h(0)
-    .child(
-      cols.length
-        ? h_flex().id("columns").flex_1().min_h(0).gap(12).p(14).items_start().children(cols.map(columnEl))
-        : div().p(20).text_color(t.muted).child(`Alle Spalten sind ausgeblendet: ein Name unten oder „${b.actionName("columns")}“ im Befehlsmenü (${b.keyShown("commands")}) zeigt eine wieder`),
-    )
+    .child(body())
     .when(st.data.columns.some((c) => c.hidden), (el) => el.child(hiddenLine(b, t, view, st)))
     .when(Boolean(st.data.limited) && !st.data.partial, (el) =>
       el.child(div().px(16).pb(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
-        .child(`Nur die ersten ${st.data.read} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
+        .child(`Nur die ersten ${st.data.count} von ${st.data.total} Einträgen; mehr Spalten ausblenden oder den Filter enger fassen`)),
+    );
+}
+
+// A board with swimlanes scrolls as one: the columns' heads above, then per
+// swimlane its head and its rows (laneRows), each row as high as its
+// highest card. Like a long column, it draws whole only the rows about its
+// window (band.js), the others as an empty frame of their height.
+const LANES = "lanes";
+const LANE_HEAD = 26;
+const LANE_GAP = 8;
+
+// `cardHeight`: the height the layout takes for a card, which its measure
+// checks.
+function laneLayout(b, rows, kept, width, count) {
+  const cardWidth = Math.max(60, ((width || LIST_W_GUESS * count) - COLUMN_GAP * (count - 1)) / Math.max(1, count));
+  const cardHeight = (card) => heightOf(b, kept, card, cardWidth);
+  const heights = rows.map((r) => (r.head ? LANE_HEAD : Math.max(...r.cards.map((c) => (c ? cardHeight(c) : 0)))));
+  return { heights, cardHeight, ...rowTops(heights, LANE_GAP) };
+}
+
+function scrollToLaneCard(b, view, st, sel) {
+  const rows = laneRows(st.data.lanes, b.navColumns(view));
+  const at = rows.findIndex((r) => !r.head && r.cards[sel.col]?.key === sel.key);
+  if (at < 0) return;
+  const kept = columnKept(b, LANES);
+  if (boardState(b).windowed) {
+    const where = scrollOf(kept.scroll);
+    const layout = laneLayout(b, rows, kept, where.width, b.navColumns(view).length);
+    revealCard(kept.band, where, layout.content, layout.tops[at], layout.heights[at]);
+  }
+  kept.scroll.scroll_to_item(at);
+}
+
+function drawLanes(b, t, mono, view, st, cols, sessions, dragged) {
+  const [kept] = columnsKept(b, [LANES]);
+  const { windowed } = boardState(b);
+  const rows = laneRows(st.data.lanes, cols);
+  const at = windowed ? scrollOf(kept.scroll) : null;
+  const layout = at && laneLayout(b, rows, kept, at.width, cols.length);
+  if (at) placeBand(kept.band, layout.content, at);
+  const heads = h_flex().id("lane-heads").flex_none().gap(COLUMN_GAP).px(14).pt(14).children(cols.map((col, ci) => {
+    const filtered = col.cards.length - col.shown.length;
+    const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
+    return div().id(`col-${ci}`).flex_1().min_w(0).rounded(10).border_1().border_color(target ? t.accent : t.border).bg(target ? dropBg(t, t.chrome) : t.chrome).p(6)
+      .map(dropOn(b, view, ci, col))
+      .child(columnHead(t, col, filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length), t.chrome));
+  }));
+  const rowEl = (row, i) => {
+    if (row.head) {
+      return h_flex().id(`lane-${row.lane.id}`).flex_none().h(LANE_HEAD).gap(8).items_center().px(4).border_b(1).border_color(t.border)
+        .child(div().size(9).flex_none().rounded(5).bg(toneColor(t, row.lane.color)))
+        .child(div().text_size(12.5).font_semibold().child(row.lane.name))
+        .child(div().text_size(12).text_color(t.muted).child(String(row.count)));
+    }
+    if (layout && !inBand(kept.band, layout.tops[i], layout.heights[i])) return div().flex_none().h(layout.heights[i]);
+    return h_flex().flex_none().gap(COLUMN_GAP).items_start().children(row.cards.map((card, ci) => {
+      const cell = div().id(`cell-${i}-${ci}`).flex_1().min_w(0).map(dropOn(b, view, ci, cols[ci]));
+      return card ? cell.child(drawCard(b, t, mono, view, st, card, cols[ci], ci, sessions, layout ? cardMeasure(b, kept, card, layout.cardHeight(card)) : null)) : cell;
+    }));
+  };
+  return v_flex().flex_1().min_h(0)
+    .child(heads)
+    .child(
+      v_flex()
+        .id(LANES)
+        .flex_1()
+        .min_h(0)
+        .gap(LANE_GAP)
+        .p(14)
+        .overflow_y_scrollbar()
+        .track_scroll(kept.scroll)
+        .when(windowed, (el) => el.on_scroll_wheel((_e, cx) => {
+          if (columnLeft(kept)) cx.notify();
+        }))
+        .children(rows.map(rowEl)),
     );
 }
 
@@ -9413,14 +10000,14 @@ function openBoardStatusMenu(b, view) {
 
 // The placeholder shape: what a view whose source reads nothing for it yet
 // shows, the text of its kind (KINDS). It has no items, so Enter, o and the
-// arrows are left to herdr. View fields it reads: source, layout.
+// arrows are left to herdr. View fields it reads: source, layout, name.
 
 export const placeholderShape = {
   nav: () => [],
   selected: () => null,
   scrollTo() {},
   count: () => null,
-  render: (b, t, mono, view) => div().p(20).text_color(t.muted).child(kindOf(view)?.text ?? "Diese Ansicht gibt es noch nicht"),
+  render: (b, t, mono, view) => div().p(20).text_color(t.muted).child(kindOf(view)?.text?.(view) ?? "Diese Ansicht gibt es noch nicht"),
   items: () => [],
   dirs: [],
   loads: false,
@@ -9967,14 +10554,16 @@ function drawTask(b, t, mono, view, st, card, ci, col, sessions) {
 // of its items ended up), withView (data, view: the data as the view's
 // settings show it now, the same data where they change nothing for it),
 // toggleRepo (b, view, repo, cx: turns a repo off or on, beside the repo
-// menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu, navigate
-// (its own keyboard movement in place of navigate's, select.js), pickStatus
-// (what a pick in the status menu does in place of a move to that column),
-// and assign (how its items' assignees are found and changed: { find(data,
-// key), withItem(data, key, patch) (the data with the item's fields set),
-// where (where an item no longer is: "im Sprint") }; a shape that has it
-// takes a, the assignee picker, ui/modals/assign.js, and its settle says the
-// outcomes of unclear assignments, unclearAssignLines).
+// menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu with
+// statusField (b, view: the name of what the status menu sets, where it is
+// not the status; null for none), navigate (its own keyboard movement in
+// place of navigate's, select.js), pickStatus (what a pick in the status
+// menu does in place of a move to that column), and assign (how its items'
+// assignees are found and changed: { find(data, key), withItem(data, key,
+// patch) (the data with the item's fields set), where (where an item no
+// longer is: "im Sprint") }; a shape that has it takes a, the assignee
+// picker, ui/modals/assign.js, and its settle says the outcomes of unclear
+// assignments, unclearAssignLines).
 // A shape keeps its own state per Board in b.shapeState[name], which its
 // state() makes once, when the Board starts: herdr refuses a ScrollHandle
 // made while a view draws ("cannot run during render"). A new way to draw
@@ -10476,6 +11065,8 @@ export const BAND_MS = 100;
 // Why "nur meine" cannot tell one's own items, where the source has no words
 // of its own for it (noViewer): it did not name the login it read as.
 const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
+// Where the store keeps the view a team's or a project's tab shows.
+const tabViewKey = (tab) => `${tab.kind === "team" ? "teamView" : "projectView"}:${tab.id}`;
 // Keys the board binds in its own key context. herdr binds Tab and
 // shift-Tab app-wide (gpui-kit's ShellRoot), to moving the keyboard to the
 // next or previous tab stop, and runs a matching binding's action before
@@ -10542,10 +11133,13 @@ export default class Board extends View {
     this.prefetchWaits = false;
     this.prefetchLeft = new Set();
     // What the top bar shows, as last chosen: the context, its tab (a tab
-    // id) per context, the view per team tab, and "nur meine".
+    // id) per context, the view per team tab and per project tab, and "nur
+    // meine"; and what the board knows of each GitHub project (learnProject).
     this.contextId = store.get("context");
     this.tabIds = {};
-    this.teamViews = {};
+    this.tabViews = {};
+    this.projectMetas = new Map();
+    this.known = { get: (id) => this.metaOf(id) };
     this.mine = store.get("mine") === true;
     this.filterText = "";
     this.filtering = false;
@@ -10695,10 +11289,80 @@ export default class Board extends View {
     return this.views[id];
   }
 
+  contexts() {
+    return contextsOf(this.config, this.known);
+  }
+
+  viewsNow() {
+    return viewsOf(this.config ?? {}, this.known);
+  }
+
+  // What the board knows of a GitHub project by its tab's id, from its last
+  // read, kept in the store ("project:<tab>"); null before any.
+  metaOf(id) {
+    if (!this.projectMetas.has(id)) this.projectMetas.set(id, readProjectMeta(store.get(projectKey(id))));
+    return this.projectMetas.get(id);
+  }
+
+  // What a read of a project's view learnt of the project (live.project, or
+  // an error's project): kept, and where its views changed, the views that
+  // came are read once in the background (the prefetch); a view GitHub
+  // dropped that its tab showed is said, and an error of the view that
+  // learns the project's views is gone. The view that learns a project's
+  // views (projectView without one shown) becomes the view it read, its
+  // state with it, where that view reads items and has no data yet; else
+  // that read ends, and the view, where it reads items and its tab shows,
+  // is read on its own. Where the tab shows another view than the one read
+  // (one GitHub dropped, or one the prefetch read), that one is read where
+  // it has no data yet and its tab shows. A read of a tab gone ends. → the
+  // view to read on (live.project).
+  learnProject(view, meta, cx) {
+    const tab = view.tab;
+    const before = this.tabById(tab.id);
+    if (!before) return false;
+    const shownBefore = this.tabViewOf(before);
+    const first = this.views[firstViewId(tab)];
+    if (first) first.error = null;
+    if (JSON.stringify(this.metaOf(tab.id)) !== JSON.stringify(meta)) {
+      this.projectMetas.set(tab.id, meta);
+      store.set(projectKey(tab.id), meta);
+      const kinds = this.takeKinds();
+      for (const id of this.configState.kinds.keys()) if (!kinds.has(id)) this.prefetchLeft.add(id);
+      this.schedulePrefetch(cx);
+    }
+    const now = this.viewFor(this.tabById(tab.id));
+    const number = view.address.view;
+    const read = number ?? view.wanted;
+    if (read !== null && read === shownBefore && !meta.views.some((v) => v.number === read) && now.id !== view.id) {
+      this.say(`Ansicht ${read} gibt es in „${meta.title}“ nicht mehr; gezeigt wird „${now.name}“`, "warning", cx);
+    }
+    if (now.id === view.id) return null;
+    cx.notify();
+    if (number !== null) {
+      const st = this.state(now.id);
+      if (this.tab()?.id === tab.id && this.loader(now) && !st.loading && !st.data) this.refresh(now, cx);
+      return null;
+    }
+    const st = this.views[now.id];
+    const moves = Boolean(this.loader(now)) && !st?.data && !st?.loading;
+    if (moves) {
+      this.views[now.id] = this.state(view.id);
+      this.prefetchLeft.delete(now.id);
+    }
+    delete this.views[view.id];
+    if (moves) return now;
+    if (this.loader(now) && this.tab()?.id === tab.id) this.refresh(now, cx);
+    return false;
+  }
+
+  tabById(id) {
+    return this.contexts().flatMap((c) => c.tabs).find((t) => t.id === id) ?? null;
+  }
+
   // The context the top bar shows (null without a valid views.json), its
   // tabs and the shown one.
   context() {
-    return pick(contextsOf(this.config), this.contextId);
+    return pick(this.contexts(), this.contextId);
   }
 
   tabs() {
@@ -10712,15 +11376,18 @@ export default class Board extends View {
     return pick(context.tabs, this.tabIds[context.id]);
   }
 
-  // The view a team tab shows (one of TEAM_VIEWS).
-  teamViewOf(tab) {
-    this.teamViews[tab.id] ??= store.get(`teamView:${tab.id}`);
-    return teamView(tab, this.teamViews[tab.id]);
+  // The view a team's or a project's tab shows, by its id (one of
+  // TEAM_VIEWS; a project's view by its number): the one chosen last on
+  // this machine where the tab has it, else its first; for a project the
+  // board knows none of the views of, the one chosen last.
+  tabViewOf(tab) {
+    this.tabViews[tab.id] ??= store.get(tabViewKey(tab));
+    return tab.views.length ? tabView(tab, this.tabViews[tab.id]) : this.tabViews[tab.id];
   }
 
-  // The view a tab shows (a team: the view it shows).
+  // The view a tab shows (a team, a project: the view it shows).
   viewFor(tab) {
-    return viewOf(tab, tab.kind === "team" ? this.teamViewOf(tab) : null);
+    return viewOf(tab, hasViews(tab) ? this.tabViewOf(tab) : null);
   }
 
   // The view the shown tab holds, or null.
@@ -10731,7 +11398,7 @@ export default class Board extends View {
 
   // A view as the config has it now, by id; null when it is gone.
   viewById(id) {
-    return viewsOf(this.config).find((v) => v.id === id) ?? null;
+    return this.viewsNow().find((v) => v.id === id) ?? null;
   }
 
   // How a view loads and writes ({ load, move? }); null for a view its
@@ -10768,19 +11435,28 @@ export default class Board extends View {
     const read = c.settingsRead && { name: this.settingsName(), ...c.settingsRead };
     ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin, moving: c.moving = null } = readConfig(c.text, read));
     if (!this.config) return false;
-    const kinds = new Map(viewsOf(this.config).map((v) => [v.id, viewKind(v)]));
-    // Before the first valid config no view has a state to compare.
-    const before = c.kinds ?? kinds;
-    for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
-    c.kinds = kinds;
+    this.takeKinds();
     this.moveShownSource();
-    const m = this.modal;
-    if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
     return true;
   }
 
+  // The view kinds as the config and what the board knows of its projects
+  // give them now: a view whose kind changed drops its open outcomes, and a
+  // dialog of a view that has another kind now closes. → the kinds before
+  // (none before the first valid config: no view has a state to compare).
+  takeKinds() {
+    const c = this.configState;
+    const kinds = new Map(this.viewsNow().map((v) => [v.id, viewKind(v)]));
+    const before = c.kinds ?? kinds;
+    for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
+    c.kinds = kinds;
+    const m = this.modal;
+    if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
+    return before;
+  }
+
   moveShownSource() {
-    const contexts = contextsOf(this.config);
+    const contexts = this.contexts();
     const { set, remove } = shownContextMoves(contexts, (key) => store.get(key), !this.configErrors.length);
     for (const [key, value] of set) store.set(key, value);
     for (const key of remove) store.remove(key);
@@ -10910,7 +11586,7 @@ export default class Board extends View {
   // hide changed shows it so and is read again; `before` as in
   // changeSettings.
   followSettings(cx, before = null) {
-    for (const view of viewsOf(this.config ?? {})) {
+    for (const view of this.viewsNow()) {
       const st = this.views[view.id];
       const settled = st?.data && SHAPES[st.data.shape].withView?.(st.data, view);
       if (settled && settled !== st.data) {
@@ -10932,7 +11608,7 @@ export default class Board extends View {
   moveStoredHidden(cx) {
     if (!this.configState.settings) return;
     const entryOf = (view) => (store.text(hiddenKey(view.id)) === null ? undefined : store.get(hiddenKey(view.id)));
-    const { moves, drop } = storedHiddenMoves(githubViews(this.config), entryOf, (path) => this.origin(path));
+    const { moves, drop } = storedHiddenMoves(this.viewsNow().filter((v) => v.source === "github"), entryOf, (path) => this.origin(path));
     for (const view of drop) store.remove(hiddenKey(view.id));
     if (!moves.length) return;
     this.changeSettings(moves.map((m) => [hidePath(m.view), m.list]), cx).then((done) => {
@@ -10964,14 +11640,19 @@ export default class Board extends View {
       if (!valid) return;
       const kinds = this.configState.kinds;
       // A problem in views.json or in this machine's settings leaves views out.
-      if (!this.configErrors.length) for (const k of goneSaved(store.keys(), new Set(kinds.keys()))) store.remove(k);
+      if (!this.configErrors.length) {
+        const tabs = new Set(this.contexts().flatMap((c) => c.tabs).map((t) => t.id));
+        for (const k of [...goneSaved(store.keys(), new Set(kinds.keys())), ...goneProjects(store.keys(), tabs)]) store.remove(k);
+      }
       this.moveStoredHidden(cx);
       this.prefetchLeft = new Set(kinds.keys());
       const shown = this.view();
       if (shown) this.restore(shown);
-      cx.timer.after(0, () => this.guarded("Gespeicherter Stand", () => viewsOf(this.config ?? {}).forEach((v) => this.restore(v))));
+      cx.timer.after(0, () => this.guarded("Gespeicherter Stand", () => this.viewsNow().forEach((v) => this.restore(v))));
       if (!shown || !this.loader(shown)) this.schedulePrefetch(cx);
       if (!shown) return;
+      const learning = this.learningView(shown);
+      if (learning) return void this.refresh(learning, cx);
       this.sources[shown.source]?.forget?.(shown);
       // The open details' related items are read again too.
       this.state(shown.id).related.clear();
@@ -10982,7 +11663,7 @@ export default class Board extends View {
 
   refresh(view, cx) {
     const loader = this.loader(view);
-    const together = loader?.together?.(viewsOf(this.config ?? {}));
+    const together = loader?.together?.(this.viewsNow());
     if (!together) return this.refreshView(view, cx);
     if (together.some((v) => this.state(v.id).loading)) return void this.againTogether.add(loader);
     for (const v of [view, ...together.filter((v) => v.id !== view.id)]) this.refreshView(v, cx);
@@ -10991,7 +11672,7 @@ export default class Board extends View {
   followTogether(cx) {
     for (const loader of [...this.againTogether]) {
       this.againTogether.delete(loader);
-      const [first] = loader.together(viewsOf(this.config ?? {}));
+      const [first] = loader.together(this.viewsNow());
       if (first) this.refresh(first, cx);
     }
   }
@@ -11033,12 +11714,20 @@ export default class Board extends View {
           st.progress = { page, pages };
           cx.notify();
         },
+        project: (meta) => {
+          if (ended) return null;
+          const now = this.learnProject(view, meta, cx);
+          if (now) view = now;
+          return now;
+        },
       };
       try {
         const { data, warnings, notice } = await loader.load(view, { hiddenFor: (v) => this.hiddenFor(v), chosen, live, last: before.data });
         // What the load has to say beside its data (a chosen sprint gone).
         if (notice) this.say(notice, "warning", cx);
         st.moves = pendingMoves(st.moves, started);
+        // A selection in data of another shape (a view GitHub gave another layout) starts anew.
+        if (st.data && st.data.shape !== data.shape) st.sel = null;
         st.data = SHAPES[data.shape].received(data, st, this.viewById(view.id) ?? view);
         st.warnings = [...warnings, ...SHAPES[data.shape].warnings(view, data)];
         st.error = null;
@@ -11046,11 +11735,15 @@ export default class Board extends View {
         st.saved = false;
         st.unavailable = false;
         // A sprint the picker chose is the view's only while the board runs.
-        if (!chosen) this.save(view, hidden, { data, warnings }, st.at, cx);
-        this.keepSelection(view);
-        this.chooseWanted(view, run, cx);
-        this.settleUnclear(view, started, data, cx);
+        // The view that learnt a project's views and handed them on is gone (learnProject).
+        if (this.views[view.id] === st) {
+          if (!chosen && SHAPES[data.shape].loads) this.save(view, st.hidden ?? hidden, { data, warnings }, st.at, cx);
+          this.keepSelection(view);
+          this.chooseWanted(view, run, cx);
+          this.settleUnclear(view, started, data, cx);
+        }
       } catch (e) {
+        if (e?.project) this.learnProject(view, e.project, cx);
         st.error = report(e);
         st.unavailable = Boolean(e?.unavailable);
         // A failed read keeps what showed before it, not what it drew on its
@@ -11134,7 +11827,7 @@ export default class Board extends View {
   prefetchNext(cx) {
     if (!this.config || !boardShown(this.isLayer()) || this.modal?.busy) return;
     if (Object.values(this.views).some((st) => st.loading || Object.keys(st.pending).length)) return;
-    const [next, ...rest] = prefetchOrder(viewsOf(this.config).filter((v) => this.prefetchLeft.has(v.id)), {
+    const [next, ...rest] = prefetchOrder(this.viewsNow().filter((v) => this.prefetchLeft.has(v.id)), {
       shown: this.view(), contextViewIds: new Set(this.context() ? contextViews(this.context()).map((v) => v.id) : []), source: this.context()?.source, now: Date.now(), every: this.config.refreshMinutes * 60000,
       stateOf: (id) => this.state(id), loads: (v) => Boolean(this.loader(v)),
     });
@@ -11600,7 +12293,7 @@ export default class Board extends View {
   }
 
   switchContext(index, cx) {
-    const context = contextsOf(this.config)[index];
+    const context = this.contexts()[index];
     if (!context) return;
     this.contextId = context.id;
     store.set("context", context.id);
@@ -11608,7 +12301,7 @@ export default class Board extends View {
   }
 
   stepContext(by, cx) {
-    const contexts = contextsOf(this.config);
+    const contexts = this.contexts();
     if (contexts.length) this.switchContext(stepIndex(contexts.length, shownIndex(contexts, this.context()), by), cx);
   }
 
@@ -11624,20 +12317,21 @@ export default class Board extends View {
     cx.notify();
   }
 
-  // Shows a view of the shown team tab; one it does not have does nothing.
-  setTeamView(name, cx) {
+  // Shows a view of the shown team's or project's tab, by its id; one it
+  // does not have does nothing.
+  setTabView(id, cx) {
     const tab = this.tab();
-    if (tab?.kind !== "team" || !tab.views.includes(name)) return;
-    this.teamViews[tab.id] = name;
-    store.set(`teamView:${tab.id}`, name);
+    if (!hasViews(tab) || !tab.views.includes(id)) return;
+    this.tabViews[tab.id] = id;
+    store.set(tabViewKey(tab), id);
     this.showTab(cx);
   }
 
-  // v: the shown team tab's next view.
-  nextTeamView(cx) {
+  // v: the shown team's or project's tab's next view.
+  nextTabView(cx) {
     const tab = this.tab();
-    if (tab?.kind !== "team") return;
-    this.setTeamView(teamViewAfter(tab, this.teamViewOf(tab)), cx);
+    if (!hasViewSwitch(tab)) return;
+    this.setTabView(tabViewAfter(tab, this.tabViewOf(tab)), cx);
   }
 
   // m: "nur meine" on or off, over whatever shows; nothing is read again.
@@ -12001,6 +12695,12 @@ export default class Board extends View {
     if (action) return action.run(this, c, cx), done();
   }
 
+  // What the status menu sets on a view: its shape's field (a GitHub
+  // board's column field), else the status.
+  statusField(view) {
+    return this.shape(view).statusField?.(this, view) ?? "Status";
+  }
+
   openStatusMenu(view, cx) {
     const open = this.shape(view).openStatusMenu;
     if (!open) return this.say("Hier gibt es keinen Status zu ändern", "info", cx);
@@ -12126,8 +12826,8 @@ export default class Board extends View {
       .pt(4)
       .pb(8)
       .when(hasViewSwitch(tab), (el) => {
-        const views = tab.views.map((v) => ({ id: v, label: teamViewName(v) }));
-        return el.child(this.segments(t, "team-view", views, this.teamViewOf(tab), (name, cx) => this.setTeamView(name, cx)));
+        const views = tab.views.map((v) => ({ id: v, label: tabViewName(tab, v) }));
+        return el.child(this.segments(t, "tab-view", views, this.tabViewOf(tab), (id, cx) => this.setTabView(id, cx)));
       })
       .when(Boolean(context), (el) => el.child(this.mineToggle(t)))
       .child(
@@ -12182,10 +12882,10 @@ export default class Board extends View {
   }
 
   contextSwitch(t, shown) {
-    const pick = (id, cx) => this.switchContext(shownIndex(contextsOf(this.config), { id }), cx);
+    const pick = (id, cx) => this.switchContext(shownIndex(this.contexts(), { id }), cx);
     const parts = [];
     let source = null;
-    for (const context of contextsOf(this.config)) {
+    for (const context of this.contexts()) {
       if (context.source !== source) {
         if (source) parts.push(div().id(`context-rule-${context.source}`).flex_none().self_stretch().w(1).my(4).mx(4).bg(t.border));
         source = context.source;
@@ -12262,14 +12962,31 @@ export default class Board extends View {
     if (!this.config) return this.configErrors.length ? message(`Keine gültige Ansicht in ${CONFIG_NAME}.json`) : loading();
     if (!view) return message("Keine Ansicht verfügbar");
     const shape = this.shape(view);
-    if (shape.loads === false) return box.child(shape.render(this, t, mono, view, st));
+    const errorLine = (text) => div().px(16).pt(14).text_color(toneColor(t, NOTE_TONES.error)).child(text);
+    if (shape.loads === false) {
+      const error = this.learnError(view);
+      return box.when(Boolean(error), (el) => el.child(errorLine(error))).child(shape.render(this, t, mono, view, st));
+    }
     if (!st.data && !st.error) return st.loading ? loading() : message("Noch nichts geladen");
     let shown = box;
-    if (st.error) shown = shown.child(div().px(16).pt(14).text_color(toneColor(t, NOTE_TONES.error)).child(st.error));
+    if (st.error) shown = shown.child(errorLine(st.error));
     const warnings = [...st.warnings, ...this.noViewerWarning(view, st, shape)];
     if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(w)));
     if (!st.data) return shown;
     return shown.child(shape.render(this, t, mono, view, st));
+  }
+
+  // For a project's view that reads nothing itself (a table's), the view
+  // that reads for it at its start and on r: the one that reads its
+  // project's views (projectView without one shown); null for any other.
+  learningView(view) {
+    return view.tab?.kind === "project" && !this.loader(view) ? projectView(view.tab, null, view.address.view) : null;
+  }
+
+  // The error of that read (learningView), drawn on the view it reads for.
+  learnError(view) {
+    const learning = this.learningView(view);
+    return learning ? this.views[learning.id]?.error ?? null : null;
   }
 
   // With "nur meine" on and no login the data was read as: what the text

@@ -26,14 +26,16 @@
 // of its items ended up), withView (data, view: the data as the view's
 // settings show it now, the same data where they change nothing for it),
 // toggleRepo (b, view, repo, cx: turns a repo off or on, beside the repo
-// menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu, navigate
-// (its own keyboard movement in place of navigate's, select.js), pickStatus
-// (what a pick in the status menu does in place of a move to that column),
-// and assign (how its items' assignees are found and changed: { find(data,
-// key), withItem(data, key, patch) (the data with the item's fields set),
-// where (where an item no longer is: "im Sprint") }; a shape that has it
-// takes a, the assignee picker, ui/modals/assign.js, and its settle says the
-// outcomes of unclear assignments, unclearAssignLines).
+// menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu with
+// statusField (b, view: the name of what the status menu sets, where it is
+// not the status; null for none), navigate (its own keyboard movement in
+// place of navigate's, select.js), pickStatus (what a pick in the status
+// menu does in place of a move to that column), and assign (how its items'
+// assignees are found and changed: { find(data, key), withItem(data, key,
+// patch) (the data with the item's fields set), where (where an item no
+// longer is: "im Sprint") }; a shape that has it takes a, the assignee
+// picker, ui/modals/assign.js, and its settle says the outcomes of unclear
+// assignments, unclearAssignLines).
 // A shape keeps its own state per Board in b.shapeState[name], which its
 // state() makes once, when the Board starts: herdr refuses a ScrollHandle
 // made while a view draws ("cannot run during render"). A new way to draw

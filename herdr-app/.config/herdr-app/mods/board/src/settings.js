@@ -13,9 +13,12 @@ export const ORIGIN = { machine: "dieser Rechner", base: `${CONFIG_NAME}.json`, 
 
 export const pathText = (path) => `„${path.join(".")}“`;
 const pathKey = (path) => JSON.stringify(path);
-const hasName = (entry, key) => isObject(entry) && isText(entry[key]);
+// A name is a text, or a number (a project's), which a path names as its
+// digits.
+const hasName = (entry, key) => isObject(entry) && (isText(entry[key]) || Number.isInteger(entry[key]));
+const sameName = (own, name) => String(own) === String(name);
 
-export const entryByName = (list, name, key) => list.find((e) => hasName(e, key) && e[key] === name);
+export const entryByName = (list, name, key) => list.find((e) => hasName(e, key) && sameName(e[key], name));
 
 function child(node, key, path, nameKeyAt) {
   if (Array.isArray(node)) {
@@ -72,7 +75,7 @@ function mergeAt(base, over, path, out) {
       continue;
     }
     let own = value;
-    if (isObject(value) && Object.hasOwn(value, nameKey) && value[nameKey] !== name) {
+    if (isObject(value) && Object.hasOwn(value, nameKey) && !sameName(value[nameKey], name)) {
       out.errors.push(`${pathText([...path, name, nameKey])}: der Name des Eintrags ändert sich nur in ${ORIGIN.base}`);
       own = Object.fromEntries(Object.entries(value).filter(([key]) => key !== nameKey));
     }

@@ -391,24 +391,23 @@ by that run. Which files of the package git tracks is set in the root
   once before its contexts. Beside them stand the shown context's tabs, its PR
   tab last: on Azure each of my teams, with a switch between its Sprint and its
   Backlog in the row below, then the pull requests of its project; on GitHub one
-  tab per project board, as "Meine Aufgaben" (my issues on the Tender project's
-  board, in the columns of its Status field), then "PRs" (pull requests I am
-  asked to review, I opened, or I reviewed, with checks, review state and
-  whether I have to act on them). The PR tabs of all GitHub contexts share
-  their sections, `sources.github.prs` in `views.json` (`sections`, and the
-  `limit` of each search), read once for all of them, so each tab sees what
-  the others see and a pull request cannot fall between them; a refresh of
-  one PR tab refreshes them all. A context's own `prs` holds its tab alone
-  (`id`, `name`, `hideRepos`, `start`); a `sections` or `limit` there is the
-  older form: the board names where they stand now and leaves that PR tab out.
-  The searches run as `views.json` writes them, and a context's PR tab shows
-  what they find in the owner's repos and in foreign ones, whose owner is no
-  GitHub context the board reads with a PR tab; a pull request in a repo of
-  another such context shows in that context's PR tab only (owners compare in
-  any case, and two contexts whose owners differ only in case are one owner: the
-  second is left out). A
-  team's Sprint shows its current sprint the way Azure's taskboard does: one row
-  per story (its id, title, own state and assignee), its tasks as cards in the
+  tab per project, named as GitHub names it, with a switch between its views in
+  the row below (more on them below), then "PRs" (pull requests I am asked to
+  review, I opened, or I reviewed, with checks, review state and whether I have
+  to act on them). The PR tabs of all GitHub contexts share their sections,
+  `sources.github.prs` in `views.json` (`sections`, and the `limit` of each
+  search), read once for all of them, so each tab sees what the others see and a
+  pull request cannot fall between them; a refresh of one PR tab refreshes them
+  all. A context's own `prs` holds its tab alone (`id`, `name`, `hideRepos`,
+  `start`); a `sections` or `limit` there is the older form: the board names
+  where they stand now and leaves that PR tab out. The searches run as
+  `views.json` writes them, and a context's PR tab shows what they find in the
+  owner's repos and in foreign ones, whose owner is no GitHub context the board
+  reads with a PR tab; a pull request in a repo of another such context shows in
+  that context's PR tab only (owners compare in any case, and two contexts whose
+  owners differ only in case are one owner: the second is left out). A team's
+  Sprint shows its current sprint the way Azure's taskboard does: one row per
+  story (its id, title, own state and assignee), its tasks as cards in the
   team's taskboard columns, each with its own state, assignee and id; a task
   whose story is not in the sprint (one left in the sprint before, say) shows
   under that story's own row, marked with its sprint ("Sprint 11", or "ohne
@@ -459,15 +458,15 @@ by that run. Which files of the package git tracks is set in the root
   story stays dimmed for my tasks in it) without reading anything again. A
   context, a team or a project added to `views.json` adds a context or a tab,
   and `r` reads the file again; the board remembers the context shown last, each
-  context's tab, each team's view and "nur meine". A board that kept the shown
-  source and each source's tab from before the contexts opens on their context
-  and tab, once. A count in a tab, a column or a list section that the filter or
-  "nur meine" thins says so ("1/4"); a tab's count leaves the cards of hidden
-  columns out. The code holds nothing of mine; the header of
-  `mods/board/src/main.js` describes the file's fields. In a `views.json` from
-  before the contexts, with `sources.github.views` or an entry of
-  `sources.azure.contexts` with `team` or `prs`, their old part is not read: the
-  board says where its views and teams go now.
+  context's tab, each team's and each project's view and "nur meine". A board
+  that kept the shown source and each source's tab from before the contexts
+  opens on their context and tab, once. A count in a tab, a column or a list
+  section that the filter or "nur meine" thins says so ("1/4"); a tab's count
+  leaves the cards of hidden columns out. The code holds nothing of mine; the
+  header of `mods/board/src/main.js` describes the file's fields. In a
+  `views.json` from before the contexts, with `sources.github.views` or an entry
+  of `sources.azure.contexts` with `team` or `prs`, their old part is not read:
+  the board says where its views and teams go now.
   `views.json` is the base; each machine's own settings lie over it in
   `~/.config/herdr-app/board/settings.json`, outside the dotfiles: no stow
   package has a `board/` there, `.stow-local-ignore` keeps every
@@ -477,58 +476,62 @@ by that run. Which files of the package git tracks is set in the root
   machine sets: a value there overrides the one in `views.json`, an object
   merges key by key down to its lists and values, and a list replaces the
   `views.json` list whole. A list whose entries have a name of their own, the
-  GitHub contexts their `owner`, the Azure contexts their `project` and a
-  GitHub context's projects their `id`, can also be reached entry by entry: an
+  GitHub contexts their `owner`, the Azure contexts their `project` and a GitHub
+  context's projects their `number`, can also be reached entry by entry: an
   object in its place, keyed by those names, merges into the entries with them,
   wherever `views.json` moves them, so `{ "sources": { "github": { "contexts": {
-  "<owner>": { "projects": { "mine": { "hide": ["Done"] } } } } } } }` sets that
-  one board's hidden columns, while an array in place of `projects` would
-  replace every project of the context. Of two entries with one name the first
-  has it, as for the board's views, and entries without one leave the others
-  reachable by theirs. A name no entry of `views.json` has, or such an object
-  for any other list (an Azure context's teams, set here only as a whole list),
-  is an error naming the file and the key, and the rest of the file applies; so
-  is a value there that changes an entry's own name, and the rest of the entry
-  applies. Settings from before the contexts, a GitHub view's entry under
-  `sources.github.views` by its id, move into its tab at a read of `views.json`,
-  once: into `sources.github.contexts.<owner>.projects.<id>`, or `.prs` for the
-  PR list (its `sections` and `limit` into `sources.github.prs`, one place for
-  all PR tabs), a project's `number`, `field` and `priorityField` out of its
-  `project`, what the context says (`source`, `layout`, the project's `owner`)
-  left out. The board writes that at once and says what moved where. Where any
-  value has no place there (an id `views.json` has no tab for, a whole list of
-  views, the Azure teams in the old form, a project of another owner, a key the
-  tab does not take, a tab the file sets already, or two values for one place
-  that differ) nothing moves: the board names each such value and shows
-  `views.json` alone until the file is changed by hand. Nor does anything move
-  while `views.json` has a problem: the board says to fix that first. A write
-  that fails, or finds the file changed since it was read, is said (a move that
-  finds the settings moved meanwhile takes them without a word), the file is
-  read again, and the next read (`r`) tries again. Settings that cannot be read,
-  are no JSON object, or give `views.json` a problem it does not have on its
-  own, are not applied: the board names the file with each problem, in the words
-  it uses for `views.json`, says that it shows `views.json` alone, and does, and
-  it changes nothing in the file until a read finds it fit again. Removing a
-  value from the file (a reset) lets `views.json`'s apply again. The board reads
-  the file whenever it reads `views.json` (the start, `r`), and a change it
-  makes is written at once, over what the file holds at that moment, one after
-  the other. Where the file no longer holds, at a value the change sets, what
-  the board made the change over (another copy of the board, or a hand, changed
-  it since), or changes while it is written, the board does not save, says that
-  the file changed and the change has to be made again, reads the file again
-  and shows what it holds; where it cannot write the file, it says so with
-  herdr's reason, the same way. Hidden columns are such a setting: hiding or
-  showing a column writes the view's whole hidden list there, which replaces
-  the view's `hide` from `views.json` on this machine until it is reset. A
-  GitHub PR tab's repos turned off are another: its `hideRepos` (repos with
-  their owner, "owner/repo"), which a switch writes there as a whole list
-  the same way. The
-  hidden columns an older board kept in herdr's localStorage move into the
-  file at a read of `views.json` once the write succeeds, and leave the
-  localStorage; where the file sets that view's hidden columns already, the
-  file's stay; those of views `views.json` no longer has stay in the
-  localStorage, and all of them do while the file does not apply. What else
-  the board remembers, as above, stays in herdr's localStorage.
+  "<owner>": { "projects": { "2": { "views": { "1": { "hide": ["Done"] } } } } }
+  } } } }` sets the hidden columns of view 1 of project 2, while an array in
+  place of `projects` would replace every project of the context. Of two entries
+  with one name the first has it, as for the board's views, and entries without
+  one leave the others reachable by theirs. A name no entry of `views.json` has,
+  or such an object for any other list (an Azure context's teams, set here only
+  as a whole list), is an error naming the file and the key, and the rest of the
+  file applies; so is a value there that changes an entry's own name, and the
+  rest of the entry applies. Settings from before the contexts, a GitHub PR
+  view's entry under `sources.github.views` by its id, move into its tab at a
+  read of `views.json`, once: into `sources.github.contexts.<owner>.prs` (its
+  `sections` and `limit` into `sources.github.prs`, one place for all PR tabs),
+  what the context says (`source`, `layout`) left out. The board writes that at
+  once and says what moved where. Where any value has no place there (an id
+  `views.json` has no tab for, a board's among them, a project's tab having no
+  `id` in `views.json`, a whole list of views, the Azure teams in the old form,
+  a key the tab does not take, a tab the file sets already, or two values for
+  one place that differ) nothing moves: the board names each such value and
+  shows `views.json` alone until the file is changed by hand. A project's
+  settings from before its views came from GitHub, an entry under `projects` by
+  its old id, or one by its number with a key of the older form (`hide`,
+  `filter`, …), are named and do not apply, and stay in the file; the rest of
+  the file applies. Nor does anything move while `views.json` has a problem: the
+  board says to fix that first. A write that fails, or finds the file changed
+  since it was read, is said (a move that finds the settings moved meanwhile
+  takes them without a word), the file is read again, and the next read (`r`)
+  tries again. Settings that cannot be read, are no JSON object, or give
+  `views.json` a problem it does not have on its own, are not applied: the board
+  names the file with each problem, in the words it uses for `views.json`, says
+  that it shows `views.json` alone, and does, and it changes nothing in the file
+  until a read finds it fit again. Removing a value from the file (a reset) lets
+  `views.json`'s apply again. The board reads the file whenever it reads
+  `views.json` (the start, `r`), and a change it makes is written at once, over
+  what the file holds at that moment, one after the other. Where the file no
+  longer holds, at a value the change sets, what the board made the change over
+  (another copy of the board, or a hand, changed it since), or changes while it
+  is written, the board does not save, says that the file changed and the change
+  has to be made again, reads the file again and shows what it holds; where it
+  cannot write the file, it says so with herdr's reason, the same way. Hidden
+  columns are such a setting, each view of a project's its own: hiding or
+  showing a column writes the view's whole hidden list there, at
+  `sources.github.contexts.<owner>.projects.<number>.views.<view>.hide` (the
+  view by its number), which replaces that view's `hide` from `views.json` on
+  this machine until it is reset. A GitHub PR tab's repos turned off are
+  another: its `hideRepos` (repos with their owner, "owner/repo"), which a
+  switch writes there as a whole list the same way. The hidden columns an older
+  board kept in herdr's localStorage move into the file at a read of
+  `views.json` once the write succeeds, and leave the localStorage; where the
+  file sets that view's hidden columns already, the file's stay; those of views
+  `views.json` no longer has stay in the localStorage, and all of them do while
+  the file does not apply. What else the board remembers, as above, stays in
+  herdr's localStorage.
   Each view keeps its last good read in herdr's localStorage (about 217 kB
   for a board of 300 cards; herdr's store takes at most 1 MiB a value and
   8 MiB in all, so a view keeps at most a million bytes, and one the store
@@ -564,8 +567,8 @@ by that run. Which files of the package git tracks is set in the root
   `board: <gh|az|sh> <kind> <ms> ms <ok|exit n|failed> view=<view id>`.
   Keys: `1 2 3` or `[ ]` switch the tab, `{ }` the context (also as AltGr types
   them, on a German layout AltGr+7 and AltGr+0), `g` and a digit go to that
-  context, `v` a team's Sprint and Backlog, `R` opens a PR tab's repo menu
-  (below), `m` turns "nur meine" on and off
+  context, `v` a team's Sprint and Backlog or a project's views, `R` opens a PR
+  tab's repo menu (below), `m` turns "nur meine" on and off
   (the contexts, the tabs, the switch and "nur meine" take clicks too), `/`
   filters, `r` refreshes (the shown view also refreshes every few minutes while
   the board shows), `Esc` closes, `gg` and `Home` go to the first card of the
@@ -628,29 +631,74 @@ by that run. Which files of the package git tracks is set in the root
   iteration follows the current one has it read again for each create. A work
   item's session starts in the repo chosen in the start dialog (below). On a
   GitHub view `h/l j/k` move over the columns shown, `H/L` move a card one
-  column, hidden ones included (`s` picks from a menu, hidden ones too, or drag
-  the card onto a column; the notice says when a card went to a hidden column),
-  the command menu's "Spalte ausblenden" hides the selected column (views.json
-  sets which start hidden; hiding or showing one writes this machine's settings,
-  above), `o` opens the item in the browser. A GitHub board reads its items in
-  pages of up to 100, one gh call each, up to views.json's `limit` (1000 by
-  default) and at most as many calls as full pages of it take; where that cuts
-  them, a note under the columns says how many it read. A hidden column is not
-  drawn: the line below the columns names the hidden ones ("ausgeblendet:
-  Backlog, Done"), a click on a name shows that column again, and the command
-  menu's "Spalten…" opens a menu of every column, shown or hidden, where
-  `Enter`, a digit or a click hides or shows one. A long column draws whole only
-  the cards about what it shows, half its height above and below; every other
-  card is an empty frame of the card's height until the column scrolls near it:
-  at once by the wheel or a key, within a tenth of a second by the scrollbar's
-  thumb, wherever the pointer is released (`mods/board/src/ui/band.js`). herdr
-  before 0.1.18 tells a mod no scroll position; there every card draws whole. A
-  click on a card or a list's row selects it; a click on one I chose (clicked
-  before, moved to with the keys or dragged onto another column; not one the
-  board selected by itself) opens its details. Where the board selects another
-  item by itself (a refresh, the filter, a hidden column), open details close.
-  The details take a third of the board's width, half of it beside a single
-  column, but never less than 420 or more than 720 pixels (detailWidth in
+  column, hidden ones included (`s` picks from a menu named after the field the
+  view's columns stand on, "Status ändern" or "Iteration ändern", hidden ones
+  too, or drag the card onto a column; the notice says when a card went to a
+  hidden column), the command menu's "Spalte ausblenden" hides the selected
+  column (views.json may set which start hidden, per view; hiding or showing one
+  writes this machine's settings, above), `o` opens the item in the browser.
+  A GitHub project's tab is in `views.json` only its `number` (with, where
+  wanted, `limit`, `start` and per view the columns hidden at first, `views`: {
+  "<number of the view>": { "hide": [...] } }); its name, its views and their
+  filter, columns, swimlanes and sort come from the project's saved views on
+  GitHub. A project entry with the keys of the form before (`id`, `name`,
+  `field`, `filter`, `priorityField`, `hide`) is left out, and the board says
+  what it is now. The row below the tabs switches between the project's views,
+  in GitHub's order and by their names; `v` steps through them, a click picks
+  one, and the board remembers the view shown per tab; at first it shows the
+  first. Each read of a view reads the project's views and fields once, then
+  that view's items by its filter, on GitHub's side (`items(query:)`), its
+  hidden columns left out of that query (`-status:"Done"`), so a hidden column
+  costs no reads. Until the board has read a project once it names the tab
+  "Projekt <number>"; that first read learns its views and reads the first (or
+  the one chosen last) in the same read, and the board keeps the views for the
+  next start. Where GitHub no longer has the view a tab shows (a board, a table
+  or roadmap view, or the one chosen last before the board knew the project's
+  views), the board says so and the tab shows and reads the project's first
+  view. A board view draws its columns from the field the view's columns stand
+  on: a single-select field's options in their order, an iteration field's
+  iterations in theirs (a completed one only where cards stand in it, or where
+  it is hidden), and a column "Ohne <field>" before them only where cards have
+  no value there; a view without such a field takes Status, as GitHub does, and
+  a warning names it, and one of a project without Status says it has no field
+  for its columns. A card moves between them (`H/L`, `s`, a drag) by either kind
+  of field. Where the view groups its cards (GitHub's "Group by"), the board
+  draws swimlanes: a band across the columns per value its cards hold, in the
+  field's order, the cards without one in a band "Ohne <field>" last; the bands
+  scroll as one under the columns' heads, `j/k` go through a column band after
+  band and `h/l` keep the band where the next column has a card in it. Within a
+  column the cards follow the view's sort keys, one after the other, ascending
+  or descending, those without a value last either way; an unsorted view keeps
+  GitHub's order. A sort key or a swimlane field the board cannot read (linked
+  pull requests, reviewers, the dates an item keeps) orders nothing, and a
+  warning says so. A view whose filter finds nothing says so with the filter its
+  query sent (with hidden columns, with the terms that leave them out): GitHub
+  answers a filter it cannot read with no items too, not with an error. A table
+  or roadmap view shows a placeholder that names it ("Tabellenansicht folgt")
+  and reads no items; the start and `r` read only its project's views there, so
+  a view that became a board on GitHub shows as one, and a read of them that
+  fails shows its error above the placeholder until a read of the project, from
+  any of its views, succeeds. "nur meine" and the filter work on top of a view
+  as before. A
+  GitHub board reads its items in pages of up to 100, one gh call each, after
+  the one for the project's views, up to views.json's `limit` (1000 by default)
+  and at most as many calls as full pages of it take; where that cuts them, a
+  note under the columns says how many it read. A hidden column is not drawn:
+  the line below the columns names the hidden ones ("ausgeblendet: Backlog,
+  Done"), a click on a name shows that column again, and the command menu's
+  "Spalten…" opens a menu of every column, shown or hidden, where `Enter`, a
+  digit or a click hides or shows one. A long column draws whole only the cards
+  about what it shows, half its height above and below; every other card is an
+  empty frame of the card's height until the column scrolls near it: at once by
+  the wheel or a key, within a tenth of a second by the scrollbar's thumb,
+  wherever the pointer is released (`mods/board/src/ui/band.js`). herdr before
+  0.1.18 tells a mod no scroll position; there every card draws whole. A click
+  on a card or a list's row selects it; a click on one I chose (clicked before,
+  moved to with the keys or dragged onto another column; not one the board
+  selected by itself) opens its details. Where the board selects another item by
+  itself (a refresh, the filter, a hidden column), open details close. The
+  details take a third of the board's width, half of it beside a single column,
+  but never less than 420 or more than 720 pixels (detailWidth in
   `mods/board/src/ui/helpers.js` has the rule).
   In each section of a GitHub PR tab the rows stand grouped by repo, each
   group where its first row would stand (so the rows that ask something of
@@ -739,27 +787,24 @@ by that run. Which files of the package git tracks is set in the root
   A card, on a GitHub board and on the Sprint's taskboard, shows one line per
   topic, each only where it has something, so a card without them stays as
   compact as before: its key with its priority at the right ("P1": on GitHub the
-  option of the project's single-select field "Priority", or the one
-  project's `priorityField` in `views.json` names, in that option's color; on
-  Azure the work item's priority, 1 red, 2 orange, 3 and 4 grey), its title, its
-  milestone as a grey chip and its parent ("Teil von #1735 [Epic] …", cut short
-  with "…" where it does not fit; the repo's name before the number only where
-  the parent lives in another repo; on Azure its id and title), its type and
-  labels (or a work item's state), and its progress: "14 / 25", a bar of one
-  segment per sub-issue (one continuous bar above 30), its done part green, and
-  "56 %", rounded down. Its session (a sure one by what its agent does, in that
-  status's color; "○ Kandidat" where it has only likely ones), "speichert …"
-  while a change of it is written, and its assignees end its progress line, or
-  its chips' line where it has no progress. On the Sprint a story's progress
-  counts the tasks in its row, done by the state their column shows, and a
-  task names its parent only in "Ohne Story" (its story's row names it
-  otherwise); the Sprint reads, in one query more, its tasks' parents outside
+  option of the project's single-select field "Priority", where it has one, in
+  that option's color; on Azure the work item's priority, 1 red, 2 orange, 3 and
+  4 grey), its title, its milestone as a grey chip and its parent ("Teil von
+  #1735 [Epic] …", cut short with "…" where it does not fit; the repo's name
+  before the number only where the parent lives in another repo; on Azure its id
+  and title), its type and labels (or a work item's state), and its progress:
+  "14 / 25", a bar of one segment per sub-issue (one continuous bar above 30),
+  its done part green, and "56 %", rounded down. Its session (a sure one by what
+  its agent does, in that status's color; "○ Kandidat" where it has only likely
+  ones), "speichert …" while a change of it is written, and its assignees end
+  its progress line, or its chips' line where it has no progress. On the Sprint
+  a story's progress counts the tasks in its row, done by the state their column
+  shows, and a task names its parent only in "Ohne Story" (its story's row names
+  it otherwise); the Sprint reads, in one query more, its tasks' parents outside
   it with each refresh and the titles of its stories' parents where it does
   not keep them; it keeps those for four hours (`r` reads them again). The
   board's query reads priority, milestone and parent at no extra cost; the
-  header's "Calls:" says why. Where a project's `priorityField` names a field
-  the project does not have as a single-select field, a warning above the
-  columns says so; the default "Priority" may be missing without one.
+  header's "Calls:" says why.
   The board's colors are the theme's, or tints of them. A column's head sits
   on a tint of its status color, and each card, on the Sprint's taskboard
   too, has a narrow edge in it; which theme color a status or a state has,

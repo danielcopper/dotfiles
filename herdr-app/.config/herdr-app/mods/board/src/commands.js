@@ -41,7 +41,7 @@
 // selected one first) }.
 
 import { cardType, itemLabel } from "./shared.js";
-import { contextsOf, hasViewSwitch, shownIndex, teamViewAfter, teamViewName, viewSwitchHint } from "./contexts.js";
+import { hasViewSwitch, shownIndex, tabViewAfter, tabViewName, viewSwitchHint } from "./contexts.js";
 import { lineIndex } from "./related.js";
 import { placed, secondEnter } from "./sessions.js";
 import { descriptionFolds } from "./ui/related.js";
@@ -155,10 +155,10 @@ export function hintsOf(c) {
 
 const tabsOf = (c) => c.b.tabs();
 const tabAt = (c) => shownIndex(tabsOf(c), c.b.tab());
-const contextsNow = (c) => contextsOf(c.b.config);
+const contextsNow = (c) => c.b.contexts();
 const contextAt = (c) => shownIndex(contextsNow(c), c.b.context());
 
-const nextView = (c) => teamViewAfter(c.b.tab(), c.b.teamViewOf(c.b.tab()));
+const nextView = (c) => tabViewAfter(c.b.tab(), c.b.tabViewOf(c.b.tab()));
 
 // Whether the shown view has items to move over (none: the placeholder).
 const walks = (c) => Boolean(c.shape?.dirs.length);
@@ -275,9 +275,9 @@ export const ACTIONS = [
   },
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(contextAction),
   {
-    id: "team-view", group: "view", name: (c) => `Ansicht wechseln: ${teamViewName(nextView(c))}`, key: "v", menu: 25, bar: true,
+    id: "tab-view", group: "view", name: (c) => `Ansicht wechseln: ${tabViewName(c.b.tab(), nextView(c))}`, key: "v", menu: 25, bar: true,
     when: (c) => Boolean(c.view) && hasViewSwitch(c.b.tab()), takes: () => true,
-    run: (b, c, cx) => b.nextTeamView(cx),
+    run: (b, c, cx) => b.nextTabView(cx),
     hint: (c) => (hasViewSwitch(c.b.tab()) ? viewSwitchHint(c.b.tab()) : null),
   },
   moveAction("move-left", "H", -1, "Nach links verschieben"),
@@ -289,10 +289,10 @@ export const ACTIONS = [
     hint: (c) => (c.shape?.create ? "neu" : null),
   },
   {
-    id: "status", group: "item", name: "Status ändern…", key: "s", menu: 3,
+    id: "status", group: "item", name: (c) => `${c.b.statusField(c.view)} ändern…`, key: "s", menu: 3,
     when: (c) => has(c, "openStatusMenu") && Boolean(c.item), takes: (c) => has(c, "openStatusMenu"),
     run: (b, c, cx) => b.openStatusMenu(c.view, cx),
-    hint: (c) => (c.shape?.openStatusMenu ? "Status" : null),
+    hint: (c) => (c.shape?.openStatusMenu ? c.b.statusField(c.view) : null),
   },
   {
     id: "assign", group: "item", name: "Zuweisen…", key: "a", menu: 4,

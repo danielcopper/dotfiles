@@ -11,22 +11,23 @@
 //   last.
 //   - github: { contexts: [{ owner, projects?: [...], prs: {...} }], prs: {
 //     sections, limit? } }, a context per owner (a user or an
-//     organisation). A project is a tab with
-//     its board: { id, name, number, field? ("Status"), priorityField?
-//     ("Priority"), filter? (a Projects filter such as "assignee:@me"),
-//     hide?: [column names], limit? (the most items it reads, 1000), start?
-//     }; its columns are the options of that single-select field, a card's
-//     priority its option of the single-select field priorityField names
-//     (none where the project has no such field; one views.json names that
-//     the project lacks is a warning). A context's prs is its PR tab: { id,
+//     organisation). A project is a tab with its views: { number, limit?
+//     (the most items a view reads, 1000), start?, views?: { "<number of
+//     the view>": { hide?: [column names] } } }, its tab's id its owner's
+//     and its number (projectTabId); its name, its views (in GitHub's
+//     order) and their layout, filter, column field, swimlane field and
+//     sort keys come from GitHub (githubProjectArgs), a card's priority
+//     from the project's single-select field "Priority" (none without
+//     one). An entry with id, name, field, filter, priorityField or hide
+//     has the form before and is left out. A context's prs is its PR tab: { id,
 //     name? ("PRs"), hideRepos?: ["<owner>/<repo>"] (repos turned off),
 //     start? }. The PR tabs of all contexts share github's prs: sections:
 //     [{ name, query, tone? }], one GitHub search for pull requests per
 //     section, as written, read once for all of them; limit? (per search,
 //     50, at most 100); tone is one of SECTION_TONES (shared.js), and
 //     without one a section takes the next of SECTION_TONE_ORDER by its
-//     place that no other section sets. A tab's id is its own among all
-//     contexts' (readGithub in config.js).
+//     place that no other section sets. A PR tab's id is its own among all
+//     contexts' PR tabs (readGithub in config.js).
 //   - azure: { org (https://dev.azure.com/<org>), repoFolders?, contexts: [{
 //     project, teams?: [{ team, views?: ["sprint", "backlog"] (both when
 //     missing), repoFolders? }] }] }, a context per project: a tab per team,
@@ -48,19 +49,24 @@
 // old part is not read: the board says where its views and teams go now.
 //
 // This machine's settings (settings.js; README, "herdr app") lie over
-// views.json and are read with it. Hidden columns are a view's hide,
-// views.json's or this machine's settings'; hiding or showing one writes it
-// into the settings. They are left out of the query and of the board. A PR
+// views.json and are read with it. Hidden columns are a view's hide (a
+// project's view's, under its project's views), views.json's or this
+// machine's settings'; hiding or showing one writes it into the settings.
+// They are left out of the query and of the board. A PR
 // tab's repos turned off (hideRepos) are written the same way; their pull
 // requests are read and not shown.
 // GitHub's queries also ask for the login gh runs as, which "nur meine"
 // compares with.
 //
-// Calls: a GitHub board view costs one gh call per refresh for each page of
-// up to 100 items it reads (GitHub's most), at most as many as full pages of
-// its limit take: ten for the 1000 by default (each item's priority,
-// milestone and parent, with its title and repo, and the first page's look
-// at the priority field add no connection and so no points; see below); the
+// Calls: a GitHub board view costs one gh call per refresh for its
+// project's views and fields (githubProjectArgs: its views, PROJECT_VIEWS,
+// and their three field lists each, so about two points), then one for each
+// page of up to 100 items it reads (GitHub's most), at most as many as full
+// pages of its limit take: ten for the 1000 by default (each item's
+// priority, milestone and parent, with its title and repo, and the values of
+// the fields its view sorts and bands by, read by name, add no connection
+// and so no points; see below); a table or roadmap view reads no items, and
+// on the start and r only its project's views; the
 // PR tabs of all contexts one together (a refresh of one refreshes them
 // all), one more per THREAD_IDS (100) pull requests in them with
 // more than FIRST_THREADS (10) review threads, one for the unread
@@ -185,18 +191,21 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { appHome, checking, exec, focused, home, layout, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, terminals, theme, writeTextFile } from "herdr";
 import { MOD, CONFIG_NAME, boardLog, cardType, errorText, firstLine, itemKey, itemLabel, lineKey, parentLabel, report, sameItem } from "./shared.js";
-import { MOVE_AGAIN, githubViews, hidePath, nameKeyAt, readConfig, settingsAlone, settingsBeforeContexts, startSettings } from "./config.js";
+import { MOVE_AGAIN, hidePath, nameKeyAt, readConfig, settingsAlone, settingsBeforeContexts, startSettings } from "./config.js";
 import { CHANGED_MEANWHILE, CHANGED_SINCE, ORIGIN, pathText, readSettings, sameAtPaths, settingsAfter, settingsFileIn, settingsText, staleRefusal } from "./settings.js";
 import { hiddenColumns, hiddenKey, isDue, pendingMoves, sameNames, storedHiddenMoves, withHidden } from "./kinds/board.js";
 import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
-import { SOURCES, contextViews, contextsOf, firstContextOf, teamViewName, pick, teamView, viewOf, viewsOf, hasViewSwitch, shownContextMoves, shownIndex, stepIndex, teamViewAfter } from "./contexts.js";
+import {
+  SOURCES, contextViews, contextsOf, firstContextOf, firstViewId, goneProjects, hasViews, tabViewName, pick, projectKey, projectView, tabView, viewOf, viewsOf, hasViewSwitch, shownContextMoves, shownIndex, stepIndex, tabViewAfter,
+} from "./contexts.js";
 import { call, toolPaths, what } from "./tools.js";
 import { SAVED_MAX, goneSaved, prefetchOrder, readLabels, readSaved, refreshDue, savedKey, savedText } from "./loading.js";
 import { renderTemplate, templateVars } from "./actions/start.js";
 import { AGENT_STATUS, itemSessions, placeKey, placed, readClaudeSessions, secondEnter, sessionIndex } from "./sessions.js";
 import { makeSources } from "./sources/index.js";
+import { readProjectMeta } from "./sources/github.js";
 import { keptRelated, lineAt, lineCount, lineId, lineIndex, lineNow, pathLabel, pickedLine, relatedLines, sectionOf, stepLine, wholeSection } from "./related.js";
 import { store, boardShown, inPlace, observesReleases, shownOf, button, detailSection, detailWidth, selectedLook, sessionReasons, toggleSwitch, CANDIDATE, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
 import { layers } from "./ui/layer.js";
@@ -291,6 +300,8 @@ export const BAND_MS = 100;
 // Why "nur meine" cannot tell one's own items, where the source has no words
 // of its own for it (noViewer): it did not name the login it read as.
 const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
+// Where the store keeps the view a team's or a project's tab shows.
+const tabViewKey = (tab) => `${tab.kind === "team" ? "teamView" : "projectView"}:${tab.id}`;
 // Keys the board binds in its own key context. herdr binds Tab and
 // shift-Tab app-wide (gpui-kit's ShellRoot), to moving the keyboard to the
 // next or previous tab stop, and runs a matching binding's action before
@@ -357,10 +368,13 @@ export default class Board extends View {
     this.prefetchWaits = false;
     this.prefetchLeft = new Set();
     // What the top bar shows, as last chosen: the context, its tab (a tab
-    // id) per context, the view per team tab, and "nur meine".
+    // id) per context, the view per team tab and per project tab, and "nur
+    // meine"; and what the board knows of each GitHub project (learnProject).
     this.contextId = store.get("context");
     this.tabIds = {};
-    this.teamViews = {};
+    this.tabViews = {};
+    this.projectMetas = new Map();
+    this.known = { get: (id) => this.metaOf(id) };
     this.mine = store.get("mine") === true;
     this.filterText = "";
     this.filtering = false;
@@ -510,10 +524,80 @@ export default class Board extends View {
     return this.views[id];
   }
 
+  contexts() {
+    return contextsOf(this.config, this.known);
+  }
+
+  viewsNow() {
+    return viewsOf(this.config ?? {}, this.known);
+  }
+
+  // What the board knows of a GitHub project by its tab's id, from its last
+  // read, kept in the store ("project:<tab>"); null before any.
+  metaOf(id) {
+    if (!this.projectMetas.has(id)) this.projectMetas.set(id, readProjectMeta(store.get(projectKey(id))));
+    return this.projectMetas.get(id);
+  }
+
+  // What a read of a project's view learnt of the project (live.project, or
+  // an error's project): kept, and where its views changed, the views that
+  // came are read once in the background (the prefetch); a view GitHub
+  // dropped that its tab showed is said, and an error of the view that
+  // learns the project's views is gone. The view that learns a project's
+  // views (projectView without one shown) becomes the view it read, its
+  // state with it, where that view reads items and has no data yet; else
+  // that read ends, and the view, where it reads items and its tab shows,
+  // is read on its own. Where the tab shows another view than the one read
+  // (one GitHub dropped, or one the prefetch read), that one is read where
+  // it has no data yet and its tab shows. A read of a tab gone ends. → the
+  // view to read on (live.project).
+  learnProject(view, meta, cx) {
+    const tab = view.tab;
+    const before = this.tabById(tab.id);
+    if (!before) return false;
+    const shownBefore = this.tabViewOf(before);
+    const first = this.views[firstViewId(tab)];
+    if (first) first.error = null;
+    if (JSON.stringify(this.metaOf(tab.id)) !== JSON.stringify(meta)) {
+      this.projectMetas.set(tab.id, meta);
+      store.set(projectKey(tab.id), meta);
+      const kinds = this.takeKinds();
+      for (const id of this.configState.kinds.keys()) if (!kinds.has(id)) this.prefetchLeft.add(id);
+      this.schedulePrefetch(cx);
+    }
+    const now = this.viewFor(this.tabById(tab.id));
+    const number = view.address.view;
+    const read = number ?? view.wanted;
+    if (read !== null && read === shownBefore && !meta.views.some((v) => v.number === read) && now.id !== view.id) {
+      this.say(`Ansicht ${read} gibt es in „${meta.title}“ nicht mehr; gezeigt wird „${now.name}“`, "warning", cx);
+    }
+    if (now.id === view.id) return null;
+    cx.notify();
+    if (number !== null) {
+      const st = this.state(now.id);
+      if (this.tab()?.id === tab.id && this.loader(now) && !st.loading && !st.data) this.refresh(now, cx);
+      return null;
+    }
+    const st = this.views[now.id];
+    const moves = Boolean(this.loader(now)) && !st?.data && !st?.loading;
+    if (moves) {
+      this.views[now.id] = this.state(view.id);
+      this.prefetchLeft.delete(now.id);
+    }
+    delete this.views[view.id];
+    if (moves) return now;
+    if (this.loader(now) && this.tab()?.id === tab.id) this.refresh(now, cx);
+    return false;
+  }
+
+  tabById(id) {
+    return this.contexts().flatMap((c) => c.tabs).find((t) => t.id === id) ?? null;
+  }
+
   // The context the top bar shows (null without a valid views.json), its
   // tabs and the shown one.
   context() {
-    return pick(contextsOf(this.config), this.contextId);
+    return pick(this.contexts(), this.contextId);
   }
 
   tabs() {
@@ -527,15 +611,18 @@ export default class Board extends View {
     return pick(context.tabs, this.tabIds[context.id]);
   }
 
-  // The view a team tab shows (one of TEAM_VIEWS).
-  teamViewOf(tab) {
-    this.teamViews[tab.id] ??= store.get(`teamView:${tab.id}`);
-    return teamView(tab, this.teamViews[tab.id]);
+  // The view a team's or a project's tab shows, by its id (one of
+  // TEAM_VIEWS; a project's view by its number): the one chosen last on
+  // this machine where the tab has it, else its first; for a project the
+  // board knows none of the views of, the one chosen last.
+  tabViewOf(tab) {
+    this.tabViews[tab.id] ??= store.get(tabViewKey(tab));
+    return tab.views.length ? tabView(tab, this.tabViews[tab.id]) : this.tabViews[tab.id];
   }
 
-  // The view a tab shows (a team: the view it shows).
+  // The view a tab shows (a team, a project: the view it shows).
   viewFor(tab) {
-    return viewOf(tab, tab.kind === "team" ? this.teamViewOf(tab) : null);
+    return viewOf(tab, hasViews(tab) ? this.tabViewOf(tab) : null);
   }
 
   // The view the shown tab holds, or null.
@@ -546,7 +633,7 @@ export default class Board extends View {
 
   // A view as the config has it now, by id; null when it is gone.
   viewById(id) {
-    return viewsOf(this.config).find((v) => v.id === id) ?? null;
+    return this.viewsNow().find((v) => v.id === id) ?? null;
   }
 
   // How a view loads and writes ({ load, move? }); null for a view its
@@ -583,19 +670,28 @@ export default class Board extends View {
     const read = c.settingsRead && { name: this.settingsName(), ...c.settingsRead };
     ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin, moving: c.moving = null } = readConfig(c.text, read));
     if (!this.config) return false;
-    const kinds = new Map(viewsOf(this.config).map((v) => [v.id, viewKind(v)]));
-    // Before the first valid config no view has a state to compare.
-    const before = c.kinds ?? kinds;
-    for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
-    c.kinds = kinds;
+    this.takeKinds();
     this.moveShownSource();
-    const m = this.modal;
-    if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
     return true;
   }
 
+  // The view kinds as the config and what the board knows of its projects
+  // give them now: a view whose kind changed drops its open outcomes, and a
+  // dialog of a view that has another kind now closes. → the kinds before
+  // (none before the first valid config: no view has a state to compare).
+  takeKinds() {
+    const c = this.configState;
+    const kinds = new Map(this.viewsNow().map((v) => [v.id, viewKind(v)]));
+    const before = c.kinds ?? kinds;
+    for (const [id, st] of Object.entries(this.views)) if (kinds.get(id) !== before.get(id)) st.unclear = [];
+    c.kinds = kinds;
+    const m = this.modal;
+    if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
+    return before;
+  }
+
   moveShownSource() {
-    const contexts = contextsOf(this.config);
+    const contexts = this.contexts();
     const { set, remove } = shownContextMoves(contexts, (key) => store.get(key), !this.configErrors.length);
     for (const [key, value] of set) store.set(key, value);
     for (const key of remove) store.remove(key);
@@ -725,7 +821,7 @@ export default class Board extends View {
   // hide changed shows it so and is read again; `before` as in
   // changeSettings.
   followSettings(cx, before = null) {
-    for (const view of viewsOf(this.config ?? {})) {
+    for (const view of this.viewsNow()) {
       const st = this.views[view.id];
       const settled = st?.data && SHAPES[st.data.shape].withView?.(st.data, view);
       if (settled && settled !== st.data) {
@@ -747,7 +843,7 @@ export default class Board extends View {
   moveStoredHidden(cx) {
     if (!this.configState.settings) return;
     const entryOf = (view) => (store.text(hiddenKey(view.id)) === null ? undefined : store.get(hiddenKey(view.id)));
-    const { moves, drop } = storedHiddenMoves(githubViews(this.config), entryOf, (path) => this.origin(path));
+    const { moves, drop } = storedHiddenMoves(this.viewsNow().filter((v) => v.source === "github"), entryOf, (path) => this.origin(path));
     for (const view of drop) store.remove(hiddenKey(view.id));
     if (!moves.length) return;
     this.changeSettings(moves.map((m) => [hidePath(m.view), m.list]), cx).then((done) => {
@@ -779,14 +875,19 @@ export default class Board extends View {
       if (!valid) return;
       const kinds = this.configState.kinds;
       // A problem in views.json or in this machine's settings leaves views out.
-      if (!this.configErrors.length) for (const k of goneSaved(store.keys(), new Set(kinds.keys()))) store.remove(k);
+      if (!this.configErrors.length) {
+        const tabs = new Set(this.contexts().flatMap((c) => c.tabs).map((t) => t.id));
+        for (const k of [...goneSaved(store.keys(), new Set(kinds.keys())), ...goneProjects(store.keys(), tabs)]) store.remove(k);
+      }
       this.moveStoredHidden(cx);
       this.prefetchLeft = new Set(kinds.keys());
       const shown = this.view();
       if (shown) this.restore(shown);
-      cx.timer.after(0, () => this.guarded("Gespeicherter Stand", () => viewsOf(this.config ?? {}).forEach((v) => this.restore(v))));
+      cx.timer.after(0, () => this.guarded("Gespeicherter Stand", () => this.viewsNow().forEach((v) => this.restore(v))));
       if (!shown || !this.loader(shown)) this.schedulePrefetch(cx);
       if (!shown) return;
+      const learning = this.learningView(shown);
+      if (learning) return void this.refresh(learning, cx);
       this.sources[shown.source]?.forget?.(shown);
       // The open details' related items are read again too.
       this.state(shown.id).related.clear();
@@ -797,7 +898,7 @@ export default class Board extends View {
 
   refresh(view, cx) {
     const loader = this.loader(view);
-    const together = loader?.together?.(viewsOf(this.config ?? {}));
+    const together = loader?.together?.(this.viewsNow());
     if (!together) return this.refreshView(view, cx);
     if (together.some((v) => this.state(v.id).loading)) return void this.againTogether.add(loader);
     for (const v of [view, ...together.filter((v) => v.id !== view.id)]) this.refreshView(v, cx);
@@ -806,7 +907,7 @@ export default class Board extends View {
   followTogether(cx) {
     for (const loader of [...this.againTogether]) {
       this.againTogether.delete(loader);
-      const [first] = loader.together(viewsOf(this.config ?? {}));
+      const [first] = loader.together(this.viewsNow());
       if (first) this.refresh(first, cx);
     }
   }
@@ -848,12 +949,20 @@ export default class Board extends View {
           st.progress = { page, pages };
           cx.notify();
         },
+        project: (meta) => {
+          if (ended) return null;
+          const now = this.learnProject(view, meta, cx);
+          if (now) view = now;
+          return now;
+        },
       };
       try {
         const { data, warnings, notice } = await loader.load(view, { hiddenFor: (v) => this.hiddenFor(v), chosen, live, last: before.data });
         // What the load has to say beside its data (a chosen sprint gone).
         if (notice) this.say(notice, "warning", cx);
         st.moves = pendingMoves(st.moves, started);
+        // A selection in data of another shape (a view GitHub gave another layout) starts anew.
+        if (st.data && st.data.shape !== data.shape) st.sel = null;
         st.data = SHAPES[data.shape].received(data, st, this.viewById(view.id) ?? view);
         st.warnings = [...warnings, ...SHAPES[data.shape].warnings(view, data)];
         st.error = null;
@@ -861,11 +970,15 @@ export default class Board extends View {
         st.saved = false;
         st.unavailable = false;
         // A sprint the picker chose is the view's only while the board runs.
-        if (!chosen) this.save(view, hidden, { data, warnings }, st.at, cx);
-        this.keepSelection(view);
-        this.chooseWanted(view, run, cx);
-        this.settleUnclear(view, started, data, cx);
+        // The view that learnt a project's views and handed them on is gone (learnProject).
+        if (this.views[view.id] === st) {
+          if (!chosen && SHAPES[data.shape].loads) this.save(view, st.hidden ?? hidden, { data, warnings }, st.at, cx);
+          this.keepSelection(view);
+          this.chooseWanted(view, run, cx);
+          this.settleUnclear(view, started, data, cx);
+        }
       } catch (e) {
+        if (e?.project) this.learnProject(view, e.project, cx);
         st.error = report(e);
         st.unavailable = Boolean(e?.unavailable);
         // A failed read keeps what showed before it, not what it drew on its
@@ -949,7 +1062,7 @@ export default class Board extends View {
   prefetchNext(cx) {
     if (!this.config || !boardShown(this.isLayer()) || this.modal?.busy) return;
     if (Object.values(this.views).some((st) => st.loading || Object.keys(st.pending).length)) return;
-    const [next, ...rest] = prefetchOrder(viewsOf(this.config).filter((v) => this.prefetchLeft.has(v.id)), {
+    const [next, ...rest] = prefetchOrder(this.viewsNow().filter((v) => this.prefetchLeft.has(v.id)), {
       shown: this.view(), contextViewIds: new Set(this.context() ? contextViews(this.context()).map((v) => v.id) : []), source: this.context()?.source, now: Date.now(), every: this.config.refreshMinutes * 60000,
       stateOf: (id) => this.state(id), loads: (v) => Boolean(this.loader(v)),
     });
@@ -1415,7 +1528,7 @@ export default class Board extends View {
   }
 
   switchContext(index, cx) {
-    const context = contextsOf(this.config)[index];
+    const context = this.contexts()[index];
     if (!context) return;
     this.contextId = context.id;
     store.set("context", context.id);
@@ -1423,7 +1536,7 @@ export default class Board extends View {
   }
 
   stepContext(by, cx) {
-    const contexts = contextsOf(this.config);
+    const contexts = this.contexts();
     if (contexts.length) this.switchContext(stepIndex(contexts.length, shownIndex(contexts, this.context()), by), cx);
   }
 
@@ -1439,20 +1552,21 @@ export default class Board extends View {
     cx.notify();
   }
 
-  // Shows a view of the shown team tab; one it does not have does nothing.
-  setTeamView(name, cx) {
+  // Shows a view of the shown team's or project's tab, by its id; one it
+  // does not have does nothing.
+  setTabView(id, cx) {
     const tab = this.tab();
-    if (tab?.kind !== "team" || !tab.views.includes(name)) return;
-    this.teamViews[tab.id] = name;
-    store.set(`teamView:${tab.id}`, name);
+    if (!hasViews(tab) || !tab.views.includes(id)) return;
+    this.tabViews[tab.id] = id;
+    store.set(tabViewKey(tab), id);
     this.showTab(cx);
   }
 
-  // v: the shown team tab's next view.
-  nextTeamView(cx) {
+  // v: the shown team's or project's tab's next view.
+  nextTabView(cx) {
     const tab = this.tab();
-    if (tab?.kind !== "team") return;
-    this.setTeamView(teamViewAfter(tab, this.teamViewOf(tab)), cx);
+    if (!hasViewSwitch(tab)) return;
+    this.setTabView(tabViewAfter(tab, this.tabViewOf(tab)), cx);
   }
 
   // m: "nur meine" on or off, over whatever shows; nothing is read again.
@@ -1816,6 +1930,12 @@ export default class Board extends View {
     if (action) return action.run(this, c, cx), done();
   }
 
+  // What the status menu sets on a view: its shape's field (a GitHub
+  // board's column field), else the status.
+  statusField(view) {
+    return this.shape(view).statusField?.(this, view) ?? "Status";
+  }
+
   openStatusMenu(view, cx) {
     const open = this.shape(view).openStatusMenu;
     if (!open) return this.say("Hier gibt es keinen Status zu ändern", "info", cx);
@@ -1941,8 +2061,8 @@ export default class Board extends View {
       .pt(4)
       .pb(8)
       .when(hasViewSwitch(tab), (el) => {
-        const views = tab.views.map((v) => ({ id: v, label: teamViewName(v) }));
-        return el.child(this.segments(t, "team-view", views, this.teamViewOf(tab), (name, cx) => this.setTeamView(name, cx)));
+        const views = tab.views.map((v) => ({ id: v, label: tabViewName(tab, v) }));
+        return el.child(this.segments(t, "tab-view", views, this.tabViewOf(tab), (id, cx) => this.setTabView(id, cx)));
       })
       .when(Boolean(context), (el) => el.child(this.mineToggle(t)))
       .child(
@@ -1997,10 +2117,10 @@ export default class Board extends View {
   }
 
   contextSwitch(t, shown) {
-    const pick = (id, cx) => this.switchContext(shownIndex(contextsOf(this.config), { id }), cx);
+    const pick = (id, cx) => this.switchContext(shownIndex(this.contexts(), { id }), cx);
     const parts = [];
     let source = null;
-    for (const context of contextsOf(this.config)) {
+    for (const context of this.contexts()) {
       if (context.source !== source) {
         if (source) parts.push(div().id(`context-rule-${context.source}`).flex_none().self_stretch().w(1).my(4).mx(4).bg(t.border));
         source = context.source;
@@ -2077,14 +2197,31 @@ export default class Board extends View {
     if (!this.config) return this.configErrors.length ? message(`Keine gültige Ansicht in ${CONFIG_NAME}.json`) : loading();
     if (!view) return message("Keine Ansicht verfügbar");
     const shape = this.shape(view);
-    if (shape.loads === false) return box.child(shape.render(this, t, mono, view, st));
+    const errorLine = (text) => div().px(16).pt(14).text_color(toneColor(t, NOTE_TONES.error)).child(text);
+    if (shape.loads === false) {
+      const error = this.learnError(view);
+      return box.when(Boolean(error), (el) => el.child(errorLine(error))).child(shape.render(this, t, mono, view, st));
+    }
     if (!st.data && !st.error) return st.loading ? loading() : message("Noch nichts geladen");
     let shown = box;
-    if (st.error) shown = shown.child(div().px(16).pt(14).text_color(toneColor(t, NOTE_TONES.error)).child(st.error));
+    if (st.error) shown = shown.child(errorLine(st.error));
     const warnings = [...st.warnings, ...this.noViewerWarning(view, st, shape)];
     if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(w)));
     if (!st.data) return shown;
     return shown.child(shape.render(this, t, mono, view, st));
+  }
+
+  // For a project's view that reads nothing itself (a table's), the view
+  // that reads for it at its start and on r: the one that reads its
+  // project's views (projectView without one shown); null for any other.
+  learningView(view) {
+    return view.tab?.kind === "project" && !this.loader(view) ? projectView(view.tab, null, view.address.view) : null;
+  }
+
+  // The error of that read (learningView), drawn on the view it reads for.
+  learnError(view) {
+    const learning = this.learningView(view);
+    return learning ? this.views[learning.id]?.error ?? null : null;
   }
 
   // With "nur meine" on and no login the data was read as: what the text
