@@ -15519,7 +15519,7 @@ const isOtherCall = (args) => isBoardCall(args) && args.includes("number=8");
 const isMineCall = (args) => isBoardCall(args) && !isOtherCall(args);
 
 test("UI: a view draws its saved state at once, with its age beside the turning ↻, and the read that follows replaces it and saves its own after the draw", async () => {
-  const at = Date.now() - 5 * MIN;
+  const at = realNow() - 5 * MIN;
   const { b, cx, host, st } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
   let root = b.render();
   assert.deepEqual([st().saved, st().loading, allCards(st().data).some((c) => c.title === "Gespeicherter Titel")], [true, true, true], "drawn before gh answers");
@@ -15538,7 +15538,7 @@ test("UI: a view draws its saved state at once, with its age beside the turning 
 });
 
 test("UI: a read that fails keeps the saved state, its age and says why; a write against the saved state is refused, also while its read runs, and one whose read failed starts it again", async () => {
-  const at = Date.now() - 5 * MIN;
+  const at = realNow() - 5 * MIN;
   const { b, cx, host, st } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
   await press(b, cx, "l", shiftL);
   assert.equal(b.notice?.text, board.SAVED_WRITE);
@@ -15603,7 +15603,7 @@ test("what each shape keeps in its saved data is the form SAVED_VERSION names: a
 });
 
 test("UI: on start the entries of views views.json no longer has are dropped; a saved state of another form of the view is not drawn; the other views' saved states come after the first draw; one too large to save drops the one before and says so in herdr's log", async () => {
-  const at = Date.now() - MIN;
+  const at = realNow() - MIN;
   logged.length = 0;
   const prs = board.parseGithubList(json("github-list.json"), testView("prs"));
   const { b, cx, host, st } = await bootBoard({ raw: {
@@ -15625,7 +15625,7 @@ test("UI: on start the entries of views views.json no longer has are dropped; a 
 });
 
 test("UI: a views.json with problems drops no saved entry, not even those of the views it leaves out; read without them it drops the gone views' entries", async () => {
-  const at = Date.now() - MIN;
+  const at = realNow() - MIN;
   const broken = JSON.parse(testConfig());
   broken.sources.github.views.find((v) => v.id === "prs").sections = "none";
   const raw = { "board:data:gone": "{}", "board:data:prs": savedFor("prs", board.parseGithubList(json("github-list.json"), testView("prs")), at) };
@@ -15639,7 +15639,7 @@ test("UI: a views.json with problems drops no saved entry, not even those of the
 });
 
 test("UI: an entry the store refuses drops the one before, and herdr's log names its key and the store's reason", async () => {
-  const at = Date.now() - MIN;
+  const at = realNow() - MIN;
   logged.length = 0;
   const { cx, host } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
   const store = globalThis.localStorage;
@@ -15659,7 +15659,7 @@ test("UI: an entry the store refuses drops the one before, and herdr's log names
 });
 
 test("UI: a saved entry the board cannot draw is dropped and said in herdr's log; the view reads as if it had none, on start, on a switch to its tab and among the other views' saved states", async () => {
-  const at = Date.now() - MIN;
+  const at = realNow() - MIN;
   logged.length = 0;
   const other = board.parseGithubBoard(json("github-board.json"), testView("other"), board.hiddenColumns(testView("other"), null));
   const { b, cx, host, st } = await bootBoard({ raw: {
@@ -15727,7 +15727,7 @@ test("UI: a refresh over a board read since the start, by r or by the timer, dra
 });
 
 test("UI: a board whose later page fails shows what it showed before the read, not its first page", async () => {
-  const at = Date.now() - MIN;
+  const at = realNow() - MIN;
   const { host, st } = await bootBoard({ raw: { "board:data:mine": savedFor("mine", savedBoard(), at) } });
   await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
   assert.equal(allCards(st().data).length, 3);
@@ -15740,7 +15740,7 @@ test("UI: a board whose later page fails selects again in what it showed before:
   const first = new Set(allCards(board.parseGithubBoard(boardPage(0, 3, "c1"), githubView(), HIDDEN)).map((c) => c.key));
   for (const c of saved.columns) c.cards = c.cards.filter((card) => !first.has(card.key));
   const fail = { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" };
-  const over = await bootBoard({ raw: { "board:data:mine": savedFor("mine", saved, Date.now() - MIN) } });
+  const over = await bootBoard({ raw: { "board:data:mine": savedFor("mine", saved, realNow() - MIN) } });
   await over.host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
   assert.ok(first.has(over.st().sel.key), "the first page's card selected");
   await over.host.answer("gh", fail, isBoardCall);
@@ -15797,7 +15797,7 @@ test("UI: a saved entry that fails to draw leaves the view's state as it was bef
   const other = board.parseGithubBoard(json("github-board.json"), testView("other"), board.hiddenColumns(testView("other"), null));
   for (const [id, entry] of [["other", other], [sprintId, { shape: "sprint", meta: { gone: { id: "s", name: "S" } } }]]) {
     logged.length = 0;
-    const { b, cx } = await bootBoard({ raw: { [board.savedKey(id)]: savedFor(id, entry, Date.now() - MIN) } });
+    const { b, cx } = await bootBoard({ raw: { [board.savedKey(id)]: savedFor(id, entry, realNow() - MIN) } });
     const st = b.state(id);
     const before = { warnings: ["vorher"], at: 7, sel: { col: 0, key: "k" }, picked: "k", detail: true, sprint: { id: "s", name: "S" } };
     Object.assign(st, before);
@@ -16021,7 +16021,7 @@ test("UI: a board that shows again goes on with the prefetch at the look that se
 
 test("UI: a view read or restored in the background scrolls none of the shown view's lists: its own first selection is set, no column of the shown board and not the PR list's rows scroll", async () => {
   const list = board.parseGithubList(json("github-list.json"), testView("prs"));
-  const { b, cx, host } = await bootBoard({ raw: { "board:data:prs": savedFor("prs", list, Date.now() - 20 * MIN) } });
+  const { b, cx, host } = await bootBoard({ raw: { "board:data:prs": savedFor("prs", list, realNow() - 20 * MIN) } });
   await host.answer("gh", ok(fixture("github-board.json")));
   b.render();
   for (const c of b.navColumns(b.view())) Object.assign(board.keptOf(b, c.id).scroll, { y: 150, width: 300, height: 200, content: 2000 });
@@ -16038,7 +16038,7 @@ test("UI: a view read or restored in the background scrolls none of the shown vi
 
 test("UI: each tab shows the age of what it draws: two saved tabs their own, a prefetched one its read's, and a new board the saved ones'", async () => {
   const { b, cx, host } = await bootBoard({ raw: {
-    "board:data:mine": savedFor("mine", savedBoard(), Date.now() - 10 * MIN), "board:data:prs": savedFor("prs", board.parseGithubList(json("github-list.json"), testView("prs")), Date.now() - 20 * MIN),
+    "board:data:mine": savedFor("mine", savedBoard(), realNow() - 10 * MIN), "board:data:prs": savedFor("prs", board.parseGithubList(json("github-list.json"), testView("prs")), realNow() - 20 * MIN),
   } });
   assert.equal(ageOf(b.render()), "Stand vor 10 min");
   await cx.fire();
@@ -16100,7 +16100,7 @@ test("UI: the Azure Sprint asks for the taskboard once the sprint is known and t
 test("UI: after a restart the Sprint draws its saved state, and what it draws before its parents' query keeps their rows as the saved state drew them", async () => {
   const { st: first, view } = await openSprint();
   assert.ok(first().data.rows.some((r) => r.key === "AB#299"), "read with the parent's row");
-  const saved = board.savedText(view, board.hiddenColumns(view, null), { data: first().data, warnings: [] }, Date.now() - MIN);
+  const saved = board.savedText(view, board.hiddenColumns(view, null), { data: first().data, warnings: [] }, realNow() - MIN);
   const { b, host } = await bootBoard({ stored: { source: "azure" }, which: found, raw: { [board.savedKey(view.id)]: saved } });
   const st = () => b.state(b.view().id);
   assert.deepEqual([st().saved, board.findCard(st().data, "AB#331").card.row], [true, "AB#299"], "the saved state");
@@ -16189,7 +16189,7 @@ test("UI: „Lädt …“ in an empty view has a spinner before it; the ↻ turn
 
 test("UI: the create dialog on a Backlog that shows its saved state stays open with its title and says it is refused; while the read runs nothing more is read, after a failed one it starts again", async () => {
   const id = "azure:team:Example Project/Example Team:backlog";
-  const { b, cx, host } = await bootBoard({ stored: BACKLOG_STORED, which: found, raw: { [`board:data:${id}`]: savedFor(id, backlogData(), Date.now() - MIN) } });
+  const { b, cx, host } = await bootBoard({ stored: BACKLOG_STORED, which: found, raw: { [`board:data:${id}`]: savedFor(id, backlogData(), realNow() - MIN) } });
   assert.equal(b.state(id).saved, true);
   await press(b, cx, "n");
   b.modal.input.set_value("Sample new story");
