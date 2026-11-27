@@ -16,8 +16,9 @@ export const viewDefaults = () => ({ hide: [], start: {} });
 
 export const KINDS = {
   "github board": { shape: "board" },
-  "github table": { text: (view) => `„${view.name}“: Tabellenansicht folgt` },
-  "github roadmap": { text: (view) => `„${view.name}“: Roadmap-Ansicht folgt` },
+  "github table": { shape: "table" },
+  // GitHub's API names no dates or zoom a roadmap shows: it draws as a table.
+  "github roadmap": { shape: "table" },
   "github list": { shape: "prs" },
   "azure sprint": { shape: "sprint" },
   "azure backlog": { shape: "backlog" },

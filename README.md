@@ -532,22 +532,25 @@ by that run. Which files of the package git tracks is set in the root
   `views.json` no longer has stay in the localStorage, and all of them do while
   the file does not apply. What else the board remembers, as above, stays in
   herdr's localStorage.
-  Each view keeps its last good read in herdr's localStorage (about 217 kB
-  for a board of 300 cards; herdr's store takes at most 1 MiB a value and
-  8 MiB in all, so a view keeps at most a million bytes, and one the store
-  refuses keeps nothing, which herdr's log names). Each read of `views.json`
-  (the start, `r`) drops the entries of views it no longer has, unless
-  `views.json` or this machine's settings have problems. After a restart,
-  and on a switch to a tab not read yet, the view draws that state at once,
-  its age at the top right ("Stand vor 3 min", "vor 2 d" from two days on),
-  and reads anew behind it; a read that fails keeps it and says why. Every
-  tab's age is that of what it draws. Nothing is written against that saved
-  state: a move, a status change, an assignment or a create is refused with
-  a note and has to be made again once the read is in; a read that failed
-  starts again. While a view shows nothing or only its saved state, a GitHub
-  board draws each page as it comes, the "Nur die ersten" note after the
-  last; the PR list draws before the follow-up for pull requests with many
-  review threads, their rows marked "…" until it came ("?" stays for what
+  Each view keeps its last good read in herdr's localStorage (about 217 kB for a
+  board of 300 cards; a table keeps its rows packed, each value that rows share
+  once, so 1000 rows with a value of their own in every field take about 731 kB;
+  herdr's store takes at most 1 MiB a value and 8 MiB in all, so a view keeps at
+  most a million bytes, and one larger, or one the store refuses, keeps nothing,
+  which herdr's log names and the view says beside its age ("Stand nicht
+  gespeichert: zu groß", or "… vom Speicher abgelehnt"), until a read of it is
+  kept). Each read of `views.json` (the start, `r`) drops the entries of views
+  it no longer has, unless `views.json` or this machine's settings have
+  problems. After a restart, and on a switch to a tab not read yet, the view
+  draws that state at once, its age at the top right ("Stand vor 3 min", "vor 2
+  d" from two days on), and reads anew behind it; a read that fails keeps it and
+  says why. Every tab's age is that of what it draws. Nothing is written against
+  that saved state: a move, a status change, an assignment or a create is
+  refused with a note and has to be made again once the read is in; a read that
+  failed starts again. While a view shows nothing or only its saved state, a
+  GitHub board or table draws each page as it comes, the "Nur die ersten" note
+  after the last; the PR list draws before the follow-up for pull requests with
+  many review threads, their rows marked "…" until it came ("?" stays for what
   could not be read); the Sprint draws before its parents outside it (their
   tasks where its saved state drew them, else in "Ohne Story"), the Backlog
   before its types' colors. A read over data read since the start shows
@@ -640,69 +643,93 @@ by that run. Which files of the package git tracks is set in the root
   A GitHub project's tab is in `views.json` only its `number` (with, where
   wanted, `limit`, `start` and per view the columns hidden at first, `views`: {
   "<number of the view>": { "hide": [...] } }); its name, its views and their
-  filter, columns, swimlanes and sort come from the project's saved views on
-  GitHub. A project entry with the keys of the form before (`id`, `name`,
-  `field`, `filter`, `priorityField`, `hide`) is left out, and the board says
-  what it is now. The row below the tabs switches between the project's views,
-  in GitHub's order and by their names; `v` steps through them, a click picks
-  one, and the board remembers the view shown per tab; at first it shows the
-  first. Each read of a view reads the project's views and fields once, then
-  that view's items by its filter, on GitHub's side (`items(query:)`), its
-  hidden columns left out of that query (`-status:"Done"`), so a hidden column
-  costs no reads. Until the board has read a project once it names the tab
-  "Projekt <number>"; that first read learns its views and reads the first (or
-  the one chosen last) in the same read, and the board keeps the views for the
-  next start. Where GitHub no longer has the view a tab shows (a board, a table
-  or roadmap view, or the one chosen last before the board knew the project's
-  views), the board says so and the tab shows and reads the project's first
-  view. A board view draws its columns from the field the view's columns stand
-  on: a single-select field's options in their order, an iteration field's
-  iterations in theirs (a completed one only where cards stand in it, or where
-  it is hidden), and a column "Ohne <field>" before them only where cards have
-  no value there, always shown (a warning says so where `hide` names it, and its
-  query leaves no column out for that name); a view without such a field takes
-  Status, as GitHub does, and a warning names it, and one of a project without
-  Status says it has no field for its columns. A card moves between them (`H/L`,
-  `s`, a drag) by either kind of field. Where the view groups its cards
-  (GitHub's "Group by"), the board draws swimlanes: a band across the columns
-  per value its cards hold, in the field's order, the cards without one in a
-  band "Ohne <field>" last; the bands scroll as one under the columns' heads,
-  `j/k` go through a column band after band and `h/l` keep the band where the
-  next column has a card in it. Within a column the cards follow the view's sort
-  keys, one after the other, ascending or descending, those without a value last
-  either way; an unsorted view keeps GitHub's order. A sort key or a swimlane
-  field the board cannot read (linked pull requests, reviewers, the dates an
-  item keeps) orders nothing, and a warning says so. A view whose filter finds
-  nothing says so with the filter its query sent (with hidden columns, with the
-  terms that leave them out): GitHub answers a filter it cannot read with no
-  items too, not with an error. A table or roadmap view shows a placeholder that
-  names it ("Tabellenansicht folgt") and reads no items; the start and `r` read
-  only its project's views there, so a view that became a board on GitHub shows
-  as one, and a read of them that fails shows its error above the placeholder
-  until a read of the project, from any of its views, succeeds. "nur meine" and
-  the filter work on top of a view as before. A
-  GitHub board reads its items in pages of up to 100, one gh call each, after
+  filter, columns, groups (a board's swimlanes), sort and visible fields come
+  from the project's saved views on GitHub. A project entry with the keys of the
+  form before (`id`, `name`, `field`, `filter`, `priorityField`, `hide`) is left
+  out, and the board says what it is now. The row below the tabs switches
+  between the project's views, in GitHub's order and by their names; `v` steps
+  through them, a click picks one, and the board remembers the view shown per
+  tab; at first it shows the first. Each read of a view reads the project's
+  views and fields once, then that view's items by its filter, on GitHub's side
+  (`items(query:)`), its hidden columns left out of that query
+  (`-status:"Done"`), so a hidden column costs no reads. Until the board has
+  read a project once it names the tab "Projekt <number>"; that first read
+  learns its views and reads the first (or the one chosen last) in the same
+  read, and the board keeps the views for the next start. Where GitHub no longer
+  has the view a tab shows (a board, a table or roadmap view, or the one chosen
+  last before the board knew the project's views), the board says so and the tab
+  shows and reads the project's first view. A board view draws its columns from
+  the field the view's columns stand on: a single-select field's options in
+  their order, an iteration field's iterations in theirs (a completed one only
+  where cards stand in it, or where it is hidden), and a column "Ohne <field>"
+  before them only where cards have no value there, always shown (a warning says
+  so where `hide` names it, and its query leaves no column out for that name); a
+  view without such a field takes Status, as GitHub does, and a warning names
+  it, and one of a project without Status says it has no field for its columns.
+  A card moves between them (`H/L`, `s`, a drag) by either kind of field. Where
+  the view groups its cards (GitHub's "Group by"), the board draws swimlanes: a
+  band across the columns per value its cards hold, in the field's order, the
+  cards without one in a band "Ohne <field>" last; the bands scroll as one under
+  the columns' heads, `j/k` go through a column band after band and `h/l` keep
+  the band where the next column has a card in it. Within a column the cards
+  follow the view's sort keys, one after the other, ascending or descending,
+  those without a value last either way; an unsorted view keeps GitHub's order.
+  A sort key or a swimlane field the board cannot read (reviewers, the dates an
+  item keeps) orders nothing, and a warning says so; linked pull requests order
+  by how many an item has. A view whose filter finds nothing says so with the
+  filter its query sent (with hidden columns, with the terms that leave them
+  out): GitHub answers a filter it cannot read with no items too, not with an
+  error. A table view reads its items as a board view does (its filter, its sort
+  keys, its "Group by") and draws them as GitHub's table does: a head row with
+  the view's visible fields in GitHub's order, the title first, then a row per
+  item, its key and title under the title (which takes the room the other fields
+  leave, at least 200 pixels) and under each other field its value by the
+  field's kind: a single-select option as a chip in its color, an iteration's
+  title, a number, a date ("3.12.", its year where it is not this one), a text,
+  the assignees, the labels as chips, the milestone as a chip, the repo, the
+  parent's title, the sub-issues done of all ("15/22", as a swimlane names
+  them), the issue type as a chip and how many pull requests are linked; nothing
+  for no value. Each field's head and cells are as wide as its kind takes
+  (`FIELD_W` in `mods/board/src/ui/shapes/table.js`), and a longer value is cut.
+  A field the board cannot read (reviewers, the dates an item keeps) keeps its
+  head and stays empty below it, and one warning names them all. The rows follow
+  the view's sort keys as a board's cards do; where the view groups them, each
+  group has a row with its value's color, its name and how many of its rows show
+  ("1/2" while the filter or "nur meine" hides some), the groups in the field's
+  order, "Ohne <field>" last; a group row is never selected, `j/k` pass over it.
+  A roadmap view draws as such a table, under its own name, as GitHub's API
+  names none of the dates or the zoom a roadmap shows: the title, then the
+  project's date and iteration fields in its order, then Status where it has
+  one. A table hides no field: GitHub's visible fields decide. On a table `j/k`
+  move over its rows, `Enter` shows the details, `o` opens the item and `a`
+  assigns it, as on a board; where the view groups or sorts by the assignees (or
+  another field the item holds), the row takes its place among the others at
+  once. A view of a layout the board does not draw (one GitHub may add) reads
+  nothing and says "Ansicht „<name>“: Darstellung „<layout>“ kennt das Board
+  nicht". "nur meine" and the filter work on top of a view as before. A GitHub
+  board or table reads its items in pages of up to 100, one gh call each, after
   the one for the project's views, up to views.json's `limit` (1000 by default)
   and at most as many calls as full pages of it take; where that cuts them, a
-  note under the columns says how many it read. A hidden column is not drawn:
-  the line below the columns names the hidden ones ("ausgeblendet: Backlog,
-  Done"), a click on a name shows that column again, and the command menu's
-  "Spalten…" opens a menu of every column, shown or hidden, where `Enter`, a
-  digit or a click hides or shows one. A column hidden goes at once; one shown
-  again stays drawn from that moment. Where the read its cards came from left
-  it out, it keeps the cards it had, dimmed (one that read has in another
-  column draws there alone), below its head a spinner before "Lädt …" (with
-  swimlanes, its head the spinner) and in its head the count GitHub gave for
-  it while hidden, until the read after it brings its cards; where that read
-  fails, it says "Karten nicht gelesen – r liest neu" (with swimlanes, its
-  head "nicht gelesen – r liest neu"). A read that started before a column
-  was hidden or shown draws the columns as they are set when it lands. A long
-  column draws whole only the cards about what it shows, half its height
-  above and below; every other card is an empty frame of the card's height
-  until the column scrolls near it: at once by the wheel or a key, within a
-  tenth of a second by the scrollbar's thumb, wherever the pointer is
-  released (`mods/board/src/ui/band.js`). herdr before 0.1.18 tells a mod no
-  scroll position; there every card draws whole. A click
+  note under the columns or the rows says how many it read. A hidden column is
+  not drawn: the line below the columns names the hidden ones ("ausgeblendet:
+  Backlog, Done"), a click on a name shows that column again, and the command
+  menu's "Spalten…" opens a menu of every column, shown or hidden, where
+  `Enter`, a digit or a click hides or shows one. A column hidden goes at once;
+  one shown again stays drawn from that moment. Where the read its cards came
+  from left it out, it keeps the cards it had, dimmed (one that read has in
+  another column draws there alone), below its head a spinner before "Lädt …"
+  (with swimlanes, its head the spinner) and in its head the count GitHub gave
+  for it while hidden, until the read after it brings its cards; where that read
+  fails, it says "Karten nicht gelesen – r liest neu" (with swimlanes, its head
+  "nicht gelesen – r liest neu"). A read that started before a column was hidden
+  or shown draws the columns as they are set when it lands. A long column draws
+  whole only the cards about what it shows, half its height above and below;
+  every other card is an empty frame of the card's height until the column
+  scrolls near it: at once by the wheel or a key, within a tenth of a second by
+  the scrollbar's thumb, wherever the pointer is released
+  (`mods/board/src/ui/band.js`); a table draws its rows so, the others as empty
+  frames of their height until the list scrolls near them. herdr before 0.1.18
+  tells a mod no scroll position; there every card and row draws whole. A click
   on a card or a list's row selects it; a click on one I chose (clicked before,
   moved to with the keys or dragged onto another column; not one the board
   selected by itself) opens its details. Where the board selects another item by

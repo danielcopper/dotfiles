@@ -14,7 +14,7 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
-import { cardLabel, cardType, epicLabel, partOfText } from "../../shared.js";
+import { cardLabel, cardType, epicLabel, noItemsText, partOfText, unreadableOrder } from "../../shared.js";
 import {
   applyMoves, canDrop, findCard, hasStep, hiddenColumns, hideable, laneNavigate, laneRows, shownColumns, stepTarget, targetsFor, toggledHidden, unknownHidden, waitsForCards, withCard, withHidden, withOlderCards,
 } from "../../kinds/board.js";
@@ -24,8 +24,8 @@ import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import {
-  CARD_EDGE, button, cardEdge, cardEnd, cardFoot, cardHead, cardMeta, chip, columnHead, footLines, inPlace, labelChip, selectedLook, showsMeta, shownOf, spinner, statusPill, typeChip, typeLine,
-  unzoomed,
+  CARD_EDGE, button, cardEdge, cardEnd, cardFoot, cardHead, cardMeta, chip, columnHead, footLines, groupHead, inPlace, labelChip, selectedLook, showsMeta, shownOf, spinner, statusPill, typeChip,
+  typeLine, unzoomed,
 } from "../helpers.js";
 import { NOTE_TONES, dropBg, toneColor } from "../tones.js";
 import { rowTops } from "../../scroll.js";
@@ -127,7 +127,7 @@ export const boardShape = {
     ...unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
     ...view.hide.filter((n) => data.columns.some((c) => c.name === n && !hideable(c))).map(notHideable),
     ...(data.meta.ownColumn === false ? [`Ansicht „${view.name}“ nennt kein Feld für ihre Spalten: das Board nimmt „${data.meta.fieldName}“, wie GitHub`] : []),
-    ...(data.meta.unreadable ?? []).map((n) => `Ansicht „${view.name}“ sortiert oder gruppiert nach „${n}“, einem Feld, das das Board nicht liest: es ordnet ohne`),
+    ...unreadableOrder(view, data.meta.unreadable ?? []),
   ],
   settle: (b, view, due, data, cx) =>
     tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, BOARD_ASSIGN)], cx),
@@ -199,14 +199,11 @@ const dropOn = (b, view, ci, col) => (el) => el
     if (from !== col.id) b.chooseDropped(view, key, cx);
   });
 
-// What a board without a card says: with the filter its query sent (the
-// view's, and with columns hidden the terms that leave them out), which
-// GitHub answers with no items also where it cannot read it.
+// What a board without a card says (noItemsText): with the view's filter,
+// and with columns hidden the terms that leave them out.
 function emptyText(data) {
   const hidden = data.columns.some((c) => c.hidden);
-  const filter = hidden ? data.meta?.query : data.meta?.filter;
-  const where = hidden ? " in den gezeigten Spalten" : "";
-  return filter ? `Keine Einträge${where} für den Filter „${filter}“ (auch einen Filter, den GitHub nicht versteht, beantwortet es so)` : `Keine Einträge${where}`;
+  return noItemsText(hidden ? data.meta?.query : data.meta?.filter, hidden ? " in den gezeigten Spalten" : "");
 }
 
 // A waiting column's count: GitHub's h<i> count, read while it was hidden.
@@ -342,10 +339,7 @@ function drawLanes(b, t, mono, view, st, cols, sessions, dragged) {
   }));
   const rowEl = (row, i) => {
     if (row.head) {
-      return h_flex().id(`lane-${row.lane.id}`).flex_none().h(LANE_HEAD).gap(8).items_center().px(4).border_b(1).border_color(t.border)
-        .child(div().size(9).flex_none().rounded(5).bg(toneColor(t, row.lane.color)))
-        .child(div().text_size(12.5).font_semibold().child(row.lane.name))
-        .child(div().text_size(12).text_color(t.muted).child(String(row.count)));
+      return groupHead(t, row.lane, String(row.count)).id(`lane-${row.lane.id}`).h(LANE_HEAD).px(4);
     }
     if (layout && !inBand(kept.band, layout.tops[i], layout.heights[i])) return div().flex_none().h(layout.heights[i]);
     return h_flex().flex_none().gap(COLUMN_GAP).items_start().children(row.cards.map((card, ci) => {

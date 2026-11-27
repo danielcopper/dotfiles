@@ -7,7 +7,7 @@
 // moves, their rollback and H/L work on it as on a board) plus its rows;
 // sprintBoard (sources/azure/sprint.js) builds it.
 
-import { byOrder, lastDayOver } from "../shared.js";
+import { byOrder, dayText, lastDayOver } from "../shared.js";
 import { navigate, shows } from "../select.js";
 import { findCard, shownColumns } from "./board.js";
 import { stateDone } from "./states.js";
@@ -165,14 +165,6 @@ export const withSprintItem = (data, key, patch) => mapSprintItem(data, key, (i)
 // The data with the item `key` in `state`; a task's column then counts as
 // read (shownState shows its own state).
 export const withItemState = (data, key, state) => mapSprintItem(data, key, (i) => ({ ...i, state, ...(isTask(i) ? { readColumn: i.column } : {}) }));
-
-// A day as the Sprint writes it, from Azure's date (the day's start, in
-// UTC): "16.11.", with its year where that is not `year`; null for none.
-export function dayText(date, year) {
-  const at = new Date(date ?? "");
-  if (Number.isNaN(at.getTime())) return null;
-  return `${at.getUTCDate()}.${at.getUTCMonth() + 1}.${at.getUTCFullYear() === year ? "" : at.getUTCFullYear()}`;
-}
 
 // An iteration's dates as the sprint picker's row says them, `year` the
 // year now: "16.11.–27.11.", "ab 16.11.", "bis 27.11.", or "ohne Daten".

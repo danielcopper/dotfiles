@@ -15,12 +15,13 @@
 //     (the most items a view reads, 1000), start?, views?: { "<number of
 //     the view>": { hide?: [column names] } } }, its tab's id its owner's
 //     and its number (projectTabId); its name, its views (in GitHub's
-//     order) and their layout, filter, column field, swimlane field and
-//     sort keys come from GitHub (githubProjectArgs), a card's priority
-//     from the project's single-select field "Priority" (none without
-//     one). An entry with id, name, field, filter, priorityField or hide
-//     has the form before and is left out. A context's prs is its PR tab: { id,
-//     name? ("PRs"), hideRepos?: ["<owner>/<repo>"] (repos turned off),
+//     order) and their layout, filter, column field, group field, sort
+//     keys and visible fields come from GitHub (githubProjectArgs), a
+//     card's priority from the project's single-select field "Priority"
+//     (none without one). An entry with id, name, field, filter,
+//     priorityField or hide has the form before and is left out. A
+//     context's prs is its PR tab: { id, name? ("PRs"), hideRepos?:
+//     ["<owner>/<repo>"] (repos turned off),
 //     start? }. The PR tabs of all contexts share github's prs: sections:
 //     [{ name, query, tone? }], one GitHub search for pull requests per
 //     section, as written, read once for all of them; limit? (per search,
@@ -58,15 +59,16 @@
 // GitHub's queries also ask for the login gh runs as, which "nur meine"
 // compares with.
 //
-// Calls: a GitHub board view costs one gh call per refresh for its
-// project's views and fields (githubProjectArgs: its views, PROJECT_VIEWS,
-// and their three field lists each, so about two points), then one for each
-// page of up to 100 items it reads (GitHub's most), at most as many as full
-// pages of its limit take: ten for the 1000 by default (each item's
-// priority, milestone and parent, with its title and repo, and the values of
-// the fields its view sorts and bands by, read by name, add no connection
-// and so no points; see below); a table or roadmap view reads no items, and
-// on the start and r only its project's views; the
+// Calls: a GitHub project's view, a board, a table or a roadmap, costs one
+// gh call per refresh for its project's views and fields
+// (githubProjectArgs: its views, PROJECT_VIEWS, and their four field lists
+// each, so about two points), then one for each page of up to 100 items it
+// reads (GitHub's most), at most as many as full pages of its limit take:
+// ten for the 1000 by default (each item's priority, milestone and parent,
+// with its title and repo, and the values of the fields its view sorts and
+// groups by and a table shows, read by name, add no connection and so no
+// points, but for linked pull requests, whose count is a connection: one
+// point more a page; see below); the
 // PR tabs of all contexts one together (a refresh of one refreshes them
 // all), one more per THREAD_IDS (100) pull requests in them with
 // more than FIRST_THREADS (10) review threads, one for the unread
@@ -161,7 +163,10 @@
 // kinds/board.js (a board's columns and cards), kinds/list.js (a PR tab's
 // repos: whose they are, those turned off, its rows grouped by repo),
 // kinds/sprint.js (a sprint's
-// taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
+// taskboard), kinds/backlog.js (a team's backlog), kinds/table.js (a
+// GitHub project's table), kinds/fields.js (a GitHub project's fields: an
+// item's value of each kind, the groups and order of a view's items),
+// kinds/states.js (a
 // state's color), select.js (filter, "nur meine", selection, the filter of
 // the menus that rank their rows by name), commands.js (the action table,
 // which the keys of its actions, the hint line and the command menu read),
@@ -179,11 +184,11 @@
 // ui/helpers.js, ui/choices.js (a dialog's choice fields and their lists),
 // ui/tones.js (the tones of labels and types, the selected background, the
 // tints), ui/layer.js (the board layer), ui/related.js (the related items as
-// drawn), ui/band.js (which cards of a board column draw whole), ui/shapes/
-// (how a view's data is drawn and worked: board, prs, sprint, backlog,
-// placeholder), ui/modals/ (the dialogs: start, status, columns, create,
-// assign, commands, sprints, sessions, repos) and this one, the Board, which
-// looks the shape up.
+// drawn), ui/band.js (which cards of a board column, or rows of a table,
+// draw whole), ui/shapes/ (how a view's data is drawn and worked: board,
+// prs, sprint, backlog, table, placeholder), ui/modals/ (the dialogs:
+// start, status, columns, create, assign, commands, sprints, sessions,
+// repos) and this one, the Board, which looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -198,10 +203,10 @@ import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
 import {
-  SOURCES, contextViews, contextsOf, firstContextOf, firstViewId, goneProjects, hasViews, tabViewName, pick, projectKey, projectView, tabView, viewOf, viewsOf, hasViewSwitch, shownContextMoves, shownIndex, stepIndex, tabViewAfter,
+  SOURCES, contextViews, contextsOf, firstContextOf, firstViewId, goneProjects, hasViews, tabViewName, pick, projectKey, tabView, viewOf, viewsOf, hasViewSwitch, shownContextMoves, shownIndex, stepIndex, tabViewAfter,
 } from "./contexts.js";
 import { call, toolPaths, what } from "./tools.js";
-import { SAVED_MAX, goneSaved, prefetchOrder, readLabels, readSaved, refreshDue, savedKey, savedText } from "./loading.js";
+import { SAVED_MAX, UNSAVED, goneSaved, prefetchOrder, readLabels, readSaved, refreshDue, savedKey, savedText } from "./loading.js";
 import { renderTemplate, templateVars } from "./actions/start.js";
 import { AGENT_STATUS, itemSessions, placeKey, placed, readClaudeSessions, secondEnter, sessionIndex } from "./sessions.js";
 import { makeSources } from "./sources/index.js";
@@ -226,6 +231,8 @@ export * from "./kinds/list.js";
 export * from "./kinds/index.js";
 export * from "./kinds/sprint.js";
 export * from "./kinds/backlog.js";
+export * from "./kinds/table.js";
+export * from "./kinds/fields.js";
 export * from "./kinds/states.js";
 export * from "./select.js";
 export * from "./commands.js";
@@ -259,6 +266,7 @@ export * from "./ui/shapes/board.js";
 export * from "./ui/shapes/prs.js";
 export * from "./ui/shapes/sprint.js";
 export * from "./ui/shapes/backlog.js";
+export * from "./ui/shapes/table.js";
 export * from "./ui/shapes/placeholder.js";
 export * from "./ui/modals/index.js";
 export * from "./ui/modals/columns.js";
@@ -511,14 +519,15 @@ export default class Board extends View {
   // one, { id, name } as the sprint picker chose it, null for the current
   // one; never stored), saved (the data drawn is the saved state, or what a
   // read drew over it so far), restored (the saved state was looked for),
-  // progress ({ page, pages }) and unavailable (the last read since
+  // unsaved (why the store did not take its last read: UNSAVED; null where
+  // it did), progress ({ page, pages }) and unavailable (the last read since
   // views.json was read found its source unavailable).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
       related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)), chosenFolds: new Map(), sprint: null,
-      saved: false, restored: false, progress: null, unavailable: false,
+      saved: false, restored: false, unsaved: null, progress: null, unavailable: false,
     };
     return this.views[id];
   }
@@ -885,8 +894,6 @@ export default class Board extends View {
       cx.timer.after(0, () => this.guarded("Gespeicherter Stand", () => this.viewsNow().forEach((v) => this.restore(v))));
       if (!shown || !this.loader(shown)) this.schedulePrefetch(cx);
       if (!shown) return;
-      const learning = this.learningView(shown);
-      if (learning) return void this.refresh(learning, cx);
       this.sources[shown.source]?.forget?.(shown);
       // The open details' related items are read again too.
       this.state(shown.id).related.clear();
@@ -1024,8 +1031,9 @@ export default class Board extends View {
       const saved = readSaved(text, view, this.hiddenFor(view));
       const shape = SHAPES[saved?.data.shape];
       if (!shape?.loads) return;
-      const data = shape.received(saved.data, st, view);
-      const warnings = [...saved.warnings, ...shape.warnings(view, saved.data)];
+      const kept = shape.fromSaved ? shape.fromSaved(saved.data) : saved.data;
+      const data = shape.received(kept, st, view);
+      const warnings = [...saved.warnings, ...shape.warnings(view, kept)];
       Object.assign(st, { data, warnings, at: saved.at, saved: true });
       this.keepSelection(view);
     } catch (e) {
@@ -1036,13 +1044,19 @@ export default class Board extends View {
     }
   }
 
-  // After the draw the data came with. Where the store does not take the
-  // read, the entry before goes too: a restart would draw it as the last.
+  // After the draw the data came with, in the form its shape stores. Where
+  // the store does not take the read, the entry before goes too: a restart
+  // would draw it as the last; the view says so beside its age (unsaved).
   save(view, hidden, read, at, cx) {
-    cx.timer.after(0, () => this.guarded("Speichern", () => {
+    cx.timer.after(0, (cx) => this.guarded("Speichern", () => {
       const key = savedKey(view.id);
-      const text = savedText(view, hidden, read, at);
+      const shape = SHAPES[read.data.shape];
+      const text = savedText(view, hidden, { ...read, data: shape.toSaved ? shape.toSaved(read.data) : read.data }, at);
       const refused = text === null ? `more than ${SAVED_MAX} bytes` : store.setText(key, text);
+      const st = this.state(view.id);
+      const unsaved = refused === null ? null : text === null ? UNSAVED.big : UNSAVED.refused;
+      if (st.unsaved !== unsaved) cx.notify();
+      st.unsaved = unsaved;
       if (refused === null) return;
       store.remove(key);
       boardLog.write(`board: ${key} not saved: ${refused}`);
@@ -2049,7 +2063,7 @@ export default class Board extends View {
   // refresh. Without a valid views.json the first row holds only the
   // board's name.
   toolbar(t, view, st) {
-    const { reading, age } = readLabels(st, Date.now());
+    const { reading, age, unsaved } = readLabels(st, Date.now());
     const context = this.context();
     const tab = this.tab();
     const row = () => h_flex().gap(12).px(16).items_center();
@@ -2084,6 +2098,7 @@ export default class Board extends View {
       )
       .when(Boolean(reading), (el) => el.child(div().id("reading").flex_none().text_size(12).text_color(t.muted).child(reading)))
       .when(Boolean(age), (el) => el.child(div().id("age").flex_none().text_size(12).text_color(t.muted).child(age)))
+      .when(Boolean(unsaved), (el) => el.child(div().id("unsaved").flex_none().text_size(12).text_color(t.dim).child(unsaved)))
       .child(button(t, "refresh", svg(REFRESH_ICON).size(14).when(Boolean(st?.loading), (el) => el.spin(1000)), false, (cx) => this.reload(cx)));
     return v_flex().id("top-bar").flex_none().border_b(1).border_color(t.border).child(nav).child(tools);
   }
@@ -2197,10 +2212,7 @@ export default class Board extends View {
     if (!view) return message("Keine Ansicht verfügbar");
     const shape = this.shape(view);
     const errorLine = (text) => div().px(16).pt(14).text_color(toneColor(t, NOTE_TONES.error)).child(text);
-    if (shape.loads === false) {
-      const error = this.learnError(view);
-      return box.when(Boolean(error), (el) => el.child(errorLine(error))).child(shape.render(this, t, mono, view, st));
-    }
+    if (shape.loads === false) return box.child(shape.render(this, t, mono, view, st));
     if (!st.data && !st.error) return st.loading ? loading() : message("Noch nichts geladen");
     let shown = box;
     if (st.error) shown = shown.child(errorLine(st.error));
@@ -2208,19 +2220,6 @@ export default class Board extends View {
     if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(w)));
     if (!st.data) return shown;
     return shown.child(shape.render(this, t, mono, view, st));
-  }
-
-  // For a project's view that reads nothing itself (a table's), the view
-  // that reads for it at its start and on r: the one that reads its
-  // project's views (projectView without one shown); null for any other.
-  learningView(view) {
-    return view.tab?.kind === "project" && !this.loader(view) ? projectView(view.tab, null, view.address.view) : null;
-  }
-
-  // The error of that read (learningView), drawn on the view it reads for.
-  learnError(view) {
-    const learning = this.learningView(view);
-    return learning ? this.views[learning.id]?.error ?? null : null;
   }
 
   // With "nur meine" on and no login the data was read as: what the text

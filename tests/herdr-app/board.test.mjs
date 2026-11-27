@@ -20,7 +20,7 @@
 // Fixtures in board-fixtures/:
 // - recorded from gh 2.96 and GitHub's GraphQL API, then reduced to six items
 //   and rewritten as sample data: github-board.json (the items of the
-//   query githubBoardArgs builds from the shipped views.json),
+//   query githubItemsArgs builds from the shipped views.json),
 //   github-not-found.json (a project number that does not exist),
 //   gh-no-login.txt (gh's stderr without a login);
 // - built by hand in the shapes GitHub returns: github-board-cases.json (a
@@ -128,7 +128,7 @@
 //   azure-pr-show.json (an active pull request, one approving reviewer and
 //   a team without a vote).
 // The board fixtures (github-board*.json) hold a board's items alone, as
-// githubBoardArgs reads them; the Status options of the project each stands
+// githubItemsArgs reads them; the Status options of the project each stands
 // in are the tests' (BOARD_OPTIONS and the others), and GitHub's answer for
 // that project's views and fields is built with them (projectJson).
 
@@ -286,7 +286,9 @@ const ITERATIONS = {
 // A project's fields in the shape GitHub sends them for PROJECT_QUERY (the
 // probe's, with made-up ids): built-in ones, Status with `options`, a
 // Priority, Size, an Estimate, a Target date, a Notes text and an
-// Iteration; `extra` adds more.
+// Iteration; `extra` adds more (REVIEWERS_FIELD, a kind the board does not
+// read).
+const REVIEWERS_FIELD = { __typename: "ProjectV2Field", id: "F_Reviewers", name: "Reviewers", dataType: "REVIEWERS" };
 function projectFields(options = BOARD_OPTIONS, extra = []) {
   const plain = (name, dataType) => ({ __typename: "ProjectV2Field", id: `F_${name.replace(/\s+/g, "_")}`, name, dataType });
   return [
@@ -303,15 +305,16 @@ function projectFields(options = BOARD_OPTIONS, extra = []) {
 }
 
 // A view of a project as PROJECT_QUERY reads it: by its layout's short
-// name, its filter, its column and swimlane fields by name and its sort
-// keys as [name, direction].
-function projectViewNode({ number = 1, name = "Mine", layout = "board", filter = "assignee:@me", column = "Status", lane = null, sorts = [] } = {}) {
+// name, its filter, its column and group fields by name, its sort keys as
+// [name, direction] and its visible fields by name, in their order.
+function projectViewNode({ number = 1, name = "Mine", layout = "board", filter = "assignee:@me", column = "Status", group = null, sorts = [], visibleFields = [] } = {}) {
   const ref = (n) => ({ id: `F_${n.replace(/\s+/g, "_")}`, name: n });
   return {
     number, name, layout: `${layout.toUpperCase()}_LAYOUT`, filter,
     verticalGroupByFields: { nodes: column ? [ref(column)] : [] },
-    groupByFields: { nodes: lane ? [ref(lane)] : [] },
+    groupByFields: { nodes: group ? [ref(group)] : [] },
     sortByFields: { nodes: sorts.map(([n, direction]) => ({ direction, field: ref(n) })) },
+    configuration: { visibleFields: { nodes: visibleFields.map(ref) } },
   };
 }
 
@@ -1349,8 +1352,8 @@ test("each tab shows one view, with an id and a kind; an Azure view's kind says 
     [`${OTHER_TAB}:first`, "github board"],
   ]);
   assert.deepEqual(views.map((v) => board.kindOf(v).shape ?? board.kindOf(v).text(v)), [
-    "sprint", "backlog", "PR-Ansicht folgt", "board", "„Plan“: Roadmap-Ansicht folgt", "„List“: Tabellenansicht folgt", "board", "board",
-  ]);
+    "sprint", "backlog", "PR-Ansicht folgt", "board", "table", "table", "board", "board",
+  ], "a roadmap draws as a table");
   assert.deepEqual([views[6].address, views[6].wanted, views[7].address, views[7].wanted], [{ owner: "sample-user", number: 8, view: null }, null, { owner: "sample-user", number: 8, view: null }, 3],
     "a project the board knows no views of: the view that learns them, wanting the one remembered");
   assert.deepEqual(board.viewsOf(config).map((v) => v.id), [
@@ -1419,10 +1422,10 @@ test("the items' query leaves out no column for a name in hide that matches the 
   const plan = planOf(projectFor(FIXTURE_OPTIONS["github-board-cases.json"]));
   const hidden = new Set(["Ohne Status", "Done"]);
   const value = (args, name) => args.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1);
-  const first = board.githubBoardArgs(githubView(), plan, hidden);
+  const first = board.githubItemsArgs(githubView(), plan, hidden);
   assert.deepEqual(["filter", "h0", "h1"].map((n) => value(first, n)), ['assignee:@me -status:"Done"', 'assignee:@me status:"Done"', undefined]);
   assert.doesNotMatch(value(first, "query"), /\$h1/);
-  assert.equal(value(board.githubBoardPageArgs(githubView(), plan, hidden, "c1", 100), "filter"), 'assignee:@me -status:"Done"', "nor do its later pages");
+  assert.equal(value(board.githubItemsPageArgs(githubView(), plan, hidden, "c1", 100), "filter"), 'assignee:@me -status:"Done"', "nor do its later pages");
   const data = board.parseGithubBoard(json("github-board-cases.json"), githubView(), hidden, [], plan);
   assert.deepEqual([data.meta.query, data.columns.find((c) => c.name === "Done").count], ['assignee:@me -status:"Done"', 265], "Done's count is the answer's h0");
 });
@@ -1430,7 +1433,7 @@ test("the items' query leaves out no column for a name in hide that matches the 
 // ---- GitHub board ----
 
 test("the items' query takes the view's filter, leaves its hidden columns out by its column field and counts them in the same request", () => {
-  const args = board.githubBoardArgs(githubView(), planOf(), HIDDEN);
+  const args = board.githubItemsArgs(githubView(), planOf(), HIDDEN);
   const value = (name) => args.find((a) => a.startsWith(`${name}=`)).slice(name.length + 1);
   assert.equal(value("filter"), 'assignee:@me -status:"Backlog","Done"');
   assert.equal(value("h0"), 'assignee:@me status:"Backlog"');
@@ -1441,31 +1444,32 @@ test("the items' query takes the view's filter, leaves its hidden columns out by
   assert.match(doc, /h0: items\(first: 0, query: \$h0\)/);
   assert.match(doc, /items\(first: 100, query: \$filter\) \{ totalCount pageInfo \{ hasNextPage endCursor \}/, "a page of GitHub's 100, and where the next starts");
   assert.match(doc, /\$h1: String!/);
-  assert.doesNotMatch(board.githubBoardArgs(githubView(), planOf(projectJson({ views: [{ filter: "" }] })), new Set()).find((a) => a.startsWith("query=")), /\$h0/);
+  assert.doesNotMatch(board.githubItemsArgs(githubView(), planOf(projectJson({ views: [{ filter: "" }] })), new Set()).find((a) => a.startsWith("query=")), /\$h0/);
   assert.doesNotMatch(doc, /\bviewer \{/, "who gh runs as comes with the project's views");
   assert.match(board.PROJECT_QUERY, /^query\([^)]*\) \{\n  viewer \{ login \}\n/, "for „nur meine“");
   const iteration = planOf(projectJson({ views: [{ filter: "is:open", column: "Iteration" }] }));
-  const byIteration = board.githubBoardArgs(githubView(), iteration, new Set(["Iteration 1"]));
+  const byIteration = board.githubItemsArgs(githubView(), iteration, new Set(["Iteration 1"]));
   assert.deepEqual(["filter", "h0", "column"].map((n) => byIteration.find((a) => a.startsWith(`${n}=`)).slice(n.length + 1)), ['is:open -iteration:"Iteration 1"', 'is:open iteration:"Iteration 1"', "Iteration"],
     "an iteration field's columns are its iterations, by their titles");
 });
 
-test("a project's views and fields are one request, in GitHub's order (PROJECT_QUERY): each view's layout, filter, column field, swimlane field and sort keys; its fields' options and iterations", () => {
+test("a project's views and fields are one request, in GitHub's order (PROJECT_QUERY): each view's layout, filter, column field, group field, sort keys and visible fields; its fields' options and iterations", () => {
   const args = board.githubProjectArgs(githubView());
   assert.deepEqual(args.filter((a) => !a.startsWith("query=")), ["api", "graphql", "-f", "-f", "login=sample-user", "-F", "number=7"]);
   const doc = board.PROJECT_QUERY.replace(/\s+/g, " ");
   assert.match(doc, /views\(first: 50, orderBy: \{ field: POSITION, direction: ASC \}\) \{ nodes \{ number name layout filter verticalGroupByFields\(first: 1\)/);
   assert.match(doc, /groupByFields\(first: 1\) .* sortByFields\(first: 5\) \{ nodes \{ direction field \{ \.\.\. on ProjectV2FieldCommon \{ id name \} \} \} \}/);
   assert.match(doc, /fields\(first: 50\) \{ nodes \{ \.\.\. on ProjectV2FieldCommon \{ id name dataType \} \.\.\. on ProjectV2SingleSelectField \{ options \{ id name color \} \} \.\.\. on ProjectV2IterationField \{ configuration \{ iterations \{ id title startDate \} completedIterations \{ id title startDate \} \} \}/);
-  assert.doesNotMatch(doc, /\b(groupBy|verticalGroupBy|sortBy|visibleFields)\(/, "none of the deprecated fields");
-  const views = [{}, { number: 4, name: "Roadmap", layout: "roadmap", filter: null, column: null }, { number: 5, name: "Mine as a list", layout: "table", column: null },
-    { number: 7, name: "Now", filter: "iteration:@current", lane: "Priority", sorts: [["Priority", "ASC"], ["Estimate", "DESC"]] }];
+  assert.match(doc, /sortByFields\(first: 5\) .* configuration \{ visibleFields\(first: 50\) \{ nodes \{ \.\.\. on ProjectV2FieldCommon \{ id name \} \} \} \} \} \}/, "a view's visible fields, in its configuration");
+  assert.doesNotMatch(doc.replace("configuration { visibleFields(", ""), /\b(groupBy|verticalGroupBy|sortBy|visibleFields)\(/, "none of the deprecated fields of a view");
+  const views = [{}, { number: 4, name: "Roadmap", layout: "roadmap", filter: null, column: null }, { number: 5, name: "Mine as a list", layout: "table", column: null, visibleFields: ["Title", "Status", "Estimate"] },
+    { number: 7, name: "Now", filter: "iteration:@current", group: "Priority", sorts: [["Priority", "ASC"], ["Estimate", "DESC"]] }];
   const project = board.parseGithubProject(projectJson({ views }), githubView());
-  assert.deepEqual(project.views.map((v) => [v.number, v.name, v.layout, v.filter, v.column, v.lane, v.sorts]), [
-    [1, "Mine", "board", "assignee:@me", "F_Status", null, []],
-    [4, "Roadmap", "roadmap", "", null, null, []],
-    [5, "Mine as a list", "table", "assignee:@me", null, null, []],
-    [7, "Now", "board", "iteration:@current", "F_Status", "F_Priority", [{ field: "F_Priority", direction: "ASC" }, { field: "F_Estimate", direction: "DESC" }]],
+  assert.deepEqual(project.views.map((v) => [v.number, v.name, v.layout, v.filter, v.column, v.group, v.sorts, v.visibleFields]), [
+    [1, "Mine", "board", "assignee:@me", "F_Status", null, [], []],
+    [4, "Roadmap", "roadmap", "", null, null, [], []],
+    [5, "Mine as a list", "table", "assignee:@me", null, null, [], ["F_Title", "F_Status", "F_Estimate"]],
+    [7, "Now", "board", "iteration:@current", "F_Status", "F_Priority", [{ field: "F_Priority", direction: "ASC" }, { field: "F_Estimate", direction: "DESC" }], []],
   ]);
   assert.deepEqual([project.title, project.viewer, project.id], ["Mine", "sample-user", "PVT_sample7"]);
   const iteration = project.fields.find((f) => f.name === "Iteration");
@@ -1554,7 +1558,7 @@ test("a card carries repo, number, title, labels, assignees, author, parent and 
   assert.equal(board.findCard(b, "PVTI_rec2").card.parent, 3002);
   const cases = casesBoard();
   assert.deepEqual(["PVTI_case1", "PVTI_case2"].map((k) => board.findCard(cases, k).card.author), ["sample-contributor", "sample-contributor"], "a pull request's author, a draft's creator");
-  const doc = board.githubBoardArgs(githubView(), planOf(), HIDDEN).find((a) => a.startsWith("query="));
+  const doc = board.githubItemsArgs(githubView(), planOf(), HIDDEN).find((a) => a.startsWith("query="));
   assert.equal(doc.match(/author \{ login \}/g).length, 2, "asked of issues and pull requests");
   assert.match(doc, /DraftIssue \{ title creator \{ login \}/);
 });
@@ -1592,7 +1596,7 @@ test("a view's sort keys order the cards within each column, one after the other
   assert.deepEqual(orderIn(down, "In progress"), [3000, 3003, 3001], "descending, the one without a priority still last");
   assert.deepEqual(orderIn(sortedBy([], values), "In progress"), [3000, 3001, 3003], "unsorted: GitHub's order");
   assert.deepEqual(orderIn(sortedBy([["Title", "ASC"]], values), "In progress"), [3000, 3003, 3001], "a field of the item itself, by its text");
-  const args = board.githubBoardArgs(githubView(), planOf(projectJson({ views: [{ sorts: [["Priority", "ASC"], ["Estimate", "DESC"], ["Title", "ASC"]] }] })), HIDDEN);
+  const args = board.githubItemsArgs(githubView(), planOf(projectJson({ views: [{ sorts: [["Priority", "ASC"], ["Estimate", "DESC"], ["Title", "ASC"]] }] })), HIDDEN);
   assert.ok(args.includes("v0=Estimate") && !args.some((a) => a.startsWith("v1=")), "a field the item does not hold read by its name, once");
   assert.match(args.find((a) => a.startsWith("query=")), /v0: fieldValueByName\(name: \$v0\) \{[\s\S]*?ProjectV2ItemFieldNumberValue \{ number \}/);
 });
@@ -1600,7 +1604,7 @@ test("a view's sort keys order the cards within each column, one after the other
 test("a view's swimlane field bands its cards across the columns: one band per value its cards hold, in the field's order, those without a value in the last; within a band the sort keys order them", () => {
   const sizes = { 3000: "M", 3001: "XS", 3004: "M", 3005: "L", 3007: "XS" };
   const values = Object.fromEntries(Object.entries(sizes).map(([n, size]) => [n, { v0: { optionId: `opt-size-${size}`, name: size } }]));
-  const lanes = sortedBy([], values, { lane: "Size" });
+  const lanes = sortedBy([], values, { group: "Size" });
   assert.deepEqual(lanes.lanes, [
     { id: "v:opt-size-XS", name: "XS", color: "ansi2" }, { id: "v:opt-size-M", name: "M", color: "muted" }, { id: "v:opt-size-L", name: "L", color: "muted" }, { id: "none", name: "Ohne Size", color: "dim" },
   ], "S, which no card has, has no band; each band in its option's color");
@@ -1612,15 +1616,15 @@ test("a view's swimlane field bands its cards across the columns: one band per v
   ], "each band its head and rows, the n-th card of each shown column (Ready, In progress, In review) in its n-th row");
   assert.deepEqual(rows.filter((r) => r.head).map((r) => r.lane.name), ["XS", "M", "L", "Ohne Size"]);
   assert.deepEqual(board.laneRows(lanes.lanes, board.shownColumns(lanes, "dry-run", false)).filter((r) => r.head).map((r) => r.lane.name), ["Ohne Size"], "a band the filter empties has none");
-  const sorted = sortedBy([["Title", "DESC"]], { ...values, 3003: { v0: { optionId: "opt-size-M", name: "M" } } }, { lane: "Size" });
+  const sorted = sortedBy([["Title", "DESC"]], { ...values, 3003: { v0: { optionId: "opt-size-M", name: "M" } } }, { group: "Size" });
   assert.deepEqual(orderIn(sorted, "In progress"), [3001, 3003, 3000], "within a band by the sort keys");
-  const byPeople = board.parseGithubBoard(json("github-board.json"), githubView(), HIDDEN, [], planOf(projectJson({ views: [{ lane: "Assignees" }] })));
+  const byPeople = board.parseGithubBoard(json("github-board.json"), githubView(), HIDDEN, [], planOf(projectJson({ views: [{ group: "Assignees" }] })));
   assert.deepEqual(byPeople.lanes.map((l) => l.name), ["sample-user"], "a field of the item itself, by its values");
   assert.equal(githubBoard().lanes, null, "no swimlane field, no bands");
 });
 
 test("a swimlane whose value is the text „none“ is a band of its own, apart from the band of the cards without a value; each card is drawn once", () => {
-  const data = sortedBy([], { 3000: { v0: { text: "none" } }, 3001: { v0: { text: "none" } } }, { lane: "Notes" });
+  const data = sortedBy([], { 3000: { v0: { text: "none" } }, 3001: { v0: { text: "none" } } }, { group: "Notes" });
   assert.deepEqual(data.lanes.map((l) => [l.id, l.name]), [["v:none", "none"], ["none", "Ohne Notes"]]);
   const columns = board.shownColumns(data, "", false);
   const drawn = board.laneRows(data.lanes, columns).filter((r) => !r.head).flatMap((r) => r.cards.filter(Boolean).map((c) => c.key));
@@ -1653,7 +1657,7 @@ test("a sort by the parent's title, those without a parent last either way; by l
 test("with swimlanes h/l go to the next column's card in the same band and row, else that band's last there, else as without; j/k through the column, band after band", () => {
   const sizes = { 3000: "M", 3001: "XS", 3004: "M", 3005: "M", 3007: "XS" };
   const values = Object.fromEntries(Object.entries(sizes).map(([n, size]) => [n, { v0: { optionId: `opt-size-${size}`, name: size } }]));
-  const data = sortedBy([], values, { lane: "Size" });
+  const data = sortedBy([], values, { group: "Size" });
   const columns = board.shownColumns(data, "", false);
   const at = (key) => ({ col: board.columnOf(columns, key), key });
   const go = (key, dir) => board.laneNavigate(columns, at(key), dir).key;
@@ -1666,13 +1670,13 @@ test("with swimlanes h/l go to the next column's card in the same band and row, 
   assert.deepEqual([go("PVTI_rec2", "down"), go("PVTI_rec1", "down"), go("PVTI_rec1", "up")], ["PVTI_rec1", "PVTI_rec3", "PVTI_rec2"]);
 });
 
-test("a sort key or swimlane field of a kind the board does not read (here linked pull requests and the date an item was created) orders nothing, and the board says so", () => {
-  const plan = planOf(projectJson({ views: [{ lane: "Linked pull requests", sorts: [["Created", "ASC"], ["Estimate", "ASC"]] }] }));
-  assert.deepEqual([plan.lane, plan.sorts.map((s) => s.field.name), plan.unreadable], [null, ["Estimate"], ["Linked pull requests", "Created"]]);
+test("a sort key or swimlane field of a kind the board does not read (here reviewers and the date an item was created) orders nothing, and the board says so", () => {
+  const plan = planOf(projectJson({ fields: projectFields(BOARD_OPTIONS, [REVIEWERS_FIELD]), views: [{ group: "Reviewers", sorts: [["Created", "ASC"], ["Estimate", "ASC"]] }] }));
+  assert.deepEqual([plan.group, plan.sorts.map((s) => s.field.name), plan.unreadable], [null, ["Estimate"], ["Reviewers", "Created"]]);
   const data = board.parseGithubBoard(json("github-board.json"), githubView(), HIDDEN, [], plan);
-  assert.deepEqual([data.lanes, data.meta.unreadable], [null, ["Linked pull requests", "Created"]]);
+  assert.deepEqual([data.lanes, data.meta.unreadable], [null, ["Reviewers", "Created"]]);
   assert.deepEqual(board.SHAPES.board.warnings(githubView(), data), [
-    "Ansicht „Mine“ sortiert oder gruppiert nach „Linked pull requests“, einem Feld, das das Board nicht liest: es ordnet ohne",
+    "Ansicht „Mine“ sortiert oder gruppiert nach „Reviewers“, einem Feld, das das Board nicht liest: es ordnet ohne",
     "Ansicht „Mine“ sortiert oder gruppiert nach „Created“, einem Feld, das das Board nicht liest: es ordnet ohne",
   ]);
   assert.deepEqual(board.SHAPES.board.warnings(githubView(), githubBoard()), []);
@@ -1755,9 +1759,9 @@ function boardPage(from, to, next, { first = from === 0, total = 6 } = {}) {
   return data;
 }
 
-test("a board's next page is one query of its items after the cursor: the same filter and field, no counts, as many as its limit leaves (githubBoardPageArgs)", () => {
+test("a board's next page is one query of its items after the cursor: the same filter and field, no counts, as many as its limit leaves (githubItemsPageArgs)", () => {
   const plan = planOf();
-  const args = board.githubBoardPageArgs(githubView(), plan, HIDDEN, "Y3Vyc29y", 100);
+  const args = board.githubItemsPageArgs(githubView(), plan, HIDDEN, "Y3Vyc29y", 100);
   const value = (name) => args.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1);
   assert.deepEqual([value("filter"), value("after"), value("login"), value("column")], ['assignee:@me -status:"Backlog","Done"', "Y3Vyc29y", "sample-user", "Status"]);
   assert.ok(args.includes("-F") && args.includes("number=7"));
@@ -1766,52 +1770,52 @@ test("a board's next page is one query of its items after the cursor: the same f
   assert.doesNotMatch(doc, /\bviewer \{|h0:|options \{/, "nothing the first page read");
   assert.match(doc, /projectV2\(number: \$number\) \{ title items\(first/, "of the project its title alone, for what a page says");
   assert.equal(value("h0"), undefined);
-  assert.match(board.githubBoardPageArgs({ ...githubView(), limit: 250 }, plan, HIDDEN, "c", 200)[3], /items\(first: 50, after/, "the last page to the limit");
-  assert.match(board.githubBoardArgs({ ...githubView(), limit: 30 }, plan, HIDDEN)[3], /items\(first: 30, query/, "a limit below a page");
+  assert.match(board.githubItemsPageArgs({ ...githubView(), limit: 250 }, plan, HIDDEN, "c", 200)[3], /items\(first: 50, after/, "the last page to the limit");
+  assert.match(board.githubItemsArgs({ ...githubView(), limit: 30 }, plan, HIDDEN)[3], /items\(first: 30, query/, "a limit below a page");
   const empty = boardPage(0, 0, "c0");
-  const next = board.nextBoardPage(empty, githubView());
+  const next = board.nextItemsPage(empty, githubView());
   assert.deepEqual(next, { after: "c0", count: 0 }, "an empty first page that says more follow");
-  const after = board.githubBoardPageArgs(githubView(), plan, HIDDEN, next.after, next.count);
+  const after = board.githubItemsPageArgs(githubView(), plan, HIDDEN, next.after, next.count);
   assert.match(after[3], /items\(first: 100, after: \$after, query/, "its next page reads from the cursor it declares");
   assert.match(after[3], /^query=query\([^)]*, \$after: String!\)/, "and declares it");
   assert.ok(after.includes("after=c0"));
 });
 
-test("a board's pages add up: each item once, the last page's pageInfo; the next page while GitHub has one and the limit leaves room (addBoardPage, nextBoardPage)", () => {
+test("a board's pages add up: each item once, the last page's pageInfo; the next page while GitHub has one and the limit leaves room (addItemsPage, nextItemsPage)", () => {
   const view = githubView();
   const first = boardPage(0, 3, "c1");
-  assert.deepEqual(board.nextBoardPage(first, view), { after: "c1", count: 3 });
+  assert.deepEqual(board.nextItemsPage(first, view), { after: "c1", count: 3 });
   const second = boardPage(2, 6, null, { first: false });
-  board.addBoardPage(first, second);
+  board.addItemsPage(first, second);
   const items = first.data.repositoryOwner.projectV2.items;
   assert.deepEqual(items.nodes.map((n) => n.id), ["PVTI_rec1", "PVTI_rec2", "PVTI_rec3", "PVTI_rec4", "PVTI_rec5", "PVTI_rec6"], "the item both pages hold, once");
-  assert.equal(board.nextBoardPage(first, view), null, "no page more");
-  assert.equal(board.nextBoardPage(boardPage(0, 3, "c1"), { ...view, limit: 3 }), null, "the limit read");
+  assert.equal(board.nextItemsPage(first, view), null, "no page more");
+  assert.equal(board.nextItemsPage(boardPage(0, 3, "c1"), { ...view, limit: 3 }), null, "the limit read");
   const noCursor = boardPage(0, 3, "c1");
   noCursor.data.repositoryOwner.projectV2.items.pageInfo.endCursor = null;
-  assert.throws(() => board.nextBoardPage(noCursor, view), { message: "Projekt „Sample“: GitHub nannte nach 3 Einträgen nicht, wo die nächsten beginnen" },
+  assert.throws(() => board.nextItemsPage(noCursor, view), { message: "Projekt „Sample“: GitHub nannte nach 3 Einträgen nicht, wo die nächsten beginnen" },
     "more without a cursor to go on from");
-  assert.equal(board.nextBoardPage(noCursor, { ...view, limit: 3 }), null, "unless the limit is read");
-  assert.equal(board.nextBoardPage({ data: { repositoryOwner: null } }, view), null, "no items: the parser explains");
-  const cut = board.parseGithubBoard(board.addBoardPage(boardPage(0, 3, "c1", { total: 9 }), boardPage(3, 5, "c2", { first: false })), { ...view, limit: 5 }, HIDDEN, [], planOf());
+  assert.equal(board.nextItemsPage(noCursor, { ...view, limit: 3 }), null, "unless the limit is read");
+  assert.equal(board.nextItemsPage({ data: { repositoryOwner: null } }, view), null, "no items: the parser explains");
+  const cut = board.parseGithubBoard(board.addItemsPage(boardPage(0, 3, "c1", { total: 9 }), boardPage(3, 5, "c2", { first: false })), { ...view, limit: 5 }, HIDDEN, [], planOf());
   assert.deepEqual([cut.limited, cut.total, cut.count], [true, 9, 5], "cut: said, with how many it read");
-  const stuck = (page) => () => board.addBoardPage(boardPage(0, 3, "c1"), page);
+  const stuck = (page) => () => board.addItemsPage(boardPage(0, 3, "c1"), page);
   const STUCK = { message: "Projekt „Sample“: GitHub kam nach 3 Einträgen nicht weiter" };
   assert.throws(stuck(boardPage(1, 3, "c2", { first: false })), STUCK, "more promised, but only items it holds");
   assert.throws(stuck(boardPage(3, 4, "c1", { first: false })), STUCK, "more promised, from the same cursor");
-  assert.equal(board.addBoardPage(boardPage(0, 3, "c1"), boardPage(1, 3, null, { first: false })).data.repositoryOwner.projectV2.items.nodes.length, 3,
+  assert.equal(board.addItemsPage(boardPage(0, 3, "c1"), boardPage(1, 3, null, { first: false })).data.repositoryOwner.projectV2.items.nodes.length, 3,
     "no item new on the last page: the end");
   const missing = { data: { repositoryOwner: { projectV2: { items: null } } } };
-  assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), missing, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "items"], message: "no access" }]),
+  assert.throws(() => board.addItemsPage(boardPage(0, 3, "c1"), missing, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "items"], message: "no access" }]),
     { message: "Projekt „Sample“: no access" });
-  assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), missing), { message: "Projekt „Sample“ lieferte die Einträge nach den ersten 3 nicht" });
+  assert.throws(() => board.addItemsPage(boardPage(0, 3, "c1"), missing), { message: "Projekt „Sample“ lieferte die Einträge nach den ersten 3 nicht" });
   const gone = { data: { repositoryOwner: { projectV2: null } } };
   const at = (path, message) => ({ type: "NOT_FOUND", path, message });
-  assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner"], "owner"), at(["repositoryOwner", "projectV2"], "project gone")]),
+  assert.throws(() => board.addItemsPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner"], "owner"), at(["repositoryOwner", "projectV2"], "project gone")]),
     { message: "Projekt „Sample“: project gone" }, "the deepest error on the way to the items");
-  assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner", "projectV2", "items", "nodes", 0], "an item"), at(["viewer"], "elsewhere")]),
+  assert.throws(() => board.addItemsPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner", "projectV2", "items", "nodes", 0], "an item"), at(["viewer"], "elsewhere")]),
     { message: "Projekt „Sample“: an item" }, "none on the way: the page's first");
-  assert.throws(() => board.addBoardPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner", "projectV2", "items", "nodes", 0], "an item"), at(["repositoryOwner", "projectV2"], "project gone")]),
+  assert.throws(() => board.addItemsPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner", "projectV2", "items", "nodes", 0], "an item"), at(["repositoryOwner", "projectV2"], "project gone")]),
     { message: "Projekt „Sample“: project gone" }, "an item's error lies past the items, not on the way to them");
 });
 
@@ -5081,7 +5085,7 @@ test("UI: a column shown again draws while the columns shown before have no card
 });
 
 test("UI: on a board with swimlanes a column shown again has the spinner in its head while a read runs, and says its cards are not read where that read fails, until a read brings its cards; the other heads have neither", async () => {
-  const project = () => ok(JSON.stringify(projectFor(BOARD_OPTIONS, { views: [{ lane: "Size" }] })));
+  const project = () => ok(JSON.stringify(projectFor(BOARD_OPTIONS, { views: [{ group: "Size" }] })));
   const { b, cx, host } = await openBoard({ projectAnswer: project });
   const head = (name) => {
     const at = b.navColumns(b.view()).findIndex((c) => c.name === name);
@@ -5230,13 +5234,14 @@ test("UI: r with views.json unchanged, or after an invalid one was fixed, keeps 
 // GitHub's answer for project 7 once its view 1 is a table.
 const mineAsTable = () => ok(JSON.stringify(projectJson({ title: "Mine", views: [{ layout: "table", column: null }] })));
 
-test("UI: a write under way while r finds its view a table now leaves nothing open", async () => {
+test("UI: a write under way while r finds its view a table now leaves nothing open, and the table reads its items", async () => {
   const { b, cx, host } = await openBoard({ stored: { [`tab:${GITHUB_CONTEXT}`]: MINE_TAB } });
   await press(b, cx, "l", shiftL);
   host.projectAnswer = (number) => (number === 7 ? mineAsTable() : ok(JSON.stringify(defaultProject(number))));
   await press(b, cx, "r");
-  assert.deepEqual([board.viewKind(b.view()), host.open("gh").map((c) => c.args.some((a) => a.includes("items(first")))], ["github table", [false]], "no items read for a table: only the move is open");
-  assert.ok(texts(b.render()).includes("„Mine“: Tabellenansicht folgt"));
+  assert.deepEqual([board.viewKind(b.view()), host.open("gh").map((c) => c.args.some((a) => a.includes("items(first")))], ["github table", [false, true]], "the move, and the table's items");
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 6, null))), "items(first");
+  assert.equal(b.views[MINE].data.shape, "table");
   await host.answer("gh", stopped(found("gh")), "updateProjectV2ItemFieldValue");
   assert.equal(b.notice.text, "tender#3004 → In progress: Ergebnis unklar: gh antwortete nicht in 30 s", "no follow-up promised");
   assert.deepEqual(b.views[MINE].unclear, []);
@@ -5339,9 +5344,11 @@ test("UI: r drops the open outcomes of a view that GitHub made a table", async (
   assert.equal(b.views[MINE].unclear.length, 1, "the refresh after it failed: still open");
   host.projectAnswer = (number) => (number === 7 ? mineAsTable() : ok(JSON.stringify(defaultProject(number))));
   await press(b, cx, "r");
-  assert.deepEqual([b.views[MINE].unclear, b.views[MINE].error, b.views[MINE].data.shape, host.open("gh").length], [[], null, "placeholder", 0]);
+  assert.deepEqual([b.views[MINE].unclear, host.open("gh").filter((c) => c.args.some((a) => a.includes("items(first"))).length], [[], 1], "dropped as the view became a table, which reads its items");
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 6, null))), "items(first");
+  assert.deepEqual([b.views[MINE].unclear, b.views[MINE].error, b.views[MINE].data.shape, host.open("gh").length], [[], null, "table", 0]);
   await cx.fire();
-  assert.notEqual(JSON.parse(memory.get(board.savedKey(MINE)) ?? "{}").data?.shape, "placeholder", "a placeholder is no data to keep");
+  assert.equal(JSON.parse(memory.get(board.savedKey(MINE)) ?? "{}").data?.shape, "table", "a table's data is kept, as a board's");
 });
 
 test("UI: a refresh settles the outcomes that came before it started and keeps the later ones for the next", async () => {
@@ -6976,7 +6983,7 @@ test("„nur meine“ counts a search of one's own whole, and a pull request on 
   const issue = cases.columns.flatMap((c) => c.cards).find((c) => c.kind === "issue" && c.author === null);
   assert.ok(issue, "an issue whose author is gone");
   assert.equal(board.isMine(issue, "sample-user"), issue.assignees.includes("sample-user"));
-  assert.match(board.githubBoardArgs(githubView(), planOf(), HIDDEN).find((a) => a.startsWith("query=")), /PullRequest \{[^}]*\}[^]*?reviewRequests\(first: 20\)/);
+  assert.match(board.githubItemsArgs(githubView(), planOf(), HIDDEN).find((a) => a.startsWith("query=")), /PullRequest \{[^}]*\}[^]*?reviewRequests\(first: 20\)/);
 });
 
 test("UI: what the filter or „nur meine“ hides is said: in the column, its count and the tab's", async () => {
@@ -7523,7 +7530,7 @@ const withViews = (views, extra = {}) => (number) => ok(JSON.stringify(number ==
 const filterOf = (call) => call.args.find((a) => a.startsWith("filter="))?.slice(7) ?? null;
 const itemCalls = (host) => host.open("gh").filter((c) => c.args.some((a) => a.includes("items(first")));
 
-test("UI: a project's tab switches between its views in row 2, in GitHub's order and by their names; v steps through them, a click picks one, and the view shown is remembered for its tab; a board reads its own filter, a table or a roadmap nothing", async () => {
+test("UI: a project's tab switches between its views in row 2, in GitHub's order and by their names; v steps through them, a click picks one, and the view shown is remembered for its tab; each view reads its items by its own filter, a table and a roadmap as tables", async () => {
   const { b, cx, host } = await openBoard({ projectAnswer: withViews(SWITCH_VIEWS) });
   const tabView = () => byId(b.render(), "tab-view");
   assert.deepEqual(tabView().kids.map((k) => [k.with.id[0], texts(k)[0]]), [["tab-view-1", "Mine"], ["tab-view-4", "Plan"], ["tab-view-5", "Liste"], ["tab-view-7", "Jetzt"]]);
@@ -7535,11 +7542,14 @@ test("UI: a project's tab switches between its views in row 2, in GitHub's order
   await press(b, cx, "escape");
   const asked = host.projectAsks.length;
   await press(b, cx, "v");
-  assert.deepEqual([b.view().id, board.viewKind(b.view()), itemCalls(host).length], [`${MINE_TAB}:4`, "github roadmap", 0]);
-  assert.ok(texts(b.render()).includes("„Plan“: Roadmap-Ansicht folgt"));
+  assert.deepEqual([b.view().id, board.viewKind(b.view()), itemCalls(host).map(filterOf)], [`${MINE_TAB}:4`, "github roadmap", [""]], "a roadmap by its own filter, none");
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 6, null))), "items(first");
+  assert.equal(b.state(`${MINE_TAB}:4`).data.shape, "table");
   await press(b, cx, "v");
-  assert.ok(texts(b.render()).includes("„Liste“: Tabellenansicht folgt"));
-  assert.equal(host.projectAsks.length, asked, "neither reads anything");
+  assert.deepEqual([b.view().id, itemCalls(host).map(filterOf)], [`${MINE_TAB}:5`, ["assignee:@me"]], "a table by its own");
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 6, null))), "items(first");
+  assert.equal(b.state(`${MINE_TAB}:5`).data.shape, "table");
+  assert.equal(host.projectAsks.length, asked + 2, "each read with its project's views");
   await press(b, cx, "v");
   assert.equal(b.view().id, `${MINE_TAB}:7`);
   assert.deepEqual(itemCalls(host).map(filterOf), ["iteration:@current"], "its own filter; it hides no column");
@@ -7586,10 +7596,11 @@ test("UI: a project the board knows nothing of yet is named by its number, and i
   const chosen = await bootBoard({ known: {}, projectAnswer: withViews(SWITCH_VIEWS), stored: { [`projectView:${MINE_TAB}`]: 7 } });
   assert.deepEqual([chosen.b.view().id, chosen.host.open("gh").map(filterOf)], [`${MINE_TAB}:7`, ["iteration:@current"]], "the view chosen last, where the project has it");
   const table = await bootBoard({ known: {}, projectAnswer: withViews([{ layout: "table", column: null }]) });
-  assert.deepEqual([board.viewKind(table.b.view()), table.host.open("gh").length], ["github table", 0], "a first view that is a table reads no items");
+  assert.deepEqual([board.viewKind(table.b.view()), table.b.views[`${MINE_TAB}:first`], table.b.views[MINE].loading, itemCalls(table.host).map(filterOf)], ["github table", undefined, true, ["assignee:@me"]],
+    "a first view that is a table reads its items in the same read, as the table's");
+  await table.host.answer("gh", ok(JSON.stringify(boardPage(0, 6, null))), "items(first");
   await table.cx.fire();
-  assert.deepEqual([table.b.views[`${MINE_TAB}:first`], memory.has(board.savedKey(`${MINE_TAB}:first`)), memory.has(board.savedKey(MINE))], [undefined, false, false], "and leaves no state nor saved data of its own");
-  assert.ok(texts(table.b.render()).includes("„Mine“: Tabellenansicht folgt"));
+  assert.deepEqual([table.b.views[MINE].data.shape, memory.has(board.savedKey(`${MINE_TAB}:first`)), JSON.parse(memory.get(board.savedKey(MINE))).data.shape], ["table", false, "table"], "its data kept as the table's");
   const failed = await bootBoard({ known: {}, projectAnswer: () => ok(fixture("github-not-found.json")) });
   assert.deepEqual([failed.b.view().id, failed.b.state(failed.b.view().id).error], [`${MINE_TAB}:first`, "Projekt 7 von sample-user nicht gefunden – „number“ in views.json prüfen"]);
 });
@@ -7617,38 +7628,21 @@ test("UI: a view GitHub no longer has is said where its read fails, and the tab 
 });
 
 // A project whose views are a board (1) and a table (2), as the board knows
-// it, and GitHub's answer for it with both or (`table` false) the board's.
+// it, and GitHub's answer for it once it has the board alone.
 const BOARD_AND_TABLE = { [board.projectKey(MINE_TAB)]: { title: "Mine", url: null, views: [{ number: 1, name: "Mine", layout: "board", filter: "assignee:@me" }, { number: 2, name: "Tab", layout: "table", filter: "" }] } };
-const boardAndTable = (table = true) => withViews([{}, ...(table ? [{ number: 2, name: "Tab", layout: "table", column: null }] : [])]);
+const boardAlone = withViews([{}]);
 
-test("UI: a view GitHub no longer has is said also where its tab showed it without a read of its own: a table view, or the one remembered of a project the board knows no views of yet", async () => {
+test("UI: a view GitHub no longer has is said also where its tab showed a table view, or the one remembered of a project the board knows no views of yet", async () => {
   const said = "Ansicht 2 gibt es in „Mine“ nicht mehr; gezeigt wird „Mine“";
-  const table = await bootBoard({ known: BOARD_AND_TABLE, stored: { [`projectView:${MINE_TAB}`]: 2 }, projectAnswer: boardAndTable(false) });
+  const table = await bootBoard({ known: BOARD_AND_TABLE, stored: { [`projectView:${MINE_TAB}`]: 2 }, projectAnswer: boardAlone });
   await table.host.answer("gh", ok(fixture("github-board.json")), "items(first");
   assert.deepEqual([table.b.view().id, table.b.notice?.text], [MINE, said], "a table view");
-  const unknown = await bootBoard({ known: {}, stored: { [`projectView:${MINE_TAB}`]: 2 }, projectAnswer: boardAndTable(false) });
+  const unknown = await bootBoard({ known: {}, stored: { [`projectView:${MINE_TAB}`]: 2 }, projectAnswer: boardAlone });
   await unknown.host.answer("gh", ok(fixture("github-board.json")), "items(first");
   assert.deepEqual([unknown.b.view().id, unknown.b.notice?.text], [MINE, said], "a project the board knew no views of");
-  const none = await bootBoard({ known: {}, projectAnswer: boardAndTable(false) });
+  const none = await bootBoard({ known: {}, projectAnswer: boardAlone });
   await none.host.answer("gh", ok(fixture("github-board.json")), "items(first");
   assert.deepEqual([none.b.view().id, none.b.notice], [MINE, null], "nothing remembered, nothing to say");
-});
-
-test("UI: a failed read of the project's views drawn on a table view goes once a read of another of the tab's views learns the project", async () => {
-  const { b, cx, host } = await bootBoard({ known: BOARD_AND_TABLE, stored: { [`projectView:${MINE_TAB}`]: 2 }, projectAnswer: boardAndTable() });
-  host.projectAnswer = () => ({ code: 1, stdout: "", stderr: "HTTP 401: Bad credentials (https://api.github.com/graphql)\n" });
-  await press(b, cx, "r");
-  const error = b.learnError(b.view());
-  assert.ok(error && texts(b.render()).includes(error), "drawn on the table view");
-  host.projectAnswer = boardAndTable();
-  b.setTabView(1, cx);
-  await settle();
-  await press(b, cx, "r");
-  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
-  assert.equal(b.state(MINE).data.shape, "board", "the board view read");
-  b.setTabView(2, cx);
-  await settle();
-  assert.deepEqual([b.view().id, b.learnError(b.view()), texts(b.render()).includes(error)], [`${MINE_TAB}:2`, null, false]);
 });
 
 test("UI: a board whose view's filter finds nothing says so with the filter its query sent (with hidden columns, the terms that leave them out), which GitHub answers so also where it cannot read it", async () => {
@@ -7660,11 +7654,13 @@ test("UI: a board whose view's filter finds nothing says so with the filter its 
   assert.ok(texts(plain.b.render()).includes("Keine Einträge"));
 });
 
-test("UI: on a project's table or roadmap view the start and r read only the project's views, so a view that became a board on GitHub reads its items", async () => {
+test("UI: on a project's table or roadmap view the start and r read its items by its filter, as a table, so a view that became a board on GitHub reads as one", async () => {
   for (const layout of ["table", "roadmap"]) {
-    const known = { [board.projectKey(MINE_TAB)]: { title: "Mine", url: null, views: [{ number: 1, name: "Mine", layout, filter: "" }] } };
-    const { b, cx, host } = await bootBoard({ known, projectAnswer: withViews([{ layout, column: null }]) });
-    assert.deepEqual([board.viewKind(b.view()), host.projectAsks, host.open("gh").length], [`github ${layout}`, [7], 0], layout);
+    const known = { [board.projectKey(MINE_TAB)]: { title: "Mine", url: null, views: [{ number: 1, name: "Mine", layout, filter: "is:open" }] } };
+    const { b, cx, host } = await bootBoard({ known, projectAnswer: withViews([{ layout, column: null, filter: "is:open" }]) });
+    assert.deepEqual([board.viewKind(b.view()), host.projectAsks, itemCalls(host).map(filterOf)], [`github ${layout}`, [7], ["is:open"]], layout);
+    await host.answer("gh", ok(JSON.stringify(boardPage(0, 6, null))), "items(first");
+    assert.equal(b.state(MINE).data.shape, "table", layout);
     host.projectAnswer = withViews([{}]);
     await press(b, cx, "r");
     assert.deepEqual([board.viewKind(b.view()), host.projectAsks.filter((n) => n === 7).length, itemCalls(host).map(filterOf)], ["github board", 2, ['assignee:@me -status:"Backlog","Done"']], layout);
@@ -7673,19 +7669,401 @@ test("UI: on a project's table or roadmap view the start and r read only the pro
   }
 });
 
-test("UI: on a project's table view a failed read of the project's views, at the start or r, shows its error above the placeholder; the next read that succeeds clears it", async () => {
+test("UI: on a project's table view a failed read, at the start or r, shows its error, above the table it drew before; the next read that succeeds clears it", async () => {
   const known = { [board.projectKey(MINE_TAB)]: { title: "Mine", url: null, views: [{ number: 1, name: "Mine", layout: "table", filter: "" }] } };
   const denied = () => ({ code: 1, stdout: "", stderr: "HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login\n" });
   const { b, cx, host } = await bootBoard({ known, projectAnswer: denied });
-  const error = b.state(`${MINE_TAB}:first`).error;
+  const error = b.state(MINE).error;
   assert.ok(error, "the read failed");
-  assert.deepEqual(texts(b.render()).filter((x) => x === error || x === "„Mine“: Tabellenansicht folgt"), [error, "„Mine“: Tabellenansicht folgt"], "at the start");
+  assert.ok(texts(b.render()).includes(error), "at the start");
   host.projectAnswer = withViews([{ layout: "table", column: null }]);
   await press(b, cx, "r");
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 6, null))), "items(first");
   assert.equal(texts(b.render()).includes(error), false, "gone after a read that succeeds");
   host.projectAnswer = denied;
   await press(b, cx, "r");
-  assert.ok(texts(b.render()).includes(error), "after r");
+  assert.ok(texts(b.render()).includes(error) && byId(b.render(), "table-head"), "after r, above the table");
+});
+
+// ---- A GitHub project's table ----
+
+// The probe's Backlog view's fields, as project 7's view 1, a table (`view`:
+// projectViewNode's options over it), and GitHub's answer for the project
+// (`extra`: projectJson's options); how the board reads that view.
+const BACKLOG_FIELDS = ["Title", "Assignees", "Status", "Linked pull requests", "Sub-issues progress"];
+const tableProject = (view = {}, extra = {}) => projectJson({ views: [{ layout: "table", column: null, visibleFields: BACKLOG_FIELDS, ...view }], ...extra });
+function tablePlanOf(answer) {
+  const project = board.parseGithubProject(answer, githubView());
+  return board.tablePlan(project, project.views[0]);
+}
+// The values of the fields read by name for github-board.json's six items
+// (3000, 3001, 3003, 3004, 3005, 3007), by field name, as GitHub sends them
+// for fieldValueByName; made up.
+const TABLE_VALUES = [
+  { Status: { optionId: "opt-in-progress", name: "In progress" }, Priority: { optionId: "opt-p1", name: "P1" }, Estimate: { number: 5 }, "Target date": { date: "2026-12-03" },
+    Notes: { text: "after the API" }, Iteration: { iterationId: "it-2", title: "Iteration 2", startDate: "2026-11-26" }, "Linked pull requests": { pullRequests: { totalCount: 2 } } },
+  { Status: { optionId: "opt-in-progress", name: "In progress" }, Priority: { optionId: "opt-p0", name: "P0" }, Estimate: { number: 2 }, "Linked pull requests": { pullRequests: { totalCount: 0 } } },
+  { Status: { optionId: "opt-in-progress", name: "In progress" }, Estimate: { number: 8 } },
+  { Status: { optionId: "opt-ready", name: "Ready" }, Priority: { optionId: "opt-p1", name: "P1" }, "Target date": { date: "2027-01-15" } },
+  { Status: { optionId: "opt-ready", name: "Ready" }, Priority: { optionId: "opt-p3", name: "P3" }, Estimate: { number: 1 } },
+  {},
+];
+// gh's answer for a table's items, read as `plan` (tablePlan) says: those
+// of boardPage, each with no column's value and the values `values` gives
+// it, as the query's aliases v<k>; `tweak(node, i)` changes the i-th item
+// further.
+function tableAnswer(plan, values = TABLE_VALUES, { from = 0, to = 6, next = null, total = 6, tweak = () => {} } = {}) {
+  const page = boardPage(from, to, next, { total });
+  page.data.repositoryOwner.projectV2.items.nodes.forEach((node, k) => {
+    delete node.fieldValueByName;
+    const own = values[from + k] ?? {};
+    plan.values.forEach((f, v) => {
+      if (own[f.name] !== undefined) node[`v${v}`] = own[f.name];
+    });
+    tweak(node, from + k);
+  });
+  return page;
+}
+const tableData = (view = {}, extra = {}, values = TABLE_VALUES) => {
+  const plan = tablePlanOf(tableProject(view, extra));
+  return board.parseGithubTable(tableAnswer(plan, values), githubView(), [], plan);
+};
+// A Board on project 7's view 1 as a table (tableProject's `view` and
+// `extra`), read as tableAnswer answers with `values` and `tweak`, or as
+// `answer`.
+async function openTable({ view = {}, extra = {}, values = TABLE_VALUES, tweak, answer = null, ...options } = {}) {
+  const project = tableProject(view, extra);
+  const plan = tablePlanOf(project);
+  const opened = await bootBoard({
+    known: { ...KNOWN_PROJECTS(), [board.projectKey(MINE_TAB)]: knownOf(project) },
+    projectAnswer: (number) => ok(JSON.stringify(number === 7 ? project : defaultProject(number))),
+    ...options,
+  });
+  await opened.host.answer("gh", ok(answer ?? JSON.stringify(tableAnswer(plan, values, { tweak }))), "items(first");
+  opened.cx.later.splice(0);
+  return { ...opened, plan, project };
+}
+const ALL_FIELDS = ["Title", "Assignees", "Status", "Labels", "Linked pull requests", "Sub-issues progress", "Priority", "Estimate", "Target date", "Notes", "Iteration", "Milestone", "Repository", "Parent issue", "Created"];
+const START_DATE = { __typename: "ProjectV2Field", id: "F_Start_date", name: "Start date", dataType: "DATE" };
+
+test("a table view's fields are its visible fields in GitHub's order, Title first as on GitHub, those the project lacks left out; a roadmap's the project's date and iteration fields, then Status; what its cells, sort keys and groups need is read by name, the kinds the board does not read are named", () => {
+  const plan = tablePlanOf(tableProject({ visibleFields: ["Assignees", "Status", "Title", "Linked pull requests", "Created", "Estimate", "Gone"], group: "Priority", sorts: [["Target date", "ASC"], ["Reviewers", "DESC"]] },
+    { fields: projectFields(BOARD_OPTIONS, [REVIEWERS_FIELD]) }));
+  assert.deepEqual(plan.fields.map((f) => f.name), ["Title", "Assignees", "Status", "Linked pull requests", "Created", "Estimate"]);
+  assert.deepEqual([plan.values.map((f) => f.name), plan.blank, plan.unreadable, plan.group.name, plan.sorts.map((s) => s.field.name), plan.queried.map((r) => r.variable), plan.leftOut(new Set(["Done"]))],
+    [["Status", "Linked pull requests", "Estimate", "Priority", "Target date"], ["Created"], ["Reviewers"], "Priority", ["Target date"], ["v0", "v1", "v2", "v3", "v4"], []]);
+  assert.deepEqual(tablePlanOf(tableProject({ visibleFields: [] })).fields.map((f) => f.name), ["Title"], "no visible fields: the title alone");
+  const roadmap = (fields) => tablePlanOf(tableProject({ layout: "roadmap", name: "Roadmap", visibleFields: ["Assignees"] }, { fields })).fields.map((f) => f.name);
+  assert.deepEqual(roadmap(projectFields(BOARD_OPTIONS, [START_DATE])), ["Title", "Target date", "Iteration", "Start date", "Status"], "in the project's order; its visible fields count for nothing");
+  assert.deepEqual(roadmap(projectFields().filter((f) => !["Status", "Title"].includes(f.name))), ["Title", "Target date", "Iteration"], "without Status none; a title always");
+});
+
+test("a table's items query reads its view's filter, no column field and no counts of hidden columns, and each field by name as its kind reads it, linked pull requests as their count; its next pages the same", () => {
+  const plan = tablePlanOf(tableProject({ filter: "is:open", visibleFields: ["Title", "Status", "Linked pull requests", "Estimate"] }));
+  const args = board.githubItemsArgs(githubView(), plan, new Set(["Done"]));
+  const value = (list, n) => list.find((a) => a.startsWith(`${n}=`))?.slice(n.length + 1) ?? null;
+  const doc = value(args, "query").replace(/\s+/g, " ");
+  assert.deepEqual(["filter", "column", "priority", "v0", "v1", "v2", "h0"].map((n) => value(args, n)), ["is:open", null, null, "Status", "Linked pull requests", "Estimate", null]);
+  assert.doesNotMatch(doc, /\$column|\$priority|h0:/);
+  assert.match(doc, /v1: fieldValueByName\(name: \$v1\) \{ \.\.\. on ProjectV2ItemFieldPullRequestValue \{ pullRequests\(first: 0\) \{ totalCount \} \} \}/);
+  assert.match(doc, /v0: fieldValueByName\(name: \$v0\) \{ \.\.\. on ProjectV2ItemFieldSingleSelectValue \{ optionId name color \}/);
+  assert.match(doc, /items\(first: 100, query: \$filter\)/);
+  const next = board.githubItemsPageArgs(githubView(), plan, new Set(), "c1", 100);
+  assert.deepEqual(["filter", "column", "after", "v1"].map((n) => value(next, n)), ["is:open", null, "c1", "Linked pull requests"]);
+  assert.match(value(next, "query"), /after: \$after/);
+  assert.doesNotMatch(value(board.githubItemsArgs(githubView(), planOf(), HIDDEN), "query"), /pullRequests\(first: 0\)/, "a board that sorts by none reads no count");
+});
+
+test("a table's rows are its items in GitHub's order where the view sorts by nothing; a field read by name has a cell, its value (a single-select option's name and color, an iteration's title, a number, a date, a text, the count of linked pull requests; none for none); a field its card holds has none, its value is the card's as the card is now", () => {
+  const data = tableData({ visibleFields: ALL_FIELDS });
+  const from = { Status: "cell", "Linked pull requests": "cell", Priority: "cell", Estimate: "cell", "Target date": "cell", Notes: "cell", Iteration: "cell", Created: null };
+  assert.deepEqual(data.fields.map((f) => [f.name, f.from]), ALL_FIELDS.map((n) => [n, n in from ? from[n] : "card"]));
+  assert.deepEqual(data.rows.map((r) => r.number), [3000, 3001, 3003, 3004, 3005, 3007]);
+  const cells = (r) => Object.fromEntries(data.fields.map((f, i) => [f.name, r.cells[i]]).filter(([, c]) => c));
+  assert.deepEqual(cells(data.rows[0]), {
+    Status: { name: "In progress", color: "ansi3" }, "Linked pull requests": { name: "2" }, Priority: { name: "P1", color: "ansi11" }, Estimate: { name: "5" }, "Target date": { name: "2026-12-03" },
+    Notes: { name: "after the API" }, Iteration: { name: "Iteration 2" },
+  });
+  assert.deepEqual(cells(data.rows[1]), { Status: { name: "In progress", color: "ansi3" }, Priority: { name: "P0", color: "ansi1" }, Estimate: { name: "2" } }, "no linked pull request: no value");
+  assert.deepEqual(cells(data.rows[5]), {});
+  assert.deepEqual([data.groups, data.groupBy, data.sortBy, data.meta.blank, data.meta.filter, data.meta.layout, data.total, data.count, data.limited, data.viewer],
+    [null, null, [], ["Created"], "assignee:@me", "table", 6, 6, false, "sample-user"]);
+  const value = (r, name) => board.tableValue(data, r, data.fields.findIndex((f) => f.name === name))?.name ?? null;
+  const card = ["Title", "Assignees", "Labels", "Sub-issues progress", "Repository", "Parent issue", "Milestone", "Created"];
+  assert.deepEqual(card.map((n) => value(data.rows[0], n)), ["[Epic] sample tool rollout", "sample-user", "enhancement, area:architecture, epic", "15/22", "sample-user/tender", null, null, null]);
+  assert.deepEqual(value(data.rows[1], "Parent issue"), "#3002", "a parent GitHub sent no title of by its number");
+  assert.deepEqual(value({ ...data.rows[0], assignees: ["Robin Example"], milestone: "v2" }, "Assignees"), "Robin Example", "the card as it is now");
+  assert.deepEqual(value({ ...data.rows[0], milestone: "v2" }, "Milestone"), "v2");
+});
+
+test("a table's rows follow the view's sort keys, one after the other, missing values last either way; where it groups, its groups stand in the field's order, „Ohne <field>“ last, its rows sorted within each; the list has a group row before each group with a row that shows, with how many of its rows show", () => {
+  const sorts = [["Priority", "ASC"], ["Estimate", "DESC"]];
+  assert.deepEqual(tableData({ sorts }).rows.map((r) => r.number), [3001, 3000, 3004, 3005, 3003, 3007]);
+  assert.deepEqual(tableData({ sorts: [["Estimate", "ASC"]] }).rows.map((r) => r.number), [3005, 3001, 3000, 3003, 3004, 3007], "ascending, those without one last");
+  const grouped = tableData({ sorts, group: "Status" });
+  assert.deepEqual(grouped.groups, [{ id: "v:opt-ready", name: "Ready", color: "ansi4" }, { id: "v:opt-in-progress", name: "In progress", color: "ansi3" }, { id: "none", name: "Ohne Status", color: "dim" }]);
+  assert.deepEqual(grouped.rows.map((r) => [r.number, r.group]), [
+    [3004, "v:opt-ready"], [3005, "v:opt-ready"], [3001, "v:opt-in-progress"], [3000, "v:opt-in-progress"], [3003, "v:opt-in-progress"], [3007, "none"],
+  ]);
+  const line = (l) => (l.row ? l.row.number : `${l.group.name} ${l.shown}/${l.held}`);
+  assert.deepEqual(board.tableLines(grouped, () => true).map(line), ["Ready 2/2", 3004, 3005, "In progress 3/3", 3001, 3000, 3003, "Ohne Status 1/1", 3007]);
+  assert.deepEqual(board.tableLines(grouped, (r) => ![3005, 3007].includes(r.number)).map(line), ["Ready 1/2", 3004, "In progress 3/3", 3001, 3000, 3003], "a group whose rows the filter hides has none");
+  assert.deepEqual(board.tableLines(tableData({ sorts }), () => true).map(line), [3001, 3000, 3004, 3005, 3003, 3007], "no groups: one block");
+});
+
+test("linked pull requests order a table's rows, and a board's cards within a column, by how many an item has, one without any last either way", () => {
+  const values = TABLE_VALUES.map((v, i) => (i === 3 ? { ...v, "Linked pull requests": { pullRequests: { totalCount: 1 } } } : v));
+  assert.deepEqual(tableData({ sorts: [["Linked pull requests", "ASC"]] }, {}, values).rows.map((r) => r.number), [3004, 3000, 3001, 3003, 3005, 3007]);
+  assert.deepEqual(tableData({ sorts: [["Linked pull requests", "DESC"]] }, {}, values).rows.map((r) => r.number), [3000, 3004, 3001, 3003, 3005, 3007]);
+  const linked = (n) => ({ v0: { pullRequests: { totalCount: n } } });
+  const byLinks = (direction) => sortedBy([["Linked pull requests", direction]], { 3000: linked(2), 3001: linked(0), 3003: linked(1), 3005: linked(3), 3004: linked(1) });
+  assert.deepEqual([orderIn(byLinks("ASC"), "In progress"), orderIn(byLinks("ASC"), "Ready")], [[3003, 3000, 3001], [3004, 3005, 3007]]);
+  assert.deepEqual(orderIn(byLinks("DESC"), "In progress"), [3000, 3003, 3001]);
+});
+
+test("an assignment places a table's row anew where the view groups or sorts by a field its card holds: in the group of its assignees now, one made for them where none was, by the sort keys there, back where it was once undone; by fields read by name it stays", () => {
+  const grouped = tableData({ group: "Assignees", sorts: [["Priority", "ASC"]] });
+  const order = (data) => data.rows.map((r) => [r.number, data.groups.find((g) => g.id === r.group).name]);
+  const mine = (...numbers) => numbers.map((n) => [n, "sample-user"]);
+  assert.deepEqual(order(grouped), mine(3001, 3000, 3004, 3005, 3003, 3007));
+  const robin = board.withTableRow(grouped, "PVTI_rec4", { assignees: ["Robin Example"], assigneeLogins: ["robin-example"] });
+  assert.deepEqual(order(robin), [[3004, "Robin Example"], ...mine(3001, 3000, 3005, 3003, 3007)]);
+  const nobody = board.withTableRow(robin, "PVTI_rec4", { assignees: [], assigneeLogins: [] });
+  assert.deepEqual(order(nobody), [...mine(3001, 3000, 3005, 3003, 3007), [3004, "Ohne Assignees"]]);
+  assert.deepEqual(board.withTableRow(nobody, "PVTI_rec4", { assignees: ["sample-user"], assigneeLogins: ["sample-user"] }), grouped, "undone: as read");
+  const sorted = tableData({ sorts: [["Assignees", "ASC"], ["Estimate", "DESC"]] });
+  assert.deepEqual(sorted.rows.map((r) => r.number), [3003, 3000, 3001, 3005, 3004, 3007]);
+  assert.deepEqual(board.withTableRow(sorted, "PVTI_rec6", { assignees: ["Alex"], assigneeLogins: ["alex"] }).rows.map((r) => r.number), [3007, 3003, 3000, 3001, 3005, 3004]);
+  const byAssignees = tableData({ sorts: [["Assignees", "ASC"]] });
+  const keyOf = (n) => byAssignees.rows.find((r) => r.number === n).key;
+  const toAlex = (data, n) => board.withTableRow(data, keyOf(n), { assignees: ["Alex"], assigneeLogins: ["alex"] });
+  const later = toAlex(byAssignees, 3003);
+  assert.deepEqual(later.rows.map((r) => r.number), [3003, 3000, 3001, 3004, 3005, 3007]);
+  assert.deepEqual(toAlex(later, 3000).rows.map((r) => r.number), [3000, 3003, 3001, 3004, 3005, 3007], "rows of the same value in GitHub's order");
+  const byStatus = tableData({ group: "Status", sorts: [["Priority", "ASC"]] });
+  const patched = board.withTableRow(byStatus, "PVTI_rec4", { assignees: ["Alex"], assigneeLogins: ["alex"] });
+  assert.deepEqual([patched.rows.map((r) => [r.number, r.group]), patched.groups], [byStatus.rows.map((r) => [r.number, r.group]), byStatus.groups]);
+  const statusByAssignees = tableData({ group: "Status", sorts: [["Assignees", "ASC"]] });
+  const alex = board.withTableRow(statusByAssignees, "PVTI_rec5", { assignees: ["Alex"], assigneeLogins: ["alex"] });
+  assert.deepEqual([alex.rows.map((r) => [r.number, r.group]), alex.groups], [
+    [[3005, "v:opt-ready"], [3004, "v:opt-ready"], [3000, "v:opt-in-progress"], [3001, "v:opt-in-progress"], [3003, "v:opt-in-progress"], [3007, "none"]], statusByAssignees.groups,
+  ], "grouped by a field read by name and sorted by one its card holds: placed anew within its group, which stays");
+});
+
+test("a table says once which of its fields the board does not read, and, as a board does, each sort key or group field it does not read", () => {
+  const warn = (view) => board.SHAPES.table.warnings(githubView(), tableData(view, { fields: projectFields(BOARD_OPTIONS, [REVIEWERS_FIELD]) }));
+  assert.deepEqual(warn({ visibleFields: ["Title", "Created"] }), ["Ansicht „Mine“ zeigt „Created“, ein Feld, das das Board nicht liest: es bleibt leer"]);
+  assert.deepEqual(warn({ visibleFields: ["Created", "Status", "Reviewers"], group: "Reviewers" }), [
+    "Ansicht „Mine“ zeigt „Created“, „Reviewers“, Felder, die das Board nicht liest: sie bleiben leer",
+    "Ansicht „Mine“ sortiert oder gruppiert nach „Reviewers“, einem Feld, das das Board nicht liest: es ordnet ohne",
+  ]);
+  assert.deepEqual(warn({}), []);
+});
+
+test("UI: a table view draws a head row of its fields, Title first, each as wide as its kind takes, the title the rest; then a row per item, its key, title and cells by their field's kind; a field the board does not read stays empty, and the board says so", async () => {
+  const fields = ["Title", "Assignees", "Status", "Labels", "Linked pull requests", "Sub-issues progress", "Target date", "Milestone", "Parent issue", "Created"];
+  const tweak = (node, i) => {
+    if (i === 1) node.content.issueType = { name: "Bug", color: "RED" };
+  };
+  const { b, host } = await openTable({ view: { visibleFields: fields }, tweak });
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  const root = b.render();
+  const head = byId(root, "table-head");
+  assert.deepEqual(texts(head), fields);
+  const widths = [150, 120, 200, 70, 80, 80, 120, 180, 100];
+  assert.deepEqual(head.kids.slice(1).map((k) => k.with.w[0]), widths);
+  assert.deepEqual([head.kids[0].styles.includes("flex_1"), head.kids[0].with.min_w[0]], [true, 200], "the title the rest, at least 200");
+  const row = byId(root, "row-PVTI_rec1");
+  assert.deepEqual(texts(row), ["tender#3000", "[Epic] sample tool rollout", "sample-user", "In progress", "enhancement", "area:architecture", "epic", "2", "15/22", board.dayText("2026-12-03", new Date().getFullYear())]);
+  assert.deepEqual(row.kids.slice(1).map((k) => k.with.w[0]), widths, "each cell as wide as its head");
+  assert.ok(row.kids.slice(1).every((k) => k.styles.includes("overflow_hidden")), "a long value is cut");
+  assert.deepEqual(row.kids[9].kids, [], "Created: empty");
+  assert.equal(pathTo(row, "In progress").at(-1).with.text_color[0], board.toneColor(t, "ansi3"), "a single-select option in its color");
+  assert.ok(texts(byId(root, "row-PVTI_rec2")).includes("#3002"), "a parent GitHub sent no title of by its number");
+  assert.deepEqual([byId(row, "type-line"), byId(byId(root, "row-PVTI_rec2"), "type-line")?.with.bg[0]], [null, board.toneColor(t, board.namedTone(t, "ansi1"))], "a line across its top in its issue type's color");
+  assert.equal(texts(root).some((x) => x.startsWith("Nur die ersten")), false, "all read: no note");
+  assert.equal(row.with.h[0], board.TABLE_ROW_H);
+  assert.ok(texts(root).includes("Ansicht „Mine“ zeigt „Created“, ein Feld, das das Board nicht liest: es bleibt leer"));
+  assert.equal(texts(root).some((x) => x.includes("folgt")), false, "no placeholder");
+});
+
+test("UI: on a table j/k walk its rows, over its group rows, and G scrolls to the last; a click selects, Enter shows the details, o opens the item; „nur meine“ and the filter narrow its rows and its groups' counts, and say where nothing is left; no field hides there; one whose filter finds nothing says so with it", async () => {
+  const tweak = (node, i) => {
+    if (i === 4) node.content.assignees.nodes = [{ login: "someone-else" }];
+  };
+  const { b, cx, host, st } = await openTable({ view: { group: "Status", sorts: [["Priority", "ASC"]] }, tweak });
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  const rows = () => byId(b.render(), "table-rows").kids;
+  assert.deepEqual(rows().map((k) => k.with.id[0]), ["group-v:opt-ready", "row-PVTI_rec4", "row-PVTI_rec5", "group-v:opt-in-progress", "row-PVTI_rec2", "row-PVTI_rec1", "row-PVTI_rec3", "group-none", "row-PVTI_rec6"]);
+  assert.deepEqual(texts(rows()[0]), ["Ready", "2"]);
+  assert.equal(rows()[0].kids[0].with.bg[0], board.toneColor(t, "ansi4"), "its value's color");
+  assert.equal(st().sel.key, "PVTI_rec4");
+  await press(b, cx, "j");
+  await press(b, cx, "j");
+  assert.equal(st().sel.key, "PVTI_rec2", "past the group row");
+  await press(b, cx, "k");
+  assert.equal(st().sel.key, "PVTI_rec5");
+  await press(b, cx, "enter");
+  assert.ok(detailPanel(b), "the details");
+  await press(b, cx, "escape");
+  await press(b, cx, "o");
+  assert.deepEqual(cx.opened, ["https://github.com/sample-user/tender/issues/3005"]);
+  await press(b, cx, "m");
+  assert.deepEqual([texts(rows()[0]), rows().some((k) => k.with.id[0] === "row-PVTI_rec5")], [["Ready", "1/2"], false], "„nur meine“");
+  await press(b, cx, "m");
+  b.filterInput.set_value("dry-run");
+  b.filterText = "dry-run";
+  assert.deepEqual(rows().map((k) => texts(k)[0]), ["In progress", "tender#3003"], "the filter");
+  assert.deepEqual(texts(rows()[0]), ["In progress", "1/3"]);
+  b.filterText = "nothing-has-this";
+  assert.ok(texts(b.render()).includes("Nichts passt zum Filter oder zu „nur meine“"));
+  b.filterText = "";
+  await click(b, cx, "row-PVTI_rec3");
+  assert.equal(st().sel.key, "PVTI_rec3", "a click selects");
+  assert.equal((await openMenu(b, cx)).some(([name]) => name.startsWith("Spalte")), false, "neither „Spalte ausblenden“ nor „Spalten…“");
+  await press(b, cx, "escape");
+  host.scrolled.splice(0);
+  await press(b, cx, "g", G);
+  assert.deepEqual(host.scrolled.splice(0).map((x) => x.row), [8], "the last row, after three group rows");
+  const empty = await openTable({ view: { filter: "bogus:::((" }, answer: JSON.stringify(boardPage(0, 0, null, { total: 0 })) });
+  assert.ok(texts(empty.b.render()).includes("Keine Einträge für den Filter „bogus:::((“ (auch einen Filter, den GitHub nicht versteht, beantwortet es so)"), "none found: said with its filter");
+  assert.ok(byId(empty.b.render(), "table-head"));
+});
+
+test("UI: the filter narrows an ungrouped table's rows, the rows j/k walk and the tab's count", async () => {
+  const { b, cx, st } = await openTable();
+  b.filterInput.set_value("fix");
+  b.filterText = "fix";
+  b.keepSelection(b.view());
+  const root = b.render();
+  assert.deepEqual(byId(root, "table-rows").kids.map((k) => k.with.id[0]), ["row-PVTI_rec2", "row-PVTI_rec6"]);
+  assert.ok(texts(byId(root, `tab-${MINE_TAB}`)).includes("2/6"));
+  assert.equal(st().sel.key, "PVTI_rec2");
+  await press(b, cx, "j");
+  assert.equal(st().sel.key, "PVTI_rec6", "over the rows the filter hides");
+});
+
+test("UI: a roadmap view draws as a table of its title, the project's date and iteration fields and Status, under its own name", async () => {
+  const { b, st } = await openTable({ view: { layout: "roadmap", name: "Roadmap", visibleFields: [] } });
+  assert.deepEqual([board.viewKind(b.view()), b.view().name, st().data.shape], ["github roadmap", "Roadmap", "table"]);
+  const root = b.render();
+  assert.deepEqual(texts(byId(root, "table-head")), ["Title", "Target date", "Iteration", "Status"]);
+  assert.deepEqual(texts(byId(root, "row-PVTI_rec1")).slice(2), [board.dayText("2026-12-03", new Date().getFullYear()), "Iteration 2", "In progress"]);
+});
+
+test("UI: a project the board knows with a view of a layout it does not draw keeps that view after a restart, and the saved states of its other views", async () => {
+  const meta = { title: "Mine", url: null, views: [
+    { number: 1, name: "Mine", layout: "board", filter: "assignee:@me" }, { number: 2, name: "Kalender", layout: "calendar", filter: "" }, { number: 3, name: "Tab", layout: "table", filter: "" },
+  ] };
+  assert.deepEqual(board.readProjectMeta(meta), meta, "read back as kept");
+  const saved = [board.savedKey(MINE), board.savedKey(`${MINE_TAB}:3`)];
+  const projectAnswer = withViews([{}, { number: 2, name: "Kalender", layout: "calendar", column: null }, { number: 3, name: "Tab", layout: "table", column: null }]);
+  const { b } = await bootBoard({ known: { ...KNOWN_PROJECTS(), [board.projectKey(MINE_TAB)]: meta }, raw: Object.fromEntries(saved.map((k) => [k, "{}"])), projectAnswer });
+  assert.deepEqual([b.tab().views, saved.map((k) => memory.has(k))], [[1, 2, 3], [true, true]], "the saved states of the others stay");
+});
+
+test("UI: a view of a layout the board does not draw keeps its layout's name, reads no items and says the board does not know it", async () => {
+  assert.equal(board.parseGithubProject(projectJson({ views: [{ layout: "calendar" }] }), githubView()).views[0].layout, "calendar");
+  const { b, host } = await bootBoard({ projectAnswer: withViews([{ name: "Kalender", layout: "calendar", column: null }]) });
+  assert.deepEqual([b.view().name, b.view().layout, itemCalls(host).length, b.state(MINE).data?.shape], ["Kalender", "calendar", 0, "placeholder"]);
+  assert.ok(texts(b.render()).includes("Ansicht „Kalender“: Darstellung „calendar“ kennt das Board nicht"));
+});
+
+test("UI: a table's row shows its item's session; Enter twice goes to it, or on an item without one opens the start dialog", async () => {
+  const { b, cx, host, st } = await openTable();
+  host.spaceList = [...host.spaceList, sessionSpace];
+  assert.ok(texts(byId(b.render(), "row-PVTI_rec4")).includes(board.AGENT_STATUS.working));
+  await press(b, cx, "enter");
+  await press(b, cx, "enter");
+  assert.equal(b.modal?.kind, "start", "tender#3000 has none");
+  await press(b, cx, "escape");
+  await press(b, cx, "escape");
+  for (const k of ["j", "j", "j"]) await press(b, cx, k);
+  assert.equal(st().sel.key, "PVTI_rec4");
+  await press(b, cx, "enter");
+  await press(b, cx, "enter");
+  assert.deepEqual(host.runs.slice(-2), [["space.select", { id: "s5" }], ["tab.select", { id: "t5" }]]);
+});
+
+test("UI: a on a table's row opens the picker; the one picked is the row's at once, its Assignees cell shows them, and gh's answer settles it, or where it leaves that open, the read after it", async () => {
+  const { b, cx, host, st } = await openTable();
+  await press(b, cx, "a");
+  assert.equal(b.modal?.kind, "assign");
+  await host.answer("gh", ok(fixture("github-assignable.json")), isAssignableCall);
+  b.modal.input.type("robin");
+  await submitPicker(b, cx);
+  const row = () => board.findRow(st().data, "PVTI_rec1");
+  assert.deepEqual([row().assignees, st().pending.PVTI_rec1], [["Robin Example"], true], "at once");
+  assert.ok(texts(byId(b.render(), "row-PVTI_rec1")).includes("Robin Example"));
+  assert.equal(byId(b.render(), "row-PVTI_rec1").with.opacity[0], 0.7, "dimmed while it is written");
+  await host.answer("gh", assignedAnswer("updateIssue", "issue", row().contentId, [["robin-example", "Robin Example"]]), isAssignCall);
+  assert.deepEqual([row().assigneeLogins, b.notice.text, host.open("gh").length], [["robin-example"], "tender#3000 ist jetzt Robin Example zugewiesen", 0]);
+  await press(b, cx, "a");
+  await press(b, cx, "down");
+  await submitPicker(b, cx);
+  await host.answer("gh", ok('{"data": {"updateIssue": null}}'), isAssignCall);
+  assert.equal(b.notice.text, "tender#3000 → niemand: Ergebnis unklar: GitHub hat die Zuweisung nicht bestätigt; lädt neu");
+  await host.answer("gh", ok(JSON.stringify(tableAnswer(tablePlanOf(tableProject())))), "items(first");
+  assert.equal(b.notice.text, "tender#3000 ist nach dem Neuladen sample-user zugewiesen, nicht niemandem", "the refresh says who it has");
+});
+
+test("UI: on a table grouped by Assignees the row a gives to someone else stands in their group at once, made for them, and goes back where GitHub refuses it", async () => {
+  const { b, cx, host } = await openTable({ view: { group: "Assignees" } });
+  const lines = () => byId(b.render(), "table-rows").kids.map((k) => k.with.id[0]);
+  const rows = ["row-PVTI_rec1", "row-PVTI_rec2", "row-PVTI_rec3", "row-PVTI_rec4", "row-PVTI_rec5", "row-PVTI_rec6"];
+  assert.deepEqual(lines(), ["group-v:sample-user", ...rows]);
+  await press(b, cx, "a");
+  await host.answer("gh", ok(fixture("github-assignable.json")), isAssignableCall);
+  b.modal.input.type("robin");
+  await submitPicker(b, cx);
+  assert.deepEqual(lines(), ["group-v:Robin Example", rows[0], "group-v:sample-user", ...rows.slice(1)], "at once");
+  await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 422: Could not resolve to a User (https://api.github.com/graphql)" }, isAssignCall);
+  assert.deepEqual(lines(), ["group-v:sample-user", ...rows], "refused: back where it was");
+});
+
+test("UI: a table without data draws each page as it comes, says which page it reads, and once the last came says how many items it read where its limit cut them", async () => {
+  const config = JSON.parse(testConfig());
+  ghProject(config, 7).limit = 150;
+  const project = tableProject();
+  const plan = tablePlanOf(project);
+  const { b, host, st } = await bootBoard({
+    config: JSON.stringify(config), known: { ...KNOWN_PROJECTS(), [board.projectKey(MINE_TAB)]: knownOf(project) }, projectAnswer: (n) => ok(JSON.stringify(n === 7 ? project : defaultProject(n))),
+  });
+  assert.ok(byId(b.render(), "loading"), "the spinner before the first page");
+  await host.answer("gh", ok(JSON.stringify(tableAnswer(plan, TABLE_VALUES, { to: 3, next: "c1", total: 9 }))), "items(first");
+  let root = b.render();
+  assert.deepEqual([st().loading, st().data.partial, st().data.rows.map((r) => r.number), readingOf(root)], [true, true, [3000, 3001, 3003], "lädt … Seite 2 von 2"], "the first page drawn");
+  assert.equal(texts(root).some((x) => x.startsWith("Nur die ersten")), false, "no note before the last page");
+  assert.ok(host.open("gh")[0].args.includes("after=c1"));
+  await host.answer("gh", ok(JSON.stringify(tableAnswer(plan, TABLE_VALUES, { from: 3, to: 5, next: "c2", total: 9 }))), "items(first");
+  root = b.render();
+  assert.deepEqual([st().loading, st().data.partial, st().data.rows.map((r) => r.number), host.open("gh").length], [false, undefined, [3000, 3001, 3003, 3004, 3005], 0], "its calls used up");
+  assert.deepEqual(texts(byId(root, "row-PVTI_rec4")).slice(3), ["Ready", "11/11"], "a later page's cells");
+  assert.ok(texts(root).includes("Nur die ersten 5 von 9 Einträgen; den Filter enger fassen"));
+});
+
+test("UI: a table's last read is kept and drawn after a restart at once, with its age, and read anew behind it; the prefetch reads a table view as it reads a board", async () => {
+  const { b: first, cx, host: read, project } = await openTable();
+  await press(first, cx, "r");
+  await read.answer("gh", ok(JSON.stringify(tableAnswer(tablePlanOf(project)))), "items(first");
+  await cx.fire();
+  const saved = memory.get(board.savedKey(MINE));
+  assert.equal(JSON.parse(saved).data.shape, "table");
+  const known = { ...KNOWN_PROJECTS(), [board.projectKey(MINE_TAB)]: knownOf(project) };
+  const again = await bootBoard({ known, raw: { [board.savedKey(MINE)]: saved }, projectAnswer: (n) => ok(JSON.stringify(n === 7 ? project : defaultProject(n))) });
+  const root = again.b.render();
+  assert.deepEqual([again.st().saved, again.st().loading, again.st().data.rows.length, Boolean(byId(root, "row-PVTI_rec1"))], [true, true, 6, true]);
+  assert.deepEqual(again.st().data, first.state(MINE).data, "its data as read");
+  assert.match(ageOf(root), /^Stand vor /);
+  const views = [{}, { number: 2, name: "Tab", layout: "table", column: null, visibleFields: BACKLOG_FIELDS, filter: "is:open" }];
+  const { b, cx: prefetch, host } = await bootBoard({ projectAnswer: withViews(views) });
+  await host.answer("gh", ok(fixture("github-board.json")), "items(first");
+  await prefetch.fire();
+  assert.deepEqual(itemCalls(host).map((c) => [filterOf(c), c.args.includes("number=7"), c.args.some((a) => a.startsWith("column="))]), [["is:open", true, false]], "the table, next in its tab");
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 6, null))), "items(first");
+  assert.equal(b.state(`${MINE_TAB}:2`).data.shape, "table");
 });
 
 test("UI: a project's views stand in GitHub's order, not their numbers': its first view is the one GitHub puts first", async () => {
@@ -7724,7 +8102,8 @@ test("UI: what the board knows of a project lasts while its tab does: a read of 
   host.config = withoutMine();
   await press(b, cx, "r");
   assert.deepEqual([memory.has(board.projectKey(MINE_TAB)), memory.has(board.projectKey(OTHER_TAB))], [false, true]);
-  assert.equal(board.readProjectMeta({ title: "T", views: [{ number: 1, name: "V", layout: "kanban", filter: "" }] }), null, "an entry of another form is none");
+  assert.equal(board.readProjectMeta({ title: "T", views: [{ number: 1, name: "V", layout: 3, filter: "" }] }), null, "an entry of another form is none");
+  for (const layout of ["", " "]) assert.equal(board.readProjectMeta({ title: "T", views: [{ number: 1, name: "V", layout, filter: "" }] }), null, `nor one with the layout ${JSON.stringify(layout)}`);
   assert.deepEqual(board.goneProjects([board.projectKey(MINE_TAB), "project:gone", "tab:x"], new Set([MINE_TAB])), ["project:gone"]);
 });
 
@@ -10458,14 +10837,14 @@ test("UI: s on the Backlog offers the type's states from the backlog configurati
   assert.deepEqual(b.modal.targets.map((t) => t.color), ["muted", "ansi4", "ansi2", "dim"]);
   await press(b, cx, "2");
   assert.deepEqual(openAzb(host, "state")[0].args, board.azStateArgs(sprintTeam(), 402, "Committed"));
-  assert.equal(board.findBacklogItem(st().data, "AB#402").state, "Committed", "at once");
+  assert.equal(board.findRow(st().data, "AB#402").state, "Committed", "at once");
   await host.answer("az", ok(JSON.stringify({ id: 402, fields: { "System.State": "Committed" } })), AZB.state);
   assert.equal(b.notice.text, "AB#402 hat jetzt den Status „Committed“");
   assert.equal(openAzb(host, "ids").length, 0, "nothing read again");
   await press(b, cx, "s");
   await press(b, cx, "3");
   await host.answer("az", azRefused("TF401320: Rule Error for field State."), AZB.state);
-  assert.equal(board.findBacklogItem(st().data, "AB#402").state, "Committed");
+  assert.equal(board.findRow(st().data, "AB#402").state, "Committed");
   assert.equal(b.notice.text, "AB#402 bleibt „Committed“: TF401320: Rule Error for field State.");
   await refreshSprint(b, cx);
   assert.deepEqual(backlogCounts(host, BACKLOG_SETTINGS), [1, 1, 1, 1], "the refusal dropped the settings");
@@ -10572,7 +10951,7 @@ test("a GitHub card names its assignees by name where the account has one, else 
   assert.equal(board.matches(card, "Robin"), true);
   assert.equal(board.isMine(card, "robin-example"), true);
   assert.equal(board.isMine(card, "Robin Example"), false);
-  const args = board.githubBoardArgs(githubView(), planOf(), HIDDEN);
+  const args = board.githubItemsArgs(githubView(), planOf(), HIDDEN);
   const query = args.find((a) => a.startsWith("query="));
   for (const kind of ["Issue", "PullRequest"]) assert.match(query, new RegExp(`\\.\\.\\. on ${kind} \\{ id number `), kind);
   assert.equal(query.split("assignees(first: 5) { nodes { login name } }").length - 1, 3, "an issue's, a pull request's and a draft's assignees by login and name");
@@ -10793,7 +11172,7 @@ test("UI: a on a Sprint's task offers the team's members, Ich first; Ich is az's
   await submitPicker(b, cx);
   assert.deepEqual(host.open("az").filter((c) => AZA.assign(c.args))[0].args, board.azAssignArgs(view.tab, 401, null));
   await host.answer("az", azAssigned(401, null), AZA.assign);
-  assert.deepEqual(board.findBacklogItem(b.state(b.view().id).data, "AB#401").assignees, []);
+  assert.deepEqual(board.findRow(b.state(b.view().id).data, "AB#401").assignees, []);
 });
 
 test("UI: on Azure a picker whose members cannot be read says so and offers Ich and niemand; an unclear assignment reads the Sprint again and says who has the item then", async () => {
@@ -13444,7 +13823,7 @@ test("the copper themes' files set every color the tests of colors read, opaque,
 });
 
 test("a card carries its labels' colors and its issue type's color, which the board's query asks for", () => {
-  const doc = board.githubBoardArgs(githubView(), planOf(), HIDDEN).find((a) => a.startsWith("query="));
+  const doc = board.githubItemsArgs(githubView(), planOf(), HIDDEN).find((a) => a.startsWith("query="));
   assert.equal(doc.match(/labels\(first: 10\) \{ nodes \{ name color \} \}/g).length, 2, "an issue's labels and a pull request's");
   assert.match(doc, /issueType \{ name color \}/);
   const b = colorsBoard();
@@ -15312,16 +15691,16 @@ function barOf(t, line) {
 }
 
 test("a board's query reads each item's priority from the project's single-select field named „Priority“, where it has one, the milestone of an issue and a pull request, and an issue's parent with its title and repo; so do its later pages", () => {
-  const args = board.githubBoardArgs(githubView(), planOf(), HIDDEN);
+  const args = board.githubItemsArgs(githubView(), planOf(), HIDDEN);
   const doc = args.find((a) => a.startsWith("query="));
   assert.ok(args.includes("priority=Priority"), "the field's name");
   assert.match(doc, /\$priority: String!/);
   assert.match(doc, /priority: fieldValueByName\(name: \$priority\) \{ \.\.\. on ProjectV2ItemFieldSingleSelectValue \{ optionId name color \} \}/, "its option too, which a sort by it ranks");
   assert.equal(doc.match(/milestone \{ title \}/g).length, 2, "of issues and pull requests");
   assert.match(doc, /parent \{ number title repository \{ nameWithOwner \} \}/);
-  const page = board.githubBoardPageArgs(githubView(), planOf(), HIDDEN, "cursor", 100);
+  const page = board.githubItemsPageArgs(githubView(), planOf(), HIDDEN, "cursor", 100);
   assert.ok(page.includes("priority=Priority") && page.find((a) => a.startsWith("query=")).includes("priority: fieldValueByName(name: $priority)"), "a later page");
-  const without = (fields) => board.githubBoardArgs(githubView(), planOf(projectJson({ fields })), HIDDEN);
+  const without = (fields) => board.githubItemsArgs(githubView(), planOf(projectJson({ fields })), HIDDEN);
   const plain = projectFields().filter((f) => f.name !== "Priority");
   for (const [label, fields] of [["none", plain], ["one that is no single-select field", [...plain, { __typename: "ProjectV2Field", id: "F_P", name: "Priority", dataType: "NUMBER" }]]]) {
     const none = without(fields);
@@ -15331,12 +15710,12 @@ test("a board's query reads each item's priority from the project's single-selec
     "no priority on a card then, whatever an answer holds");
 });
 
-test("a GitHub card carries its priority as its option's name and its color's tone (GitHub's named colors as a status's), its milestone, and its parent's title and repo; none of them where GitHub sends none", () => {
+test("a GitHub card carries its priority as its option's name and its color (GitHub's named colors as a status's), its milestone, and its parent's title and repo; none of them where GitHub sends none", () => {
   const data = cardsBoard();
   const epic = cardOf(data, 2217);
   assert.deepEqual([epic.priority, epic.milestone, epic.parent, epic.parentTitle, epic.parentRepo],
-    [{ name: "P1", tone: "ansi11" }, "v1", 1735, "[Epic] emu-atlas adoption — every emulator on the machine, answered by the resolver", "sample-user/tender"]);
-  assert.deepEqual([cardOf(data, 2301).priority, cardOf(data, 2301).parentRepo], [{ name: "P0", tone: "ansi1" }, "sample-user/atlas"]);
+    [{ name: "P1", color: "ansi11" }, "v1", 1735, "[Epic] emu-atlas adoption — every emulator on the machine, answered by the resolver", "sample-user/tender"]);
+  assert.deepEqual([cardOf(data, 2301).priority, cardOf(data, 2301).parentRepo], [{ name: "P0", color: "ansi1" }, "sample-user/atlas"]);
   const plain = cardOf(data, 1467);
   assert.deepEqual([plain.priority, plain.milestone, plain.parent, plain.parentTitle, plain.parentRepo], [null, null, null, null, null]);
   assert.deepEqual([cardOf(data, 2310).kind, cardOf(data, 2310).milestone], ["pr", "v2"], "a pull request's milestone");
@@ -15346,19 +15725,19 @@ test("a GitHub card carries its priority as its option's name and its color's to
     answer.data.repositoryOwner.projectV2.items.nodes[0].priority = value;
     return cardOf(board.parseGithubBoard(answer, githubView(), HIDDEN, [], planOf(projectFor(CARDS_OPTIONS))), 2217).priority;
   };
-  for (const [color, tone] of Object.entries(tones)) assert.deepEqual(withPriority({ name: "Hoch", color }), { name: "Hoch", tone }, color);
+  for (const [named, color] of Object.entries(tones)) assert.deepEqual(withPriority({ name: "Hoch", color: named }), { name: "Hoch", color }, named);
   for (const value of [null, {}, { name: "", color: "RED" }, { color: "RED" }]) assert.equal(withPriority(value), null, JSON.stringify(value));
 });
 
 test("an Azure work item's priority: 1 red, 2 orange, 3 and 4 muted, each as „P<n>“; none without a whole number; every query of work items asks for it", () => {
   assert.deepEqual([1, 2, 3, 4, 5].map(board.azPriority), [
-    { name: "P1", tone: "ansi1" }, { name: "P2", tone: "ansi11" }, { name: "P3", tone: "muted" }, { name: "P4", tone: "muted" }, { name: "P5", tone: "muted" },
+    { name: "P1", color: "ansi1" }, { name: "P2", color: "ansi11" }, { name: "P3", color: "muted" }, { name: "P4", color: "muted" }, { name: "P5", color: "muted" },
   ]);
   assert.deepEqual([undefined, null, "1", 1.5].map(board.azPriority), [null, null, null, null]);
   const answer = json("azure-sprint-items.json");
   answer[0].fields["Microsoft.VSTS.Common.Priority"] = 2;
   const [first, second] = board.parseWorkItems(JSON.stringify(answer), sprintTeam());
-  assert.deepEqual([first.priority, second.priority], [{ name: "P2", tone: "ansi11" }, null]);
+  assert.deepEqual([first.priority, second.priority], [{ name: "P2", color: "ansi11" }, null]);
   assert.equal(board.PRIORITY, "Microsoft.VSTS.Common.Priority");
   assert.ok(board.WORK_ITEM_FIELDS.includes(board.PRIORITY));
   assert.match(board.idsWiql([1]), /\[Microsoft\.VSTS\.Common\.Priority\]/);
@@ -15784,7 +16163,7 @@ test("the new lines' text and chips read at 4.5:1 or more on a card and a select
   for (const [name, t] of Object.entries(themes)) {
     const grounds = [t.background, board.selectedBg(t)];
     const onChip = ([fg, bg]) => grounds.map((g) => contrast(fg, over(bg, g)));
-    for (const tone of tones) ratios[`${name} priority ${tone}`] = onChip(chipLook(board.priorityChip(t, { priority: { name: "P1", tone } })));
+    for (const tone of tones) ratios[`${name} priority ${tone}`] = onChip(chipLook(board.priorityChip(t, { priority: { name: "P1", color: tone } })));
     const meta = board.cardMeta(t, { milestone: "v1" }, "Teil von #1");
     ratios[`${name} milestone`] = onChip(chipLook(byId(meta, "milestone")));
     ratios[`${name} parent`] = grounds.map((g) => contrast(byId(meta, "parent").with.text_color[0], g));
@@ -15895,7 +16274,7 @@ function largeLanes(n) {
     if (i % 5) node.v0 = { optionId: `opt-size-${SIZES[(i % 7) % 4]}`, name: SIZES[(i % 7) % 4] };
   });
   const text = JSON.stringify(answer);
-  return { answer: text, project: () => ok(JSON.stringify(projectFor(LARGE_STATUS, { views: [{ lane: "Size" }] }))) };
+  return { answer: text, project: () => ok(JSON.stringify(projectFor(LARGE_STATUS, { views: [{ group: "Size" }] }))) };
 }
 const lanesHandle = (b) => board.keptOf(b, "lanes").scroll;
 
@@ -15913,6 +16292,94 @@ test("UI: a full draw of a board of 300 cards in swimlanes whose list herdr laid
       assert.ok(cost.elements >= 300 && cost.elements <= 1500, `${name}, draw ${draw}: ${cost.elements} elements`);
     }
   }
+});
+
+// largeBoardAnswer's items as the items of tableProject's view, read by
+// `plan`: no column's value, a Status and a count of linked pull requests.
+function largeTableAnswer(plan, n) {
+  const answer = JSON.parse(largeBoardAnswer(n));
+  const at = (name) => `v${plan.values.findIndex((f) => f.name === name)}`;
+  answer.data.repositoryOwner.projectV2.items.nodes.forEach((node, i) => {
+    delete node.fieldValueByName;
+    node[at("Status")] = [{ optionId: "opt-ready", name: "Ready" }, { optionId: "opt-in-progress", name: "In progress" }, null][i % 3];
+    node[at("Linked pull requests")] = { pullRequests: { totalCount: i % 4 } };
+  });
+  return JSON.stringify(answer);
+}
+const tableHandle = (b) => b.shapeState.table.scroll;
+const tableList = (b) => byId(b.render(), "table-rows");
+const wholeRows = (list) => list.kids.flatMap((k, i) => (k.with.id ? [i] : []));
+const rowRange = (from, to) => Array.from({ length: to - from }, (_, i) => from + i);
+// A table of 1000 rows whose list herdr laid out 1200 wide and 900 high.
+async function longTable(options = {}) {
+  const opened = await openTable({ answer: largeTableAnswer(tablePlanOf(tableProject()), 1000), ...options });
+  Object.assign(tableHandle(opened.b), { width: 1200, height: 900 });
+  return opened;
+}
+
+test("UI: a table of 1000 rows draws whole only the rows about where its ScrollHandle says the list stands, half a window above and below; every other row is an empty frame as high as a row, and every row a child of the list in its order", async () => {
+  const { b, st } = await longTable();
+  assert.equal(st().data.rows.length, 1000);
+  let list = tableList(b);
+  assert.equal(list.kids.length, 1000, "scroll_to_item names a row by its place");
+  assert.deepEqual(wholeRows(list), rowRange(0, 43), "at the top: the rows from 0 to 1350 pixels, 32 a row");
+  assert.deepEqual(list.kids.slice(0, 3).map((k) => k.with.id[0]), ["row-PVTI_large0", "row-PVTI_large1", "row-PVTI_large2"]);
+  const frame = list.kids[500];
+  assert.deepEqual([frame.kids, frame.with.h[0], frame.with.id], [[], board.TABLE_ROW_H, undefined], "a frame: no element inside, a row's height");
+  tableHandle(b).y = 16000;
+  list = tableList(b);
+  assert.deepEqual(wholeRows(list), rowRange(485, 543), "scrolled 16000 down: the rows in [15550, 17350)");
+  tableHandle(b).y = 1e6;
+  list = tableList(b);
+  assert.ok(list.kids[999].with.id && !list.kids[0].with.id, "past its end, as herdr's offset stands until herdr clamps it: drawn at the end");
+});
+
+test("UI: in a long table that groups its rows a group row outside the band is a frame of a group row's height, and the band counts it so", async () => {
+  const { b } = await longTable({ view: { group: "Status" } });
+  const list = tableList(b);
+  assert.deepEqual([list.kids.length, list.kids[0].with.id[0], list.kids[335].with.id, list.kids[335].with.h[0]], [1003, "group-v:opt-ready", undefined, board.TABLE_GROUP_H], "In progress, after Ready's 334 rows");
+  tableHandle(b).y = 11516;
+  assert.equal(wholeRows(tableList(b))[0], 346, "the band from 11066: In progress's rows start at 10744, 28 below its group row's top");
+});
+
+test("UI: a full draw of a table of 1000 rows whose list herdr laid out 900 pixels high converts 6 to 100 colors to OKLCH and makes 1000 to 2000 elements, in copper-dark and catppuccin-mocha, each draw on a new theme object as herdr gives it", async () => {
+  const { b, host } = await longTable();
+  b.render();
+  for (const [name, t] of [["copper-dark", copperTheme("dark")], ["catppuccin-mocha", catppuccinTheme()]]) {
+    host.theme = () => ({ ...t });
+    for (const draw of [1, 2]) {
+      const cost = drawCost(b, host);
+      assert.ok(cost.conversions >= 6 && cost.conversions <= 100, `${name}, draw ${draw}: ${cost.conversions} conversions`);
+      assert.ok(cost.elements >= 1000 && cost.elements <= 2000, `${name}, draw ${draw}: ${cost.elements} elements`);
+    }
+  }
+});
+
+test("UI: on a table a key that selects a row outside the band scrolls to it and draws it whole while herdr has not run the scroll yet; the wheel, and every BAND_MS the timer, ask a draw only where the list left its band", async () => {
+  const { b, cx, host, st } = await longTable();
+  b.render();
+  host.scrolled.splice(0);
+  await press(b, cx, "g", G);
+  assert.deepEqual([st().sel.key, host.scrolled.splice(0)], ["PVTI_large999", [{ handle: tableHandle(b), row: 999 }]]);
+  assert.ok(tableList(b).kids[999].with.id, "drawn whole where the scroll goes");
+  assert.equal(bandLook(cx), 0, "the handle not moved yet: the band stays where the scroll goes");
+  tableHandle(b).y = 31100;
+  b.render();
+  assert.equal(bandLook(cx), 0, "herdr ran it: in the band");
+  tableHandle(b).y = 0;
+  assert.equal(bandLook(cx), 1, "the window left its band");
+  b.render();
+  tableHandle(b).y = 400;
+  const wheel = tableList(b).with.on_scroll_wheel[0];
+  assert.equal(notifies(cx, (own) => wheel({}, own)), 0, "400 down: within the band");
+  tableHandle(b).y = 5000;
+  assert.equal(notifies(cx, (own) => wheel({}, own)), 1);
+});
+
+test("UI: on a herdr whose ScrollHandle reads nothing back (before 0.1.18) every row of a table draws whole, and its list follows no wheel", async () => {
+  const { b } = await longTable({ oldScroll: true });
+  const list = tableList(b);
+  assert.deepEqual([wholeRows(list).length, list.with.on_scroll_wheel, b.shapeState.table.windowed], [1000, undefined, false]);
 });
 
 test("UI: a board with swimlanes draws the columns' heads once and below them, scrolling as one, each band's head and rows; only the rows about its window whole; h/l keep the band, and the list scrolls to the row of the card chosen", async () => {
@@ -17455,6 +17922,58 @@ test("UI: over the saved state, a read whose later page fails draws the saved st
   assert.deepEqual(drawnColumn(b, "Backlog"), { texts: ["Backlog", "265", "Lädt …"], spins: true }, "the read after it runs");
 });
 
+// largeBoardAnswer's 1000 items as `plan`'s (tablePlan) table reads them,
+// each an issue with a value of its own in every field the board reads,
+// its repo too, where the field's kind allows one: a single-select's and
+// an iteration's are the field's, and an issue type one of the 25 an
+// organisation may have. The worst case of a table's saved state.
+function fullTableAnswer(plan) {
+  const answer = JSON.parse(largeBoardAnswer(1000));
+  const colors = ["RED", "YELLOW", "BLUE", "PURPLE", "GREEN", "ORANGE", "PINK", "GRAY"];
+  const day = (i) => new Date(Date.UTC(2026, 0, 1) + i * DAY).toISOString().slice(0, 10);
+  const value = (f, i) => ({
+    SINGLE_SELECT: () => ({ optionId: f.options[i % f.options.length].id, name: f.options[i % f.options.length].name }),
+    ITERATION: () => ({ iterationId: f.iterations[i % f.iterations.length].id, title: f.iterations[i % f.iterations.length].title }),
+    NUMBER: () => ({ number: i }),
+    DATE: () => ({ date: day(i) }),
+    TEXT: () => ({ text: `note ${i}: after the API change and before the release` }),
+    LINKED_PULL_REQUESTS: () => ({ pullRequests: { totalCount: 1 + i } }),
+  })[f.type]();
+  answer.data.repositoryOwner.projectV2.items.nodes.forEach((node, i) => {
+    delete node.fieldValueByName;
+    delete node.priority;
+    const c = node.content;
+    const repo = `sample-user/repo-${i}`;
+    Object.assign(c, {
+      __typename: "Issue", repository: { nameWithOwner: repo }, url: `https://github.com/${repo}/issues/${c.number}`,
+      issueType: { name: `Type ${i % 25}`, color: colors[i % colors.length] }, milestone: { title: `v${i}` },
+      labels: { nodes: [...c.labels.nodes, { name: `area-${i}`, color: i.toString(16).padStart(6, "0") }] },
+      assignees: { nodes: [{ login: "sample-user" }, { login: `person-${i}`, name: `Person ${i}` }] },
+      parent: { number: 900 + i, title: `[Epic] Sample parent ${900 + i} with a title long enough to be cut short`, repository: { nameWithOwner: repo } },
+      subIssuesSummary: { total: 1 + i, completed: Math.floor(i / 2) },
+    });
+    plan.values.forEach((f, v) => (node[`v${v}`] = value(f, i)));
+  });
+  return answer;
+}
+
+test("the saved state of a table at its limit of 1000 rows, each with a value of its own in every field the board reads where its kind allows one, takes about 731 kB, less than the million bytes a view may keep (SAVED_MAX), and reads back as it was", () => {
+  const plan = tablePlanOf(tableProject({ visibleFields: ALL_FIELDS, group: "Status", sorts: [["Estimate", "ASC"], ["Notes", "DESC"]] }));
+  const data = board.parseGithubTable(fullTableAnswer(plan), githubView(), [], plan);
+  assert.equal(data.rows.length, 1000);
+  assert.ok(data.rows.every((r) => data.fields.every((f, k) => f.from === null || board.tableValue(data, r, k) !== null)), "every row a value in every field it reads");
+  const text = board.savedText(githubView(), new Set(), { data: board.SHAPES.table.toSaved(data), warnings: [] }, 1);
+  const bytes = board.storeBytes(text);
+  assert.ok(text && bytes <= board.SAVED_MAX && bytes <= 750_000, `${bytes} bytes`);
+  assert.deepEqual(board.SHAPES.table.fromSaved(JSON.parse(text).data), data, "read back as it was");
+  const mixed = { ...data, rows: data.rows.map((r, i) => (i % 2 ? r : { ...r, foreign: true })) };
+  assert.deepEqual(board.SHAPES.table.fromSaved(JSON.parse(JSON.stringify(board.SHAPES.table.toSaved(mixed)))), mixed, "a field some rows lack, lacking there");
+  const pr = { ...data, rows: data.rows.map((r, i) => (i ? r : { ...r, kind: "pr", url: `https://github.com/${r.repo}/pull/${r.number}` })) };
+  assert.equal(board.SHAPES.table.toSaved(pr).packed.traits.some((t) => t.trait === "url"), false, "no address GitHub gives an issue or a pull request kept");
+  const odd = { ...data, rows: data.rows.map((r, i) => (i ? r : { ...r, url: "https://example.com/elsewhere" })) };
+  assert.equal(board.SHAPES.table.fromSaved(JSON.parse(JSON.stringify(board.SHAPES.table.toSaved(odd)))).rows[0].url, "https://example.com/elsewhere", "an address of another form kept");
+});
+
 test("the saved state: an entry is a view's only while its form and hidden columns are the same; one the store would take more than SAVED_MAX bytes for is none, counted as the store counts, and a board at its limit of 1000 items fits; gone views' entries are named", () => {
   const view = testView(MINE);
   const hidden = board.hiddenColumns(view, null);
@@ -17484,16 +18003,16 @@ test("the saved state: an entry is a view's only while its form and hidden colum
   assert.deepEqual(board.goneSaved(["board:data:mine", "board:data:gone", "data:gone", "source", "hidden:gone"], new Set(["mine"])), ["board:data:gone"]);
 });
 
-test("the saved state of each shipped view signs as SAVED_VERSION 4 has it, a project's view once the board knows it; where its settings lie, its tab's folders and views and the repos a PR tab turns off are no form of it", () => {
+test("the saved state of each shipped view signs as SAVED_VERSION 5 has it, a project's view once the board knows it; where its settings lie, its tab's folders and views and the repos a PR tab turns off are no form of it", () => {
   const known = { get: () => ({ title: "P", url: null, views: [{ number: 1, name: "Board", layout: "board", filter: "" }] }) };
   const sigs = board.viewsOf(board.readConfig(shippedConfig()).config, known).map((v) => {
     const text = board.savedText(v, board.hiddenColumns(v), { data: { shape: "board" }, warnings: [] }, 1);
     return [board.viewKind(v), createHash("sha256").update(JSON.parse(text).sig).digest("hex").slice(0, 16)];
   });
   assert.deepEqual(sigs, [
-    ["github board", "a115dce1d2b18501"], ["github list", "30dc57ce5fab2e00"],
-    ["azure sprint", "d53a6847f4d1df40"], ["azure backlog", "0c370d1ff1167bdf"], ["azure prs", "68461a98a97b29a3"],
-    ["azure sprint", "96069af2bc294b34"], ["azure backlog", "ae097c5af922705e"], ["azure prs", "358f8303ecdd0ed5"],
+    ["github board", "44363005361199d9"], ["github list", "0dc7d4693c698167"],
+    ["azure sprint", "059951778d67152f"], ["azure backlog", "a25ef2a55d9dc776"], ["azure prs", "f1f0b376679f9271"],
+    ["azure sprint", "1b79e44e660fddd6"], ["azure backlog", "9327819c47162386"], ["azure prs", "1faefca7ee01bc5b"],
   ]);
   const view = githubView();
   const text = board.savedText(view, HIDDEN, { data: githubBoard(), warnings: [] }, 1);
@@ -17518,12 +18037,19 @@ function skeleton(v) {
 }
 
 test("what each shape keeps in its saved data is the form SAVED_VERSION names: a change to it raises SAVED_VERSION and the fingerprint here", () => {
-  const print = (data) => createHash("sha256").update(JSON.stringify(skeleton(JSON.parse(JSON.stringify(data))))).digest("hex").slice(0, 12);
+  const saved = (data) => board.SHAPES[data.shape].toSaved?.(data) ?? data;
+  const print = (data) => createHash("sha256").update(JSON.stringify(skeleton(JSON.parse(JSON.stringify(saved(data)))))).digest("hex").slice(0, 12);
+  const azPrioritized = (name) => JSON.stringify(json(name).map((wi, i) => (i ? wi : { ...wi, fields: { ...wi.fields, [board.PRIORITY]: 1 } })));
   const shapes = {
-    board: githubBoard(), prs: board.parseGithubList(json("github-list.json"), testView("prs")), sprint: sprintData(), backlog: backlogData(),
+    board: board.parseGithubBoard(boardItemsWith({ 3000: { priority: priorityOf("P1") } }), githubView(), HIDDEN, [], planOf(projectFor(FIXTURE_OPTIONS["github-board.json"]))),
+    prs: board.parseGithubList(json("github-list.json"), testView("prs")),
+    sprint: board.sprintBoard({ ...sprintParts(), items: board.parseWorkItems(azPrioritized("azure-sprint-items.json"), sprintTeam()) }),
+    backlog: backlogData({ items: azPrioritized("azure-backlog-items.json") }),
+    table: tableData({ visibleFields: ALL_FIELDS, group: "Status", sorts: [["Priority", "ASC"]] }),
   };
+  for (const k of ["board", "sprint", "backlog"]) assert.match(JSON.stringify(saved(shapes[k])), /"priority":\{"name":/, `${k}: a priority in what it keeps`);
   assert.deepEqual({ version: board.SAVED_VERSION, ...Object.fromEntries(Object.entries(shapes).map(([k, d]) => [k, print(d)])) },
-    { version: 4, board: "178614242c7b", prs: "a995da7f9b5f", sprint: "e4b71886155b", backlog: "fd167b2a10f0" });
+    { version: 5, board: "ea26d8e02220", prs: "a995da7f9b5f", sprint: "a51de1177e88", backlog: "c4437d013757", table: "2589329862d5" });
 });
 
 test("UI: a PR tab's repos turned off apply to a saved state it draws and to a read that ends after the switch", async () => {
@@ -17541,7 +18067,16 @@ test("UI: a PR tab's repos turned off apply to a saved state it draws and to a r
   assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [], "the read that ends after the switch shows neither");
 });
 
-test("UI: on start the entries of views views.json no longer has are dropped; a saved state of another form of the view is not drawn; the other views' saved states come after the first draw; one too large to save drops the one before and says so in herdr's log", async () => {
+// Runs the timer queued at `index` in cx.later alone, with a cx that
+// counts its draws → how many it asked for.
+async function fireCounted(cx, index) {
+  let n = 0;
+  cx.later.splice(index, 1)[0]({ ...cx, notify: () => n++ });
+  await settle();
+  return n;
+}
+
+test("UI: on start the entries of views views.json no longer has are dropped; a saved state of another form of the view is not drawn; the other views' saved states come after the first draw; one too large to save drops the one before and says so in herdr's log and beside the view's age, drawn once as it comes and once as it goes, until a read is saved", async () => {
   const at = realNow() - MIN;
   logged.length = 0;
   const prs = board.parseGithubList(json("github-list.json"), testView("prs"));
@@ -17556,11 +18091,28 @@ test("UI: on start the entries of views views.json no longer has are dropped; a 
   const huge = boardPage(0, 6, null);
   for (const n of huge.data.repositoryOwner.projectV2.items.nodes) n.content.title = "x".repeat(200000);
   memory.set(board.savedKey(MINE), savedFor(MINE, savedBoard(), at));
+  const save = cx.later.length;
   await host.answer("gh", ok(JSON.stringify(huge)));
   assert.equal(st().data.shape, "board", "drawn");
+  assert.equal(await fireCounted(cx, save), 1, "one draw for the line");
   await cx.fire();
   assert.equal(memory.has(board.savedKey(MINE)), false, "not saved, and the older entry gone");
   assert.ok(logged.includes(`board: ${board.savedKey(MINE)} not saved: more than ${board.SAVED_MAX} bytes`), logged.join("\n"));
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  const unsaved = byId(b.render(), "unsaved");
+  assert.deepEqual([texts(unsaved), unsaved.with.text_color[0], ageOf(b.render())], [["Stand nicht gespeichert: zu groß"], t.dim, "Stand vor 0 s"], "dim, beside its age");
+  const readAndSave = async () => {
+    await press(b, cx, "r");
+    const queued = cx.later.length;
+    await host.answer("gh", ok(fixture("github-board.json")), isMineCall);
+    const draws = await fireCounted(cx, queued);
+    await cx.fire();
+    return draws;
+  };
+  assert.equal(await readAndSave(), 1, "one draw as it goes");
+  assert.deepEqual([byId(b.render(), "unsaved"), memory.has(board.savedKey(MINE))], [null, true], "saved again: gone");
+  assert.equal(await readAndSave(), 0, "none while it stays gone");
 });
 
 test("UI: a views.json with problems drops no saved entry, not even those of the views it leaves out; read without them it drops the gone views' entries", async () => {
@@ -17577,10 +18129,10 @@ test("UI: a views.json with problems drops no saved entry, not even those of the
   assert.deepEqual([memory.has("board:data:gone"), memory.has("board:data:prs")], [false, true]);
 });
 
-test("UI: an entry the store refuses drops the one before, and herdr's log names its key and the store's reason", async () => {
+test("UI: an entry the store refuses drops the one before, herdr's log names its key and the store's reason, and the view says it is not saved", async () => {
   const at = realNow() - MIN;
   logged.length = 0;
-  const { cx, host } = await bootBoard({ raw: { [board.savedKey(MINE)]: savedFor(MINE, savedBoard(), at) } });
+  const { b, cx, host } = await bootBoard({ raw: { [board.savedKey(MINE)]: savedFor(MINE, savedBoard(), at) } });
   const store = globalThis.localStorage;
   const setItem = store.setItem;
   store.setItem = (k, v) => {
@@ -17595,6 +18147,7 @@ test("UI: an entry the store refuses drops the one before, and herdr's log names
   }
   assert.equal(memory.has(board.savedKey(MINE)), false);
   assert.ok(logged.includes(`board: ${board.savedKey(MINE)} not saved: store value \`board:data:mine\` is 9 bytes, over the limit`), logged.join("\n"));
+  assert.deepEqual(texts(byId(b.render(), "unsaved")), ["Stand nicht gespeichert: vom Speicher abgelehnt"]);
 });
 
 test("UI: a saved entry the board cannot draw is dropped and said in herdr's log; the view reads as if it had none, on start, on a switch to its tab and among the other views' saved states", async () => {
@@ -17631,7 +18184,7 @@ test("UI: a GitHub board without data draws each page as it comes, with its warn
   assert.equal(texts(root).some((x) => x.startsWith("Nur die ersten")), false, "no note before the last page");
   assert.equal(texts(byId(root, `tab-${MINE_TAB}`)).includes("…"), false, "the tab counts what is drawn");
   const page = (total) => boardPage(0, 3, "c1", { total });
-  assert.deepEqual([board.boardPages(page(250), testView(MINE), 10), board.boardPages(page(250), { limit: 150 }, 2), board.boardPages(page(0), testView(MINE), 10)], [3, 2, 1],
+  assert.deepEqual([board.itemPages(page(250), testView(MINE), 10), board.itemPages(page(250), { limit: 150 }, 2), board.itemPages(page(0), testView(MINE), 10)], [3, 2, 1],
     "the pages by the count GitHub names, no more than the calls; a page more than it names counts as one more");
   await host.answer("gh", ok(JSON.stringify(boardPage(3, 6, "c2", { first: false, total: 9 }))), isBoardCall);
   root = b.render();
@@ -18103,9 +18656,9 @@ test("each gh, az and sh run logs one line: what it ran for, its view and how lo
   await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, isBoardCall);
   const ms = (line) => Number(line.match(/ (\d+) ms /)[1]);
   const view = MINE.replace(/[/]/g, "\\/");
-  assert.match(logged[0], new RegExp(`^board: gh board-page-1 \\d+ ms ok view=${view}$`));
+  assert.match(logged[0], new RegExp(`^board: gh items-page-1 \\d+ ms ok view=${view}$`));
   assert.ok(ms(logged[0]) >= 1234 && ms(logged[0]) < 1234 + 5000, logged[0]);
-  assert.match(logged[1], new RegExp(`^board: gh board-page-2 \\d+ ms exit 1 view=${view}$`));
+  assert.match(logged[1], new RegExp(`^board: gh items-page-2 \\d+ ms exit 1 view=${view}$`));
   await bootBoard();
   assert.ok(logged.some((l) => new RegExp(`^board: gh project \\d+ ms ok view=${view}$`).test(l)), "the read of the project's views");
   const { host: az } = await bootBoard({ stored: { context: AZURE_CONTEXT }, which: found });

@@ -3,8 +3,7 @@
 // row before Azure names the new id; and after a refresh, how unclear
 // creates and parent links ended up. The backlog shape creates so.
 
-import { errorText, itemKey, itemLabel } from "../shared.js";
-import { findBacklogItem } from "../kinds/backlog.js";
+import { errorText, findRow, itemKey, itemLabel } from "../shared.js";
 import { writeAtOnce } from "./write.js";
 
 // The key a create is written under: one create at a time per view (an
@@ -123,7 +122,7 @@ export async function unclearCreateLines(b, view, due) {
 // item the backlog does not hold (a Task) it cannot tell.
 export function unclearParentLines(due, data) {
   return due.map((u) => {
-    const now = findBacklogItem(data, u.key);
+    const now = findRow(data, u.key);
     if (!now) return { text: `Ob ${u.label} unter ${u.parentLabel} hängt, zeigt der Backlog nicht: ${u.label} ist kein Eintrag von ihm`, warn: true };
     if (now.parent === u.parent) return { text: `${u.label} hängt nach dem Neuladen unter ${u.parentLabel}`, warn: false };
     return { text: `${u.label} hängt nach dem Neuladen nicht unter ${u.parentLabel}`, warn: true };

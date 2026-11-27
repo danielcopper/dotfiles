@@ -34,6 +34,24 @@ export const textList = (v) => Array.isArray(v) && v.every((x) => typeof x === "
 // `first`).
 export const PAGE = 100;
 
+export const findRow = (data, key) => data?.rows.find((r) => r.key === key) ?? null;
+export const withRow = (data, key, patch) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)) });
+
+// What a list or board says where the filter or "nur meine" hides every
+// item it has.
+export const NOTHING_SHOWS = "Nichts passt zum Filter oder zu „nur meine“";
+
+// What a GitHub project's view without an item says, with the filter its
+// query sent (`where`: the columns it read), which GitHub answers with no
+// items also where it cannot read it.
+export const noItemsText = (filter, where = "") =>
+  (filter ? `Keine Einträge${where} für den Filter „${filter}“ (auch einen Filter, den GitHub nicht versteht, beantwortet es so)` : `Keine Einträge${where}`);
+
+// The warnings of a GitHub project's view that sorts or groups by fields
+// the board does not read (`names`), one each.
+export const unreadableOrder = (view, names) =>
+  names.map((n) => `Ansicht „${view.name}“ sortiert oder gruppiert nach „${n}“, einem Feld, das das Board nicht liest: es ordnet ohne`);
+
 export const firstLine = (text) => String(text ?? "").trim().split("\n")[0];
 export const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
 
@@ -191,6 +209,15 @@ export function readMemo() {
 export const DAY_MS = 86400000;
 export const lastDayEnd = (finish) => Date.parse(finish ?? "") + DAY_MS;
 export const lastDayOver = (finish, now) => lastDayEnd(finish) <= now;
+
+// A day as the board writes it, from a date that parses as the day's start
+// in UTC (Azure's, GitHub's "2026-12-03"): "3.12.", with its year where
+// that is not `year`; null for none.
+export function dayText(date, year) {
+  const at = new Date(date ?? "");
+  if (Number.isNaN(at.getTime())) return null;
+  return `${at.getUTCDate()}.${at.getUTCMonth() + 1}.${at.getUTCFullYear() === year ? "" : at.getUTCFullYear()}`;
+}
 
 // A day label for a past moment, by local calendar days.
 export function ageLabel(iso, now) {

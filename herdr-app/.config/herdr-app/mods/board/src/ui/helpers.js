@@ -496,6 +496,29 @@ export function typeLine(t, item, hex, inset = 0) {
 export const selectedLook = (t, selected, rest, restBg = null) => (el) =>
   el.border_color(selected ? t.accent : rest).when(selected || Boolean(restBg), (e) => e.bg(selected ? selectedBg(t) : restBg));
 
+export const listRow = (b, t, view, st, item, rest = t.background) =>
+  h_flex()
+    .id(`row-${item.key}`)
+    .relative()
+    .flex_none()
+    .gap(12)
+    .px(18)
+    .items_center()
+    .border_l(2)
+    .map(selectedLook(t, st.sel?.key === item.key, rest))
+    .opacity(st.pending[item.key] ? 0.7 : 1)
+    .cursor_pointer()
+    .hover((s) => s.bg(t.hover))
+    .on_click((_e, cx) => {
+      if (!b.modal) b.clickItem(view, { col: 0, key: item.key }, cx);
+    });
+
+export const groupHead = (t, group, count) =>
+  h_flex().flex_none().gap(8).items_center().border_b(1).border_color(t.border)
+    .child(div().size(9).flex_none().rounded(5).bg(toneColor(t, group.color)))
+    .child(div().text_size(12.5).font_semibold().child(group.name))
+    .child(div().text_size(12).text_color(t.muted).child(count));
+
 // A card's chip: `text` in `fg` on `bg`.
 export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
 
@@ -549,7 +572,7 @@ export const sessionReasons = (s) =>
 
 export function priorityChip(t, item) {
   if (!item.priority) return null;
-  return toneChip(t, item.priority.name, namedTone(t, item.priority.tone)).id("priority").flex_none();
+  return toneChip(t, item.priority.name, namedTone(t, item.priority.color)).id("priority").flex_none();
 }
 
 // `kids`: the key, on a story its fold and type too.

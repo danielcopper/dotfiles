@@ -1,17 +1,12 @@
-// A team's backlog: its rows in backlog order, the item with a key, a state
-// change laid over the data, what a new work item may be, and the
-// backlog's warnings. backlogList (sources/azure/backlog.js) builds the data.
+// A team's backlog: its rows in backlog order, a state change laid over the
+// data, what a new work item may be, and the backlog's warnings.
+// backlogList (sources/azure/backlog.js) builds the data.
 
+import { withRow } from "../shared.js";
 import { shows } from "../select.js";
 
-// The work item with `key`, or null.
-export const findBacklogItem = (data, key) => data?.rows.find((r) => r.key === key) ?? null;
-
 // The data with the item `key` in `state`.
-export const withBacklogState = (data, key, state) => withBacklogItem(data, key, { state });
-
-// The data with the item `key`'s fields set to those of `patch`.
-export const withBacklogItem = (data, key, patch) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)) });
+export const withBacklogState = (data, key, state) => withRow(data, key, { state });
 
 // The rows that show, as one column (navigate walks a list as one).
 export const backlogNav = (data, filter, mine) => [{ id: "backlog", name: data.meta.level.name, shown: data.rows.filter((r) => shows(r, filter, mine, data.viewer)) }];

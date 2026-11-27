@@ -15,7 +15,7 @@ import { NOTIFIED, ageLabel, cardLabel } from "../../shared.js";
 import { repoHidePath } from "../../config.js";
 import { sameNames } from "../../kinds/board.js";
 import { keptRows, repoGroups, repoSwitches, toggledRepos } from "../../kinds/list.js";
-import { checkColor, checksSection, detailNote, detailSection, foreignChip, selectedLook, shownOf, toggleSwitch } from "../helpers.js";
+import { checkColor, checksSection, detailNote, detailSection, foreignChip, listRow, shownOf, toggleSwitch } from "../helpers.js";
 import { NOTE_TONES, headBg, markColor, toneColor } from "../tones.js";
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
@@ -94,24 +94,9 @@ export function sectionCount(section, shown, held) {
 
 function drawPrs(b, t, mono, view, st) {
   const now = Date.now();
-  const row = (r, tone) => {
-    const selected = st.sel?.key === r.key;
-    return h_flex()
-      .id(`row-${r.key}`)
-      .flex_none()
-      .gap(12)
-      .px(18)
+  const row = (r, tone) =>
+    listRow(b, t, view, st, r, toneColor(t, tone))
       .py(8)
-      .items_center()
-      .border_l(2)
-      // Its section's stripe, the accent while it is selected.
-      .map(selectedLook(t, selected, toneColor(t, tone)))
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => {
-        // A click on a row (clickItem).
-        if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
-      })
       .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
       .child(div().flex_1().min_w(0).truncate().child(r.title))
       .child(attentionCell(t, r))
@@ -120,7 +105,6 @@ function drawPrs(b, t, mono, view, st) {
       .child(div().w(60).flex_none().text_size(12).text_color(t.muted).child(r.draft ? "Entwurf" : ""))
       .when(Boolean(r.checks), (el) => el.child(div().w(70).flex_none().text_size(12).text_color(checkColor(t, r.checks?.state)).child(r.checks?.short ?? "")))
       .child(div().w(70).flex_none().text_size(12).text_color(t.muted).child(ageLabel(r.updatedAt, now)));
-  };
   const children = [];
   for (const [i, s] of st.data.sections.entries()) {
     const kept = keptRows(st.data, s);

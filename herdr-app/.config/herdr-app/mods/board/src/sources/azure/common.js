@@ -174,10 +174,10 @@ export function azPerson(who) {
   return { name: personName({ name: who.displayName, login: who.uniqueName }), login: who.uniqueName?.toLowerCase() ?? null };
 }
 
-const PRIORITY_TONES = { 1: "ansi1", 2: "ansi11" };
+const PRIORITY_COLORS = { 1: "ansi1", 2: "ansi11" };
 
 export function azPriority(value) {
-  return Number.isInteger(value) ? { name: `P${value}`, tone: PRIORITY_TONES[value] ?? "muted" } : null;
+  return Number.isInteger(value) ? { name: `P${value}`, color: PRIORITY_COLORS[value] ?? "muted" } : null;
 }
 
 // A work item of az boards query's answer as the board shows it, keyed as

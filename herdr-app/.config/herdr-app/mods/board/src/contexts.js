@@ -16,8 +16,9 @@ export const githubTabId = (viewId) => `github:${viewId}`;
 
 // What the board knows of a project from its last read, by its tab's id
 // (`known.get(id)`: { title, url, views: [{ number, name, layout, filter }]
-// in GitHub's order, layout "board", "table" or "roadmap" }, null before
-// any): Board.learnProject keeps it.
+// in GitHub's order, layout as parseGithubProject names it (viewLayout:
+// "board", "table", "roadmap" or another's name) }, null before any):
+// Board.learnProject keeps it.
 export const NO_PROJECTS = { get: () => null };
 
 // Where the store keeps what the board knows of a project, by its tab's id,

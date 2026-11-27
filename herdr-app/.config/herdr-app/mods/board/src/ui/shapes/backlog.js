@@ -14,8 +14,8 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
-import { cardLabel, report } from "../../shared.js";
-import { backlogNav, backlogWarnings, findBacklogItem, withBacklogItem, withBacklogState } from "../../kinds/backlog.js";
+import { NOTHING_SHOWS, cardLabel, findRow, report, withRow } from "../../shared.js";
+import { backlogNav, backlogWarnings, withBacklogState } from "../../kinds/backlog.js";
 import { itemSessions } from "../../sessions.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
@@ -23,7 +23,7 @@ import { openStateMenu, setStateAtOnce, unclearStateLines } from "../../actions/
 import { stateColor } from "../../kinds/states.js";
 import { unclearCreateLines, unclearParentLines } from "../../actions/create.js";
 import { MODALS } from "../modals/index.js";
-import { selectedLook, sessionChip, shownOf, stateChip, typeLine, workItemDetail } from "../helpers.js";
+import { listRow, sessionChip, shownOf, stateChip, typeLine, workItemDetail } from "../helpers.js";
 
 // The backlog shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -33,13 +33,13 @@ const backlogColumns = (b, st) => backlogNav(st.data, b.filterText, b.mine);
 
 // How the backlog finds an item, and where one no longer is: what its
 // states and its assignments share.
-const BACKLOG_LOOKUP = { find: findBacklogItem, where: "im Backlog" };
+const BACKLOG_LOOKUP = { find: findRow, where: "im Backlog" };
 // How the backlog finds, changes and shows its items' states
 // (actions/state.js). A state that landed is the item's own: nothing is
 // read again for it.
 const BACKLOG_STATES = { ...BACKLOG_LOOKUP, withState: withBacklogState, stateOf: (_data, item) => item.state, again: false };
 // How the backlog finds and changes its items' assignees (actions/assign.js).
-const BACKLOG_ASSIGN = { ...BACKLOG_LOOKUP, withItem: withBacklogItem };
+const BACKLOG_ASSIGN = { ...BACKLOG_LOOKUP, withItem: withRow };
 
 // The widths of a row's cells (the title takes the rest).
 const WIDTH = { key: 80, type: 110, state: 120, sprint: 120, assignee: 150 };
@@ -112,30 +112,14 @@ function drawBacklog(b, t, mono, view, st) {
       .child(div().w(WIDTH.sprint).flex_none().child("Sprint"))
       .child(div().w(WIDTH.assignee).flex_none().child("Zugewiesen")));
   if (!col.shown.length) {
-    const what = data.rows.length ? "Nichts passt zum Filter oder zu „nur meine“" : "Der Backlog ist leer";
+    const what = data.rows.length ? NOTHING_SHOWS : "Der Backlog ist leer";
     return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));
   }
   const row = (r) => {
-    const selected = st.sel?.key === r.key;
     const session = itemSessions(sessions, r)[0] ?? null;
     const line = typeLine(t, r, data.meta.typeColors?.[r.type]);
-    return h_flex()
-      .id(`row-${r.key}`)
-      .relative()
-      .flex_none()
-      .gap(12)
-      .px(18)
+    return listRow(b, t, view, st, r)
       .py(7)
-      .items_center()
-      .border_l(2)
-      .map(selectedLook(t, selected, t.background))
-      .opacity(st.pending[r.key] ? 0.7 : 1)
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => {
-        // A click on a row (clickItem).
-        if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
-      })
       .child(div().w(WIDTH.key).flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
       .child(cell(WIDTH.type, r.type ?? ""))
       .child(h_flex().flex_1().min_w(0).gap(6).items_center()

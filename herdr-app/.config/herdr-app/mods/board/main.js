@@ -17,12 +17,13 @@
 //     (the most items a view reads, 1000), start?, views?: { "<number of
 //     the view>": { hide?: [column names] } } }, its tab's id its owner's
 //     and its number (projectTabId); its name, its views (in GitHub's
-//     order) and their layout, filter, column field, swimlane field and
-//     sort keys come from GitHub (githubProjectArgs), a card's priority
-//     from the project's single-select field "Priority" (none without
-//     one). An entry with id, name, field, filter, priorityField or hide
-//     has the form before and is left out. A context's prs is its PR tab: { id,
-//     name? ("PRs"), hideRepos?: ["<owner>/<repo>"] (repos turned off),
+//     order) and their layout, filter, column field, group field, sort
+//     keys and visible fields come from GitHub (githubProjectArgs), a
+//     card's priority from the project's single-select field "Priority"
+//     (none without one). An entry with id, name, field, filter,
+//     priorityField or hide has the form before and is left out. A
+//     context's prs is its PR tab: { id, name? ("PRs"), hideRepos?:
+//     ["<owner>/<repo>"] (repos turned off),
 //     start? }. The PR tabs of all contexts share github's prs: sections:
 //     [{ name, query, tone? }], one GitHub search for pull requests per
 //     section, as written, read once for all of them; limit? (per search,
@@ -60,15 +61,16 @@
 // GitHub's queries also ask for the login gh runs as, which "nur meine"
 // compares with.
 //
-// Calls: a GitHub board view costs one gh call per refresh for its
-// project's views and fields (githubProjectArgs: its views, PROJECT_VIEWS,
-// and their three field lists each, so about two points), then one for each
-// page of up to 100 items it reads (GitHub's most), at most as many as full
-// pages of its limit take: ten for the 1000 by default (each item's
-// priority, milestone and parent, with its title and repo, and the values of
-// the fields its view sorts and bands by, read by name, add no connection
-// and so no points; see below); a table or roadmap view reads no items, and
-// on the start and r only its project's views; the
+// Calls: a GitHub project's view, a board, a table or a roadmap, costs one
+// gh call per refresh for its project's views and fields
+// (githubProjectArgs: its views, PROJECT_VIEWS, and their four field lists
+// each, so about two points), then one for each page of up to 100 items it
+// reads (GitHub's most), at most as many as full pages of its limit take:
+// ten for the 1000 by default (each item's priority, milestone and parent,
+// with its title and repo, and the values of the fields its view sorts and
+// groups by and a table shows, read by name, add no connection and so no
+// points, but for linked pull requests, whose count is a connection: one
+// point more a page; see below); the
 // PR tabs of all contexts one together (a refresh of one refreshes them
 // all), one more per THREAD_IDS (100) pull requests in them with
 // more than FIRST_THREADS (10) review threads, one for the unread
@@ -163,7 +165,10 @@
 // kinds/board.js (a board's columns and cards), kinds/list.js (a PR tab's
 // repos: whose they are, those turned off, its rows grouped by repo),
 // kinds/sprint.js (a sprint's
-// taskboard), kinds/backlog.js (a team's backlog), kinds/states.js (a
+// taskboard), kinds/backlog.js (a team's backlog), kinds/table.js (a
+// GitHub project's table), kinds/fields.js (a GitHub project's fields: an
+// item's value of each kind, the groups and order of a view's items),
+// kinds/states.js (a
 // state's color), select.js (filter, "nur meine", selection, the filter of
 // the menus that rank their rows by name), commands.js (the action table,
 // which the keys of its actions, the hint line and the command menu read),
@@ -181,11 +186,11 @@
 // ui/helpers.js, ui/choices.js (a dialog's choice fields and their lists),
 // ui/tones.js (the tones of labels and types, the selected background, the
 // tints), ui/layer.js (the board layer), ui/related.js (the related items as
-// drawn), ui/band.js (which cards of a board column draw whole), ui/shapes/
-// (how a view's data is drawn and worked: board, prs, sprint, backlog,
-// placeholder), ui/modals/ (the dialogs: start, status, columns, create,
-// assign, commands, sprints, sessions, repos) and this one, the Board, which
-// looks the shape up.
+// drawn), ui/band.js (which cards of a board column, or rows of a table,
+// draw whole), ui/shapes/ (how a view's data is drawn and worked: board,
+// prs, sprint, backlog, table, placeholder), ui/modals/ (the dialogs:
+// start, status, columns, create, assign, commands, sprints, sessions,
+// repos) and this one, the Board, which looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -228,6 +233,24 @@ export const textList = (v) => Array.isArray(v) && v.every((x) => typeof x === "
 // How many items GitHub sends in one page of a connection at most (its
 // `first`).
 export const PAGE = 100;
+
+export const findRow = (data, key) => data?.rows.find((r) => r.key === key) ?? null;
+export const withRow = (data, key, patch) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)) });
+
+// What a list or board says where the filter or "nur meine" hides every
+// item it has.
+export const NOTHING_SHOWS = "Nichts passt zum Filter oder zu „nur meine“";
+
+// What a GitHub project's view without an item says, with the filter its
+// query sent (`where`: the columns it read), which GitHub answers with no
+// items also where it cannot read it.
+export const noItemsText = (filter, where = "") =>
+  (filter ? `Keine Einträge${where} für den Filter „${filter}“ (auch einen Filter, den GitHub nicht versteht, beantwortet es so)` : `Keine Einträge${where}`);
+
+// The warnings of a GitHub project's view that sorts or groups by fields
+// the board does not read (`names`), one each.
+export const unreadableOrder = (view, names) =>
+  names.map((n) => `Ansicht „${view.name}“ sortiert oder gruppiert nach „${n}“, einem Feld, das das Board nicht liest: es ordnet ohne`);
 
 export const firstLine = (text) => String(text ?? "").trim().split("\n")[0];
 export const lastLine = (text) => String(text ?? "").trim().split("\n").at(-1);
@@ -387,6 +410,15 @@ export const DAY_MS = 86400000;
 export const lastDayEnd = (finish) => Date.parse(finish ?? "") + DAY_MS;
 export const lastDayOver = (finish, now) => lastDayEnd(finish) <= now;
 
+// A day as the board writes it, from a date that parses as the day's start
+// in UTC (Azure's, GitHub's "2026-12-03"): "3.12.", with its year where
+// that is not `year`; null for none.
+export function dayText(date, year) {
+  const at = new Date(date ?? "");
+  if (Number.isNaN(at.getTime())) return null;
+  return `${at.getUTCDate()}.${at.getUTCMonth() + 1}.${at.getUTCFullYear() === year ? "" : at.getUTCFullYear()}`;
+}
+
 // A day label for a past moment, by local calendar days.
 export function ageLabel(iso, now) {
   const then = new Date(iso), today = new Date(now);
@@ -419,8 +451,9 @@ export const viewDefaults = () => ({ hide: [], start: {} });
 
 export const KINDS = {
   "github board": { shape: "board" },
-  "github table": { text: (view) => `„${view.name}“: Tabellenansicht folgt` },
-  "github roadmap": { text: (view) => `„${view.name}“: Roadmap-Ansicht folgt` },
+  "github table": { shape: "table" },
+  // GitHub's API names no dates or zoom a roadmap shows: it draws as a table.
+  "github roadmap": { shape: "table" },
   "github list": { shape: "prs" },
   "azure sprint": { shape: "sprint" },
   "azure backlog": { shape: "backlog" },
@@ -1699,14 +1732,6 @@ export const withSprintItem = (data, key, patch) => mapSprintItem(data, key, (i)
 // read (shownState shows its own state).
 export const withItemState = (data, key, state) => mapSprintItem(data, key, (i) => ({ ...i, state, ...(isTask(i) ? { readColumn: i.column } : {}) }));
 
-// A day as the Sprint writes it, from Azure's date (the day's start, in
-// UTC): "16.11.", with its year where that is not `year`; null for none.
-export function dayText(date, year) {
-  const at = new Date(date ?? "");
-  if (Number.isNaN(at.getTime())) return null;
-  return `${at.getUTCDate()}.${at.getUTCMonth() + 1}.${at.getUTCFullYear() === year ? "" : at.getUTCFullYear()}`;
-}
-
 // An iteration's dates as the sprint picker's row says them, `year` the
 // year now: "16.11.–27.11.", "ab 16.11.", "bis 27.11.", or "ohne Daten".
 export function sprintDates(it, year) {
@@ -1747,8 +1772,9 @@ export const githubTabId = (viewId) => `github:${viewId}`;
 
 // What the board knows of a project from its last read, by its tab's id
 // (`known.get(id)`: { title, url, views: [{ number, name, layout, filter }]
-// in GitHub's order, layout "board", "table" or "roadmap" }, null before
-// any): Board.learnProject keeps it.
+// in GitHub's order, layout as parseGithubProject names it (viewLayout:
+// "board", "table", "roadmap" or another's name) }, null before any):
+// Board.learnProject keeps it.
 export const NO_PROJECTS = { get: () => null };
 
 // Where the store keeps what the board knows of a project, by its tab's id,
@@ -2098,7 +2124,7 @@ export async function call(tool, args, on, timeout, { write = false, paths = nul
 // How views load beyond one read: each view's last good data kept on disk
 // (the saved state, drawn at once after a restart), what a load draws before
 // its end, the order the prefetch reads the other views in, and the top
-// bar's words for a read and an age.
+// bar's words for a read, an age and a state not saved.
 
 // herdr's store refuses a value whose JSON string takes more than 1 MiB in
 // UTF-8, and a file of more than 8 MiB for all keys (gpui-kit's
@@ -2106,8 +2132,12 @@ export async function call(tool, args, on, timeout, { write = false, paths = nul
 export const SAVED_MAX = 1000000;
 export const SAVED_PREFIX = "board:data:";
 // Raised when what a shape draws from changes, so that no older data is drawn.
-export const SAVED_VERSION = 4;
+export const SAVED_VERSION = 5;
 export const savedKey = (id) => `${SAVED_PREFIX}${id}`;
+// What a view says beside its age where the store did not take its last
+// read: more than SAVED_MAX bytes, or refused by the store itself (the 8
+// MiB of all keys, say).
+export const UNSAVED = { big: "Stand nicht gespeichert: zu groß", refused: "Stand nicht gespeichert: vom Speicher abgelehnt" };
 
 // Data read for other hidden columns, another form of the view or another
 // organisation, project or team of its Azure tab is not its data; where its
@@ -2135,6 +2165,39 @@ export function storeBytes(text) {
 export function savedText(view, hidden, { data, warnings }, at) {
   const text = JSON.stringify({ sig: savedSig(view, hidden), at, data, warnings });
   return storeBytes(text) <= SAVED_MAX ? text : null;
+}
+
+// Rows (objects) as a shape keeps them in its saved state (toSaved): per
+// trait (a row's property), the values its rows hold, each once, and each
+// row's index into them (-1: the row lacks the trait; none where each row
+// holds a value of its own, in their order); unpackRows makes the rows of
+// them again, rows that share a value sharing it.
+export function packRows(rows) {
+  const names = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+  return {
+    count: rows.length,
+    traits: names.map((trait) => {
+      const seen = new Map();
+      const values = [];
+      const index = rows.map((r) => {
+        if (!Object.hasOwn(r, trait)) return -1;
+        const text = JSON.stringify(r[trait]);
+        if (!seen.has(text)) seen.set(text, values.push(r[trait]) - 1);
+        return seen.get(text);
+      });
+      return index.every((k, i) => k === i) ? { trait, values } : { trait, values, index };
+    }),
+  };
+}
+
+export function unpackRows({ count, traits }) {
+  const rows = Array.from({ length: count }, () => ({}));
+  for (const { trait, values, index = values.map((_, i) => i) } of traits) {
+    index.forEach((k, i) => {
+      if (k >= 0) rows[i][trait] = values[k];
+    });
+  }
+  return rows;
 }
 
 export function readSaved(text, view, hidden) {
@@ -2182,9 +2245,9 @@ export function sinceLabel(at, now) {
 }
 
 export function readLabels(st, now) {
-  if (!st) return { reading: "", age: "" };
+  if (!st) return { reading: "", age: "", unsaved: "" };
   const page = st.progress?.pages > 1 ? ` Seite ${st.progress.page} von ${st.progress.pages}` : "";
-  return { reading: st.loading ? `lädt …${page}` : "", age: st.at ? `Stand ${sinceLabel(st.at, now)}` : "" };
+  return { reading: st.loading ? `lädt …${page}` : "", age: st.at ? `Stand ${sinceLabel(st.at, now)}` : "", unsaved: st.unsaved ?? "" };
 }
 
 // ==== src/actions/start.js ====
@@ -2879,10 +2942,10 @@ export function azPerson(who) {
   return { name: personName({ name: who.displayName, login: who.uniqueName }), login: who.uniqueName?.toLowerCase() ?? null };
 }
 
-const PRIORITY_TONES = { 1: "ansi1", 2: "ansi11" };
+const PRIORITY_COLORS = { 1: "ansi1", 2: "ansi11" };
 
 export function azPriority(value) {
-  return Number.isInteger(value) ? { name: `P${value}`, tone: PRIORITY_TONES[value] ?? "muted" } : null;
+  return Number.isInteger(value) ? { name: `P${value}`, color: PRIORITY_COLORS[value] ?? "muted" } : null;
 }
 
 // A work item of az boards query's answer as the board shows it, keyed as
@@ -3003,18 +3066,12 @@ export function checkStateResult(stdout, state) {
 
 // ==== src/kinds/backlog.js ====
 
-// A team's backlog: its rows in backlog order, the item with a key, a state
-// change laid over the data, what a new work item may be, and the
-// backlog's warnings. backlogList (sources/azure/backlog.js) builds the data.
-
-// The work item with `key`, or null.
-export const findBacklogItem = (data, key) => data?.rows.find((r) => r.key === key) ?? null;
+// A team's backlog: its rows in backlog order, a state change laid over the
+// data, what a new work item may be, and the backlog's warnings.
+// backlogList (sources/azure/backlog.js) builds the data.
 
 // The data with the item `key` in `state`.
-export const withBacklogState = (data, key, state) => withBacklogItem(data, key, { state });
-
-// The data with the item `key`'s fields set to those of `patch`.
-export const withBacklogItem = (data, key, patch) => ({ ...data, rows: data.rows.map((r) => (r.key === key ? { ...r, ...patch } : r)) });
+export const withBacklogState = (data, key, state) => withRow(data, key, { state });
 
 // The rows that show, as one column (navigate walks a list as one).
 export const backlogNav = (data, filter, mine) => [{ id: "backlog", name: data.meta.level.name, shown: data.rows.filter((r) => shows(r, filter, mine, data.viewer)) }];
@@ -4207,6 +4264,129 @@ export function repoSwitches(data, visible) {
   return [...found.filter((e) => !e.foreign), ...found.filter((e) => e.foreign), ...[...switches.values()].slice(found.length)];
 }
 
+// ==== src/kinds/fields.js ====
+
+// A GitHub project's fields as the board reads them: per kind of field, an
+// item's value of it, and items in a view's order, in the groups of its
+// "Group by" field and by its sort keys. sources/github.js reads the values
+// from GitHub's answers; a table (kinds/table.js, ui/shapes/table.js) draws
+// its rows' values and places a changed row anew by the same rules.
+
+// Theme colors for GitHub's named colors: a Projects v2 option's and an
+// issue type's (IssueTypeColor), which share the names.
+export const GITHUB_COLORS = {
+  GRAY: "muted", BLUE: "ansi4", GREEN: "ansi2", YELLOW: "ansi3", ORANGE: "ansi11", RED: "ansi1", PINK: "ansi13", PURPLE: "ansi5",
+};
+
+// The id of the column and of the group of the items without a value,
+// outside the ids of the others (a group's is `v:` and its value's key).
+export const NO_VALUE = "none";
+
+const lower = (text) => String(text ?? "").toLowerCase();
+const textValue = (name) => (name ? { key: name, name, rank: lower(name) } : null);
+const countValue = (n) => ({ key: String(n), name: String(n), rank: n });
+
+// Per type of a project's field, an item's value of it as the board groups,
+// sorts and draws it: { key (the value's own), name (as a column, group or
+// cell names it), rank (its place: a number, else a text compared as such),
+// color (a single-select option's, as a theme name) }, or null for no value.
+// `byName`: the items' query reads it by name (fieldValueByName, `value`);
+// of the others an item's card holds it. A field of a type not here is one
+// the board does not read.
+const VALUES = {
+  SINGLE_SELECT: {
+    byName: true,
+    of(field, value) {
+      const at = (field.options ?? []).findIndex((o) => (value?.optionId ? o.id === value.optionId : o.name === value?.name));
+      if (at < 0) return null;
+      const option = field.options[at];
+      return { key: option.id, name: option.name, rank: at, color: GITHUB_COLORS[option.color] ?? "muted" };
+    },
+  },
+  ITERATION: {
+    byName: true,
+    of(field, value) {
+      const at = (field.iterations ?? []).findIndex((i) => i.id === value?.iterationId);
+      if (at >= 0) return { key: value.iterationId, name: field.iterations[at].title, rank: at };
+      return value?.iterationId ? { key: value.iterationId, name: value.title ?? value.iterationId, rank: -1 } : null;
+    },
+  },
+  NUMBER: { byName: true, of: (_f, value) => (typeof value?.number === "number" ? countValue(value.number) : null) },
+  DATE: { byName: true, of: (_f, value) => (typeof value?.date === "string" && value.date ? { key: value.date, name: value.date, rank: value.date } : null) },
+  TEXT: { byName: true, of: (_f, value) => textValue(typeof value?.text === "string" ? value.text : null) },
+  // None linked counts as no value, an empty cell as on GitHub.
+  LINKED_PULL_REQUESTS: { byName: true, of: (_f, value) => (value?.pullRequests?.totalCount > 0 ? countValue(value.pullRequests.totalCount) : null) },
+  TITLE: { of: (_f, _v, card) => textValue(card.title) },
+  ASSIGNEES: { of: (_f, _v, card) => textValue(card.assignees.join(", ")) },
+  LABELS: { of: (_f, _v, card) => textValue(card.labels.join(", ")) },
+  MILESTONE: { of: (_f, _v, card) => textValue(card.milestone) },
+  REPOSITORY: { of: (_f, _v, card) => textValue(card.repo) },
+  PARENT_ISSUE: { of: (_f, _v, card) => (card.parent === null ? null : textValue(card.parentTitle ?? `#${card.parent}`)) },
+  ISSUE_TYPE: { of: (_f, _v, card) => textValue(card.type) },
+  SUB_ISSUES_PROGRESS: {
+    of: (_f, _v, card) => (card.sub ? { key: `${card.sub.done}/${card.sub.total}`, name: `${card.sub.done}/${card.sub.total}`, rank: card.sub.done / card.sub.total } : null),
+  },
+};
+export const readable = (field) => Object.hasOwn(VALUES, field.type);
+export const readByName = (field) => VALUES[field.type]?.byName === true;
+export const valueOf = (field, value, card) => VALUES[field.type]?.of(field, value, card) ?? null;
+
+// Where a table's row holds a field's value: "cell" (read by name, in the
+// row's cells), "card" (the row's card holds it, read as it draws), or null
+// (a kind the board does not read).
+export const fromOf = (field) => (!readable(field) ? null : readByName(field) ? "cell" : "card");
+export const cardValue = (field, card) => valueOf(field, null, card);
+
+const byRank = (a, b) => (typeof a === "number" && typeof b === "number" ? a - b : String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0);
+
+// Two ranks by a sort key, those without one (null) last whichever the
+// direction.
+function bySort(a, b, direction) {
+  const none = (rank) => rank === null || rank === undefined;
+  if (none(a) || none(b)) return Number(none(a)) - Number(none(b));
+  const diff = byRank(a, b);
+  return direction === "DESC" ? -diff : diff;
+}
+
+export const groupId = (value) => (value ? `v:${value.key}` : NO_VALUE);
+
+// The groups of a view's "Group by" field `field` (a board's swimlanes, a
+// table's groups): one per value its items hold (`entries`, each with its
+// `groupValue`), in the field's order (a single-select's options, an
+// iteration's iterations, else by value), the items without one last.
+export function groupsOf(field, entries) {
+  const seen = new Map();
+  for (const e of entries) if (e.groupValue && !seen.has(e.groupValue.key)) seen.set(e.groupValue.key, e.groupValue);
+  const groups = [...seen.values()].sort((a, b) => byRank(a.rank, b.rank)).map((v) => ({ id: groupId(v), name: v.name, color: v.color ?? "muted" }));
+  if (entries.some((e) => !e.groupValue)) groups.push({ id: NO_VALUE, name: `Ohne ${field.name}`, color: "dim" });
+  return groups;
+}
+
+export function orderEntry(order, groupBy, sorts, value) {
+  const groupValue = groupBy ? value(groupBy) : null;
+  return { order, groupValue, group: groupId(groupValue), ranks: sorts.map((s, k) => value(s.field, k)?.rank ?? null) };
+}
+
+// Items in the order a view shows them (`entries`, each with its `group`'s
+// id, the `ranks` of its sort keys and its place in GitHub's order, `order`):
+// by their group's place in `groups` where the view groups, then by the
+// sort keys `sorts` ([{ direction }]) one after the other, those without a
+// value last, then in GitHub's order.
+export function viewOrder(entries, groups, sorts) {
+  const groupAt = new Map((groups ?? []).map((g, i) => [g.id, i]));
+  return [...entries].sort((a, b) => {
+    if (groups) {
+      const group = groupAt.get(a.group) - groupAt.get(b.group);
+      if (group) return group;
+    }
+    for (const [k, s] of sorts.entries()) {
+      const diff = bySort(a.ranks[k], b.ranks[k], s.direction);
+      if (diff) return diff;
+    }
+    return a.order - b.order;
+  });
+}
+
 // ==== src/sources/github.js ====
 
 // GitHub: the queries for a Projects v2 project (its views and fields) and
@@ -4214,27 +4394,20 @@ export function repoSwitches(data, visible) {
 // what gh's answers and failures mean, and the source as the board uses it
 // (makeGithub).
 
-// Theme colors for GitHub's named colors: a Projects v2 option's and an
-// issue type's (IssueTypeColor), which share the names.
-const GITHUB_COLORS = {
-  GRAY: "muted", BLUE: "ansi4", GREEN: "ansi2", YELLOW: "ansi3", ORANGE: "ansi11", RED: "ansi1", PINK: "ansi13", PURPLE: "ansi5",
-};
-// The id of the column and of the swimlane of the cards without a value,
-// outside the ids of the others (a lane's is `v:` and its value's key).
-export const NO_VALUE = "none";
-
 // A filter term on a project's field: GitHub's filters take the field's name
 // in lower case, spaces as dashes, and values in quotes (measured for
 // Status only).
 const fieldKey = (field) => field.toLowerCase().replace(/\s+/g, "-");
 const quoted = (value) => `"${value.replace(/"/g, "")}"`;
 
-// GitHub's layouts of a project's view, as the board names them (viewKind).
-const LAYOUTS = { BOARD_LAYOUT: "board", TABLE_LAYOUT: "table", ROADMAP_LAYOUT: "roadmap" };
+// A layout of a project's view as the board names it (viewKind): GitHub's
+// name without "_LAYOUT", in lower case ("board", "table", "roadmap").
+const viewLayout = (layout) => String(layout ?? "").replace(/_LAYOUT$/, "").toLowerCase();
 
 // How many of a project's fields and views a read takes (GitHub keeps at
 // most 50 fields a project), and of a view's sort keys; a view groups by
-// one field at most, for its columns and for its swimlanes.
+// one field at most, for its columns and for its groups (a board's
+// swimlanes).
 export const PROJECT_FIELDS = 50;
 export const PROJECT_VIEWS = 50;
 export const SORT_KEYS = 5;
@@ -4243,8 +4416,9 @@ const FIELD_REF = "... on ProjectV2FieldCommon { id name }";
 
 // One GraphQL request for a project as its views show it: its fields (with
 // their options and iterations) and its views in GitHub's order, each with
-// its layout, filter, column field, swimlane field and sort keys; and the
-// login gh runs as. The header of main.js says what it costs.
+// its layout, filter, column field, group field, sort keys and visible
+// fields in their order; and the login gh runs as. The header of main.js
+// says what it costs.
 export const PROJECT_QUERY = `query($login: String!, $number: Int!) {
   viewer { login }
   repositoryOwner(login: $login) {
@@ -4261,6 +4435,7 @@ export const PROJECT_QUERY = `query($login: String!, $number: Int!) {
           verticalGroupByFields(first: 1) { nodes { ${FIELD_REF} } }
           groupByFields(first: 1) { nodes { ${FIELD_REF} } }
           sortByFields(first: ${SORT_KEYS}) { nodes { direction field { ${FIELD_REF} } } }
+          configuration { visibleFields(first: ${PROJECT_FIELDS}) { nodes { ${FIELD_REF} } } }
         } }
       }
     }
@@ -4291,13 +4466,14 @@ function parseViewNode(node) {
   return {
     number: node.number,
     name: node.name ?? `Ansicht ${node.number}`,
-    layout: LAYOUTS[node.layout] ?? "table",
+    layout: viewLayout(node.layout),
     filter: typeof node.filter === "string" ? node.filter : "",
     column: fieldIdsOf(node.verticalGroupByFields)[0] ?? null,
-    lane: fieldIdsOf(node.groupByFields)[0] ?? null,
+    group: fieldIdsOf(node.groupByFields)[0] ?? null,
     sorts: (Array.isArray(node.sortByFields?.nodes) ? node.sortByFields.nodes : [])
       .filter((s) => s?.field?.id)
       .map((s) => ({ field: s.field.id, direction: s.direction === "DESC" ? "DESC" : "ASC" })),
+    visibleFields: fieldIdsOf(node.configuration?.visibleFields),
   };
 }
 
@@ -4305,9 +4481,10 @@ function parseViewNode(node) {
 // as its views show it: { id, title, url, viewer, fields: [{ id, name, type
 // (GitHub's dataType), options? (a single-select field's), iterations? (an
 // iteration field's, in their order) }], views: [{ number, name, layout
-// ("board", "table" or "roadmap"), filter, column, lane (a field's id, or
-// null), sorts: [{ field, direction }] }] }. A project that is not there is
-// explained by the error at its path.
+// ("board", "table", "roadmap" or another's name: viewLayout), filter,
+// column, group (a field's id, or null), sorts: [{ field, direction }],
+// visibleFields (their ids, in their order) }] }. A project that is not
+// there is explained by the error at its path.
 export function parseGithubProject(json, view, errors = []) {
   const { owner, number } = view.address;
   const ownerNode = json?.data?.repositoryOwner;
@@ -4338,16 +4515,15 @@ export function parseGithubProject(json, view, errors = []) {
 }
 
 // What the board keeps of a project between reads (Board.learnProject): its
-// title, address and views, in GitHub's order, as the switch shows them;
-// and what the store holds of it read back so (null for anything else, as
-// for none).
+// title, address and views, in GitHub's order, as the switch shows them,
+// of any layout (one the board does not draw too); and what the store
+// holds of it read back so (null for anything else, as for none).
 const metaView = (v) => ({ number: v.number, name: v.name, layout: v.layout, filter: v.filter });
 export const projectMeta = (project) => ({ title: project.title, url: project.url, views: project.views.map(metaView) });
 export function readProjectMeta(value) {
   const views = value?.views;
   if (typeof value?.title !== "string" || !Array.isArray(views)) return null;
-  const layouts = Object.values(LAYOUTS);
-  const valid = views.every((v) => Number.isInteger(v?.number) && typeof v.name === "string" && layouts.includes(v.layout) && typeof v.filter === "string");
+  const valid = views.every((v) => Number.isInteger(v?.number) && typeof v.name === "string" && isText(v.layout) && typeof v.filter === "string");
   return valid ? { title: value.title, url: typeof value.url === "string" ? value.url : null, views: views.map(metaView) } : null;
 }
 
@@ -4362,19 +4538,10 @@ const STATUS_FIELD = "Status";
 // has one by that name (GitHub's template field).
 export const PRIORITY_FIELD = "Priority";
 
-// How the board reads and draws the project view `shown` (one of
-// project.views) as a board: its column field (the view's, else "Status",
-// `ownColumn` false then), its swimlane field and sort keys where the board
-// can read them (`unreadable`: the names of those it cannot, a field of a
-// kind it does not read), the priority field, and the fields read by name
-// besides the column's and the priority's (`values`, each as the alias v<i>
-// of the items' query).
-export function boardPlan(project, shown) {
-  const byId = new Map(project.fields.map((f) => [f.id, f]));
-  const own = byId.get(shown.column);
-  const ownColumn = Boolean(own && COLUMN_TYPES.includes(own.type));
-  const column = ownColumn ? own : project.fields.find((f) => f.name === STATUS_FIELD && f.type === "SINGLE_SELECT") ?? null;
-  if (!column) throw new BoardError(`Ansicht „${shown.name}“ von „${project.title}“ hat kein Feld für ihre Spalten (ein Auswahl- oder Iterationsfeld)`);
+// A view's group field ("Group by": a board's swimlanes, a table's groups)
+// and its sort keys where the board can read them, and the names of those
+// it cannot (`unreadable`: a field of a kind it does not read).
+function viewOrderFields(byId, shown) {
   const unreadable = [];
   const usable = (field) => {
     if (!field) return null;
@@ -4382,11 +4549,9 @@ export function boardPlan(project, shown) {
     unreadable.push(field.name);
     return null;
   };
-  const lane = usable(byId.get(shown.lane));
+  const group = usable(byId.get(shown.group));
   const sorts = shown.sorts.map((s) => ({ field: usable(byId.get(s.field)), direction: s.direction })).filter((s) => s.field);
-  const priority = project.fields.find((f) => f.name === PRIORITY_FIELD && f.type === "SINGLE_SELECT") ?? null;
-  const values = [...new Set([lane, ...sorts.map((s) => s.field)].filter((f) => f && readByName(f) && f !== column && f !== priority))];
-  return { project, shown, column, ownColumn, lane, sorts, priority, values, unreadable };
+  return { group, sorts, unreadable };
 }
 
 const VALUE_FIELDS = `
@@ -4395,6 +4560,72 @@ const VALUE_FIELDS = `
     ... on ProjectV2ItemFieldNumberValue { number }
     ... on ProjectV2ItemFieldDateValue { date }
     ... on ProjectV2ItemFieldTextValue { text }`;
+const OPTION_VALUE = " ... on ProjectV2ItemFieldSingleSelectValue { optionId name color }";
+// What the items' query reads of a value by its field's kind, where that is
+// not VALUE_FIELDS: of linked pull requests their count, a connection.
+const VALUE_SELECTS = { LINKED_PULL_REQUESTS: " ... on ProjectV2ItemFieldPullRequestValue { pullRequests(first: 0) { totalCount } }" };
+
+// A field the items' query reads by name: the key of its value in an item
+// (UNALIASED: fieldValueByName's own), the variable that names it and what
+// the query reads of it.
+const UNALIASED = "fieldValueByName";
+const queryRead = (field, key, variable = key, select = VALUE_SELECTS[field.type] ?? VALUE_FIELDS) => ({ field, key, variable, select });
+const valueReads = (fields) => fields.map((f, i) => queryRead(f, `v${i}`));
+
+// How the board reads and draws the project view `shown` (one of
+// project.views) as a board: its column field (the view's, else "Status",
+// `ownColumn` false then), its group field and sort keys (viewOrderFields),
+// the priority field, and the fields its items' query reads by name
+// (`queried`: the column's, the priority's and those of the other fields it
+// orders by, `values`); `leftOut(hidden)`: the hidden columns its query
+// leaves out; `parse`: parseGithubBoard by it.
+export function boardPlan(project, shown) {
+  const byId = new Map(project.fields.map((f) => [f.id, f]));
+  const own = byId.get(shown.column);
+  const ownColumn = Boolean(own && COLUMN_TYPES.includes(own.type));
+  const column = ownColumn ? own : project.fields.find((f) => f.name === STATUS_FIELD && f.type === "SINGLE_SELECT") ?? null;
+  if (!column) throw new BoardError(`Ansicht „${shown.name}“ von „${project.title}“ hat kein Feld für ihre Spalten (ein Auswahl- oder Iterationsfeld)`);
+  const { group, sorts, unreadable } = viewOrderFields(byId, shown);
+  const priority = project.fields.find((f) => f.name === PRIORITY_FIELD && f.type === "SINGLE_SELECT") ?? null;
+  const values = [...new Set([group, ...sorts.map((s) => s.field)].filter((f) => f && readByName(f) && f !== column && f !== priority))];
+  const queried = [queryRead(column, UNALIASED, "column", VALUE_FIELDS), ...(priority ? [queryRead(priority, "priority", "priority", OPTION_VALUE)] : []), ...valueReads(values)];
+  const plan = { project, shown, column, ownColumn, group, sorts, priority, values, unreadable, queried };
+  plan.leftOut = (hidden) => [...hidden].filter((n) => n !== noValueName(plan));
+  plan.parse = (json, view, hidden, errors) => parseGithubBoard(json, view, hidden, errors, plan);
+  return plan;
+}
+
+const ROADMAP_TYPES = ["DATE", "ITERATION"];
+
+// The fields a table view shows: Title first, as on GitHub, then the view's
+// visible fields in their order; for a roadmap, whose visible fields
+// GitHub's API does not give, the project's date and iteration fields and
+// Status.
+function tableFields(project, shown, byId) {
+  const title = project.fields.find((f) => f.type === "TITLE") ?? { id: "title", name: "Title", type: "TITLE" };
+  const status = project.fields.find((f) => f.name === STATUS_FIELD && f.type === "SINGLE_SELECT");
+  const after = shown.layout === "roadmap"
+    ? [...project.fields.filter((f) => ROADMAP_TYPES.includes(f.type)), ...(status ? [status] : [])]
+    : shown.visibleFields.map((id) => byId.get(id)).filter(Boolean);
+  return [title, ...after.filter((f) => f.type !== "TITLE")];
+}
+
+// How the board reads and draws the project view `shown` as a table (a
+// table or a roadmap view): its fields (tableFields; `blank`: the names of
+// those of a kind the board does not read, whose cells stay empty), its
+// group field and sort keys (viewOrderFields), and the fields its items'
+// query reads by name (`values`, `queried`); its query leaves out no column;
+// `parse`: parseGithubTable by it.
+export function tablePlan(project, shown) {
+  const byId = new Map(project.fields.map((f) => [f.id, f]));
+  const fields = tableFields(project, shown, byId);
+  const { group, sorts, unreadable } = viewOrderFields(byId, shown);
+  const values = [...new Set([...fields, group, ...sorts.map((s) => s.field)].filter((f) => f && readByName(f)))];
+  const blank = fields.filter((f) => !readable(f)).map((f) => f.name);
+  const plan = { project, shown, group, sorts, values, unreadable, fields, blank, queried: valueReads(values), leftOut: () => [] };
+  plan.parse = (json, view, _hidden, errors) => parseGithubTable(json, view, errors, plan);
+  return plan;
+}
 
 const CONTENT_FIELDS = `
   content {
@@ -4408,31 +4639,28 @@ const CONTENT_FIELDS = `
     ... on DraftIssue { title creator { login } assignees(first: 5) { nodes { login name } } }
   }`;
 
-// An item's fields as the board's query reads them: the column field's
-// value (fieldValueByName), the priority's, the other fields' by name
-// (v<i>) and the content.
+// An item's fields as the items' query reads them: the values the plan
+// reads by name and the content.
 function itemFields(plan) {
-  const priority = plan.priority ? "\n  priority: fieldValueByName(name: $priority) { ... on ProjectV2ItemFieldSingleSelectValue { optionId name color } }" : "";
-  const values = plan.values.map((_, i) => `\n  v${i}: fieldValueByName(name: $v${i}) {${VALUE_FIELDS} }`).join("");
+  const selections = plan.queried.map((r) => `\n  ${r.key === UNALIASED ? "" : `${r.key}: `}fieldValueByName(name: $${r.variable}) {${r.select} }`).join("");
   return `
-  id
-  fieldValueByName(name: $column) {${VALUE_FIELDS} }${priority}${values}${CONTENT_FIELDS}`;
+  id${selections}${CONTENT_FIELDS}`;
 }
 
 const filterWith = (plan, term) => [plan.shown.filter, term].filter(Boolean).join(" ");
 
+// The column without a value is always shown: its name asks GitHub for
+// nothing.
 const noValueName = (plan) => `Ohne ${plan.column.name}`;
-// The column without a value is always shown: its name asks GitHub for nothing.
-const queriedHidden = (plan, hidden) => [...hidden].filter((n) => n !== noValueName(plan));
 
-// The filter of a board's shown items: the view's, with its hidden columns
-// left out.
-function boardFilter(plan, hidden) {
-  const names = queriedHidden(plan, hidden);
+// The filter of a view's items: the view's, with the hidden columns its
+// query leaves out (plan.leftOut).
+function itemsFilter(plan, hidden) {
+  const names = plan.leftOut(hidden);
   return filterWith(plan, names.length ? `-${fieldKey(plan.column.name)}:${names.map(quoted).join(",")}` : "");
 }
 
-// The items a board's query reads: the page after `count` items, from the
+// The items a view's query reads: the page after `count` items, from the
 // cursor $after where `paged` (a page after the first; `count` may be 0
 // there, after an empty first page), PAGE at most and no more than the
 // view's limit leaves, with whether more follow and where they start.
@@ -4441,11 +4669,11 @@ function itemsSelection(view, plan, count, paged) {
   return `items(first: ${Math.min(PAGE, view.limit - count)}${after}, query: $filter) { totalCount pageInfo { hasNextPage endCursor } nodes {${itemFields(plan)} } }`;
 }
 
-// A board's query: its variables after the ones every page has, and what it
-// reads of the project.
-function boardQuery(plan, vars, project) {
-  const own = [...(plan.priority ? [", $priority: String!"] : []), ...plan.values.map((_, i) => `, $v${i}: String!`)].join("");
-  return `query($login: String!, $number: Int!, $column: String!, $filter: String!${own}${vars}) {
+// A view's items' query: its variables after the ones every page has, and
+// what it reads of the project.
+function itemsQuery(plan, vars, project) {
+  const own = plan.queried.map((r) => `, $${r.variable}: String!`).join("");
+  return `query($login: String!, $number: Int!, $filter: String!${own}${vars}) {
   repositoryOwner(login: $login) {
     ... on ProjectV2Owner {
       projectV2(number: $number) {
@@ -4456,35 +4684,34 @@ function boardQuery(plan, vars, project) {
 }`;
 }
 
-function boardArgs(view, plan, hidden, doc) {
+function itemsArgs(view, plan, hidden, doc) {
   return [
-    "api", "graphql", "-f", `query=${doc}`, "-f", `login=${view.address.owner}`, "-F", `number=${view.address.number}`, "-f", `column=${plan.column.name}`,
-    "-f", `filter=${boardFilter(plan, hidden)}`,
-    ...(plan.priority ? ["-f", `priority=${plan.priority.name}`] : []),
-    ...plan.values.flatMap((f, i) => ["-f", `v${i}=${f.name}`]),
+    "api", "graphql", "-f", `query=${doc}`, "-f", `login=${view.address.owner}`, "-F", `number=${view.address.number}`,
+    "-f", `filter=${itemsFilter(plan, hidden)}`,
+    ...plan.queried.flatMap((r) => ["-f", `${r.variable}=${r.field.name}`]),
   ];
 }
 
-// The first page of a board's items, as boardPlan says to read them, and
-// the counts of its hidden columns (first: 0), for the column menu.
-export function githubBoardArgs(view, plan, hidden) {
-  const names = queriedHidden(plan, hidden);
-  const key = fieldKey(plan.column.name);
+// The first page of a view's items, as its plan says to read them, and the
+// counts of the hidden columns its query leaves out (first: 0), for the
+// column menu.
+export function githubItemsArgs(view, plan, hidden) {
+  const names = plan.leftOut(hidden);
   const counts = names.map((_, i) => `\n        h${i}: items(first: 0, query: $h${i}) { totalCount }`).join("");
   const vars = names.map((_, i) => `, $h${i}: String!`).join("");
-  const doc = boardQuery(plan, vars, `id title url
+  const doc = itemsQuery(plan, vars, `id title url
         ${itemsSelection(view, plan, 0, false)}${counts}`);
-  return [...boardArgs(view, plan, hidden, doc), ...names.flatMap((n, i) => ["-f", `h${i}=${filterWith(plan, `${key}:${quoted(n)}`)}`])];
+  return [...itemsArgs(view, plan, hidden, doc), ...names.flatMap((n, i) => ["-f", `h${i}=${filterWith(plan, `${fieldKey(plan.column.name)}:${quoted(n)}`)}`])];
 }
 
-// One GraphQL request for the page of a board's items after the cursor
+// One GraphQL request for the page of a view's items after the cursor
 // `after`, `count` items read before it: the same items as the first page's
 // query, and the project's title.
-export function githubBoardPageArgs(view, plan, hidden, after, count) {
-  return [...boardArgs(view, plan, hidden, boardQuery(plan, ", $after: String!", `title ${itemsSelection(view, plan, count, true)}`)), "-f", `after=${after}`];
+export function githubItemsPageArgs(view, plan, hidden, after, count) {
+  return [...itemsArgs(view, plan, hidden, itemsQuery(plan, ", $after: String!", `title ${itemsSelection(view, plan, count, true)}`)), "-f", `after=${after}`];
 }
 
-// Where a board's items stand in its answers.
+// Where a view's items stand in its answers.
 const ITEMS_PATH = [...PROJECT_PATH, "items"];
 
 // The error that explains a page without its items: the deepest one on the
@@ -4495,14 +4722,14 @@ function pageError(errors) {
   return onTheWay.sort((a, b) => b.path.length - a.path.length)[0] ?? errors[0] ?? null;
 }
 
-// The board answer `json` (githubBoardArgs) with the items of the next
-// page's answer `page` (githubBoardPageArgs, and its GraphQL errors)
+// The items' answer `json` (githubItemsArgs) with the items of the next
+// page's answer `page` (githubItemsPageArgs, and its GraphQL errors)
 // added, each item once (one that moved between two reads may come
 // twice), and that page's pageInfo, which says whether more follow. A page
 // without its items is explained by GitHub's error (pageError). One that
 // says more follow but adds no item or names the same cursor again is taken
 // for GitHub's paging stuck, and fails.
-export function addBoardPage(json, page, errors = []) {
+export function addItemsPage(json, page, errors = []) {
   const project = json.data.repositoryOwner.projectV2;
   const items = project.items;
   const next = page?.data?.repositoryOwner?.projectV2?.items;
@@ -4520,11 +4747,11 @@ export function addBoardPage(json, page, errors = []) {
   return json;
 }
 
-// The page after the board answer `json`, { after, count } (its cursor and
+// The page after the items' answer `json`, { after, count } (its cursor and
 // how many items came before it), where GitHub says one follows and the
 // view's limit leaves room for it; else null. One that follows without a
 // cursor to start from fails.
-export function nextBoardPage(json, view) {
+export function nextItemsPage(json, view) {
   const project = json?.data?.repositoryOwner?.projectV2;
   const items = project?.items;
   if (!Array.isArray(items?.nodes) || !items.pageInfo?.hasNextPage || items.nodes.length >= view.limit) return null;
@@ -4533,7 +4760,7 @@ export function nextBoardPage(json, view) {
   return { after, count: items.nodes.length };
 }
 
-export function boardPages(json, view, calls) {
+export function itemPages(json, view, calls) {
   const total = json?.data?.repositoryOwner?.projectV2?.items?.totalCount ?? 0;
   return Math.min(calls, Math.max(1, Math.ceil(Math.min(total, view.limit) / PAGE)));
 }
@@ -4563,7 +4790,7 @@ const assigneesOf = (nodes) => {
 
 function githubPriority(value) {
   if (typeof value?.name !== "string" || !value.name) return null;
-  return { name: value.name, tone: GITHUB_COLORS[value.color] ?? "muted" };
+  return { name: value.name, color: GITHUB_COLORS[value.color] ?? "muted" };
 }
 
 const foreignMark = (owners, repo, flag = "foreign") => (repoOwnership(repo, owners) === "foreign" ? { [flag]: true } : {});
@@ -4611,68 +4838,14 @@ export function errorAt(errors, path) {
 // Every GraphQL error whose path starts with `path`.
 export const errorsAt = (errors, path) => (errors ?? []).filter((e) => Array.isArray(e.path) && path.every((p, i) => e.path[i] === p));
 
-const lower = (text) => String(text ?? "").toLowerCase();
-const textValue = (name) => (name ? { key: name, name, rank: lower(name) } : null);
-
-// Per type of a project's field, an item's value of it as the board groups
-// and sorts by it: { key (the value's own), name (as a column or swimlane
-// names it), rank (its place: a number, else a text compared as such) }, or
-// null for no value. `byName`: the items' query reads it by name
-// (fieldValueByName, `value`); of the others an item's card holds it. A
-// field of a type not here is one the board does not read.
-const VALUES = {
-  SINGLE_SELECT: {
-    byName: true,
-    of(field, value) {
-      const at = (field.options ?? []).findIndex((o) => (value?.optionId ? o.id === value.optionId : o.name === value?.name));
-      return at < 0 ? null : { key: field.options[at].id, name: field.options[at].name, rank: at };
-    },
-  },
-  ITERATION: {
-    byName: true,
-    of(field, value) {
-      const at = (field.iterations ?? []).findIndex((i) => i.id === value?.iterationId);
-      if (at >= 0) return { key: value.iterationId, name: field.iterations[at].title, rank: at };
-      return value?.iterationId ? { key: value.iterationId, name: value.title ?? value.iterationId, rank: -1 } : null;
-    },
-  },
-  NUMBER: { byName: true, of: (_f, value) => (typeof value?.number === "number" ? { key: String(value.number), name: String(value.number), rank: value.number } : null) },
-  DATE: { byName: true, of: (_f, value) => (typeof value?.date === "string" && value.date ? { key: value.date, name: value.date, rank: value.date } : null) },
-  TEXT: { byName: true, of: (_f, value) => textValue(typeof value?.text === "string" ? value.text : null) },
-  TITLE: { of: (_f, _v, card) => textValue(card.title) },
-  ASSIGNEES: { of: (_f, _v, card) => textValue(card.assignees.join(", ")) },
-  LABELS: { of: (_f, _v, card) => textValue(card.labels.join(", ")) },
-  MILESTONE: { of: (_f, _v, card) => textValue(card.milestone) },
-  REPOSITORY: { of: (_f, _v, card) => textValue(card.repo) },
-  PARENT_ISSUE: { of: (_f, _v, card) => (card.parent === null ? null : textValue(card.parentTitle ?? `#${card.parent}`)) },
-  ISSUE_TYPE: { of: (_f, _v, card) => textValue(card.type) },
-  SUB_ISSUES_PROGRESS: {
-    of: (_f, _v, card) => (card.sub ? { key: `${card.sub.done}/${card.sub.total}`, name: `${card.sub.done}/${card.sub.total}`, rank: card.sub.done / card.sub.total } : null),
-  },
-};
-const readable = (field) => Object.hasOwn(VALUES, field.type);
-const readByName = (field) => VALUES[field.type]?.byName === true;
-const valueOf = (field, value, card) => VALUES[field.type]?.of(field, value, card) ?? null;
-
-const byRank = (a, b) => (typeof a === "number" && typeof b === "number" ? a - b : String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0);
-
-// Two values by a sort key, those without one last whichever the direction.
-function bySort(a, b, direction) {
-  if (!a || !b) return Number(!a) - Number(!b);
-  const order = byRank(a.rank, b.rank);
-  return direction === "DESC" ? -order : order;
-}
-
 function nodeValue(plan, node, card, field) {
-  if (field === plan.column) return valueOf(field, node.fieldValueByName, card);
-  if (field === plan.priority) return valueOf(field, node.priority, card);
-  const at = plan.values.indexOf(field);
-  return valueOf(field, at >= 0 ? node[`v${at}`] : null, card);
+  const read = plan.queried.find((r) => r.field === field);
+  return valueOf(field, read ? node[read.key] : null, card);
 }
 
 function boardColumns(plan, hidden, answer, held) {
   const field = plan.column;
-  const names = queriedHidden(plan, hidden);
+  const names = plan.leftOut(hidden);
   const base = field.type === "ITERATION"
     ? field.iterations.filter((i) => !i.completed || held.has(i.id) || hidden.has(i.title)).map((i) => ({ id: i.id, name: i.title, color: "muted" }))
     : field.options.map((o) => ({ id: o.id, name: o.name, color: GITHUB_COLORS[o.color] ?? "muted" }));
@@ -4686,61 +4859,37 @@ function boardColumns(plan, hidden, answer, held) {
   }));
 }
 
-// A board's swimlanes: one per value of the swimlane field its cards hold,
-// in the field's order (a single-select's options, an iteration's
-// iterations, else by value), the cards without one last.
-const laneId = (value) => (value ? `v:${value.key}` : NO_VALUE);
-function boardLanes(plan, cards) {
-  if (!plan.lane) return null;
-  const seen = new Map();
-  for (const card of cards) if (card.laneValue && !seen.has(card.laneValue.key)) seen.set(card.laneValue.key, card.laneValue);
-  const lanes = [...seen.values()].sort((a, b) => byRank(a.rank, b.rank)).map((v) => {
-    const option = plan.lane.options?.find((o) => o.id === v.key);
-    return { id: laneId(v), name: v.name, color: option ? GITHUB_COLORS[option.color] ?? "muted" : "muted" };
-  });
-  if (cards.some((c) => !c.laneValue)) lanes.push({ id: NO_VALUE, name: `Ohne ${plan.lane.name}`, color: "dim" });
-  return lanes;
+function answerItems(json, errors, project) {
+  const items = json?.data?.repositoryOwner?.projectV2?.items;
+  if (Array.isArray(items?.nodes)) return items;
+  const e = errorAt(errors, ITEMS_PATH) ?? errorAt(errors, PROJECT_PATH);
+  throw new BoardError(e ? `Projekt „${project.title}“: ${firstLine(e.message)}` : `Projekt „${project.title}“ lieferte keine Einträge`);
 }
 
-// gh's answers for a board (githubBoardArgs and its pages, joined by
-// addBoardPage; and the GraphQL errors that came with them), read as
+function itemEntry(plan, node, view, order) {
+  const card = githubCard(node, view.owners, plan);
+  return { node, card, ...orderEntry(order, plan.group, plan.sorts, (field) => nodeValue(plan, node, card, field)) };
+}
+
+// gh's answers for a board (githubItemsArgs and its pages, joined by
+// addItemsPage; and the GraphQL errors that came with them), read as
 // boardPlan says (`plan`) → the board shape's data (ui/shapes/board.js):
 // columns from the column field, each card in its column (one without a
 // value in a column "Ohne <field>" before them, which takes no card), in
-// its swimlane's order and then by the view's sort keys (those without a
-// value last; unsorted, GitHub's order), and the swimlanes where the view
-// has a swimlane field.
+// the view's order (viewOrder), and the swimlanes, each card's `lane`,
+// where the view groups.
 export function parseGithubBoard(json, view, hidden, errors, plan) {
   const { project, shown } = plan;
-  const items = json?.data?.repositoryOwner?.projectV2?.items;
-  if (!Array.isArray(items?.nodes)) {
-    const e = errorAt(errors, ITEMS_PATH) ?? errorAt(errors, PROJECT_PATH);
-    throw new BoardError(e ? `Projekt „${project.title}“: ${firstLine(e.message)}` : `Projekt „${project.title}“ lieferte keine Einträge`);
-  }
+  const items = answerItems(json, errors, project);
   const answer = json.data.repositoryOwner.projectV2;
-  const cards = items.nodes.filter(Boolean).map((node) => {
-    const card = githubCard(node, view.owners, plan);
-    const column = nodeValue(plan, node, card, plan.column);
-    const laneValue = plan.lane ? nodeValue(plan, node, card, plan.lane) : null;
-    return { card, column: column?.key ?? null, laneValue, keys: plan.sorts.map((s) => nodeValue(plan, node, card, s.field)) };
+  const cards = items.nodes.filter(Boolean).map((node, order) => {
+    const entry = itemEntry(plan, node, view, order);
+    return { ...entry, column: nodeValue(plan, node, entry.card, plan.column)?.key ?? null };
   });
   const columns = boardColumns(plan, hidden, answer, new Set(cards.map((c) => c.column)));
   const byId = new Map(columns.map((c) => [c.id, c]));
-  const lanes = boardLanes(plan, cards);
-  const laneAt = new Map((lanes ?? []).map((l, i) => [l.id, i]));
-  const ordered = cards
-    .map((c, i) => ({ ...c, i, lane: laneId(c.laneValue) }))
-    .sort((a, b) => {
-      if (lanes) {
-        const lane = laneAt.get(a.lane) - laneAt.get(b.lane);
-        if (lane) return lane;
-      }
-      for (const [k, s] of plan.sorts.entries()) {
-        const order = bySort(a.keys[k], b.keys[k], s.direction);
-        if (order) return order;
-      }
-      return a.i - b.i;
-    });
+  const lanes = plan.group ? groupsOf(plan.group, cards) : null;
+  const ordered = viewOrder(cards, lanes, plan.sorts);
   if (ordered.some((c) => !byId.has(c.column))) {
     const none = { id: NO_VALUE, name: noValueName(plan), color: "dim", hidden: false, cardsNotRead: false, count: 0, target: false, cards: [] };
     columns.unshift(none);
@@ -4748,7 +4897,7 @@ export function parseGithubBoard(json, view, hidden, errors, plan) {
   }
   for (const c of ordered) {
     const col = byId.get(byId.has(c.column) ? c.column : NO_VALUE);
-    col.cards.push({ ...c.card, column: col.id, ...(lanes ? { lane: c.lane } : {}) });
+    col.cards.push({ ...c.card, column: col.id, ...(lanes ? { lane: c.group } : {}) });
     if (!col.hidden) col.count++;
   }
   return {
@@ -4763,11 +4912,61 @@ export function parseGithubBoard(json, view, hidden, errors, plan) {
       url: project.url,
       view: shown.number,
       filter: shown.filter,
-      query: boardFilter(plan, hidden),
+      query: itemsFilter(plan, hidden),
       unreadable: plan.unreadable,
     },
     columns,
     lanes,
+    total: items.totalCount,
+    limited: items.pageInfo?.hasNextPage ?? false,
+    viewer: project.viewer,
+    count: items.nodes.length,
+  };
+}
+
+const tableField = (f) => ({ id: f.id, name: f.name, type: f.type, from: fromOf(f) });
+const tableCell = (value) => (value ? { name: value.name, ...(value.color ? { color: value.color } : {}) } : null);
+
+// gh's answers for a table or roadmap view, as for a board (above), read as
+// tablePlan says (`plan`) → the table shape's data (ui/shapes/table.js): {
+// shape: "table", meta, fields: [{ id, name, type (GitHub's dataType),
+// from (fromOf) }] (tablePlan's, Title first), groupBy (the group field
+// in that form, null without), sortBy ([{ field in that form, direction
+// }]), groups ([{ id, name, color }] in the group field's order, "Ohne
+// <field>" last; null without), rows (the cards in the view's order,
+// viewOrder, each with its place in GitHub's order `order`, its `group` where
+// the view groups, its sort keys' `ranks` and its `cells`, one per field:
+// the value of one read by name, { name, color? }, else null), total,
+// limited, viewer, count }.
+export function parseGithubTable(json, view, errors, plan) {
+  const { project, shown } = plan;
+  const items = answerItems(json, errors, project);
+  const entries = items.nodes.filter(Boolean).map((node, order) => itemEntry(plan, node, view, order));
+  const groups = plan.group ? groupsOf(plan.group, entries) : null;
+  const rows = viewOrder(entries, groups, plan.sorts).map((e) => ({
+    ...e.card,
+    order: e.order,
+    ...(groups ? { group: e.group } : {}),
+    ranks: e.ranks,
+    cells: plan.fields.map((f) => (readByName(f) ? tableCell(nodeValue(plan, e.node, e.card, f)) : null)),
+  }));
+  return {
+    shape: "table",
+    meta: {
+      projectId: project.id,
+      title: project.title,
+      url: project.url,
+      view: shown.number,
+      layout: shown.layout,
+      filter: shown.filter,
+      unreadable: plan.unreadable,
+      blank: plan.blank,
+    },
+    fields: plan.fields.map(tableField),
+    groupBy: plan.group ? tableField(plan.group) : null,
+    sortBy: plan.sorts.map((s) => ({ field: tableField(s.field), direction: s.direction })),
+    groups,
+    rows,
     total: items.totalCount,
     limited: items.pageInfo?.hasNextPage ?? false,
     viewer: project.viewer,
@@ -5440,6 +5639,11 @@ export function readGh({ code, stdout, stderr }, { write = false, path = null, r
   throw failure(text, { write, unclear: !(status >= 400) });
 }
 
+// How a project's view is read and drawn, by the shape its layout draws in
+// (KINDS); null for a layout the board does not draw.
+const PLANS = { board: boardPlan, table: tablePlan };
+const planFor = (layout) => PLANS[kindOf({ source: "github", layout })?.shape] ?? null;
+
 const gh = async (paths, args, options = {}) => readGh(await call("gh", args, null, GH_TIMEOUT, { ...options, paths }), options);
 
 const prsReadKey = (view) => JSON.stringify([view.sections, view.limit]);
@@ -5501,6 +5705,57 @@ export function makeGithub(paths) {
     return read;
   }
 
+  // A project's view, of whichever layout: the project with its views and
+  // fields (githubProjectArgs), which the board learns (live.project); then,
+  // of the view it shows (the view's own, or for the view that learns them
+  // the one it wants, else the first), the first page of items and each
+  // next one, one call each, until GitHub has no more, the view's limit is
+  // read, or as many calls ran as full pages would take to read it; read as
+  // its layout's plan says (planFor), a view of a layout the board does not
+  // draw reading none. Both reads are one load, so that the view's state,
+  // progress, error and saved data stay those of one read; the board, which
+  // knows what shows, names the view it goes on with. A board's move writes
+  // the card's column (one layout's data may stand in another's view until
+  // its read).
+  const projectViews = {
+    async load(view, { hiddenFor, live = NO_LIVE }) {
+      // The hidden columns as the load starts: a change since reads again.
+      let hidden = hiddenFor(view);
+      const head = await gh(paths, githubProjectArgs(view), what(view, "project"));
+      const project = parseGithubProject(head.json, view, head.errors);
+      const meta = projectMeta(project);
+      const { wanted = null } = view;
+      const number = view.address.view ?? (project.views.some((v) => v.number === wanted) ? wanted : project.views[0]?.number);
+      const shown = project.views.find((v) => v.number === number);
+      if (!shown) {
+        const why = view.address.view === null ? "hat keine Ansichten" : `hat keine Ansicht ${view.address.view} mehr`;
+        throw Object.assign(new BoardError(`Projekt „${project.title}“ ${why}`), { project: meta });
+      }
+      const learnt = live.project(meta);
+      const toPlan = planFor(shown.layout);
+      if (learnt === false || !toPlan) return { data: { shape: "placeholder" }, warnings: head.warnings };
+      const now = learnt ?? view;
+      const plan = toPlan(project, shown);
+      if (now !== view) hidden = hiddenFor(now);
+      const parse = (json, errors) => plan.parse(json, now, hidden, errors);
+      const { json, warnings, errors } = await gh(paths, githubItemsArgs(now, plan, hidden), what(now, "items-page-1"));
+      warnings.unshift(...head.warnings);
+      const calls = Math.ceil(now.limit / PAGE);
+      const pages = itemPages(json, now, calls);
+      for (let call = 1, next = nextItemsPage(json, now); next && call < calls; call++, next = nextItemsPage(json, now)) {
+        live.partial(() => ({ data: { ...parse(json, errors), partial: true }, warnings: [...warnings] }));
+        live.page(call + 1, Math.max(call + 1, pages));
+        const page = await gh(paths, githubItemsPageArgs(now, plan, hidden, next.after, next.count), what(now, `items-page-${call + 1}`));
+        addItemsPage(json, page.json, page.errors);
+        warnings.push(...page.warnings);
+      }
+      return { data: parse(json, errors), warnings };
+    },
+    async move(view, data, card, column) {
+      checkMoveResult((await gh(paths, githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH, ...what(view, "move") })).json, card);
+    },
+  };
+
   return {
     site: "GitHub",
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
@@ -5532,51 +5787,9 @@ export function makeGithub(paths) {
       },
     },
     views: {
-      board: {
-        // The project with its views and fields (githubProjectArgs), which
-        // the board learns (live.project); then, of the view it shows (the
-        // view's own, or for the view that learns them the one it wants,
-        // else the first), the first page of items and each next one, one
-        // call each, until GitHub has no more, the view's limit is read, or
-        // as many calls ran as full pages would take to read it. A view of
-        // another layout reads no items. Both reads are one load, so that the
-        // view's state, progress, error and saved data stay those of one read;
-        // the board, which knows what shows, names the view it goes on with.
-        async load(view, { hiddenFor, live = NO_LIVE }) {
-          // The hidden columns as the load starts: a change since reads again.
-          let hidden = hiddenFor(view);
-          const head = await gh(paths, githubProjectArgs(view), what(view, "project"));
-          const project = parseGithubProject(head.json, view, head.errors);
-          const meta = projectMeta(project);
-          const { wanted = null } = view;
-          const number = view.address.view ?? (project.views.some((v) => v.number === wanted) ? wanted : project.views[0]?.number);
-          const shown = project.views.find((v) => v.number === number);
-          if (!shown) {
-            const why = view.address.view === null ? "hat keine Ansichten" : `hat keine Ansicht ${view.address.view} mehr`;
-            throw Object.assign(new BoardError(`Projekt „${project.title}“ ${why}`), { project: meta });
-          }
-          const learnt = live.project(meta);
-          if (learnt === false || shown.layout !== "board") return { data: { shape: "placeholder" }, warnings: head.warnings };
-          const now = learnt ?? view;
-          const plan = boardPlan(project, shown);
-          if (now !== view) hidden = hiddenFor(now);
-          const { json, warnings, errors } = await gh(paths, githubBoardArgs(now, plan, hidden), what(now, "board-page-1"));
-          warnings.unshift(...head.warnings);
-          const calls = Math.ceil(now.limit / PAGE);
-          const pages = boardPages(json, now, calls);
-          for (let call = 1, next = nextBoardPage(json, now); next && call < calls; call++, next = nextBoardPage(json, now)) {
-            live.partial(() => ({ data: { ...parseGithubBoard(json, now, hidden, errors, plan), partial: true }, warnings: [...warnings] }));
-            live.page(call + 1, Math.max(call + 1, pages));
-            const page = await gh(paths, githubBoardPageArgs(now, plan, hidden, next.after, next.count), what(now, `board-page-${call + 1}`));
-            addBoardPage(json, page.json, page.errors);
-            warnings.push(...page.warnings);
-          }
-          return { data: parseGithubBoard(json, now, hidden, errors, plan), warnings };
-        },
-        async move(view, data, card, column) {
-          checkMoveResult((await gh(paths, githubMoveArgs(data.meta, card, column), { write: true, path: MOVE_PATH, ...what(view, "move") })).json, card);
-        },
-      },
+      board: projectViews,
+      table: projectViews,
+      roadmap: projectViews,
       list: {
         together: (views) => views.filter((v) => v.source === "github" && v.layout === "list"),
         async load(view, { live = NO_LIVE }) {
@@ -6672,6 +6885,29 @@ export function typeLine(t, item, hex, inset = 0) {
 export const selectedLook = (t, selected, rest, restBg = null) => (el) =>
   el.border_color(selected ? t.accent : rest).when(selected || Boolean(restBg), (e) => e.bg(selected ? selectedBg(t) : restBg));
 
+export const listRow = (b, t, view, st, item, rest = t.background) =>
+  h_flex()
+    .id(`row-${item.key}`)
+    .relative()
+    .flex_none()
+    .gap(12)
+    .px(18)
+    .items_center()
+    .border_l(2)
+    .map(selectedLook(t, st.sel?.key === item.key, rest))
+    .opacity(st.pending[item.key] ? 0.7 : 1)
+    .cursor_pointer()
+    .hover((s) => s.bg(t.hover))
+    .on_click((_e, cx) => {
+      if (!b.modal) b.clickItem(view, { col: 0, key: item.key }, cx);
+    });
+
+export const groupHead = (t, group, count) =>
+  h_flex().flex_none().gap(8).items_center().border_b(1).border_color(t.border)
+    .child(div().size(9).flex_none().rounded(5).bg(toneColor(t, group.color)))
+    .child(div().text_size(12.5).font_semibold().child(group.name))
+    .child(div().text_size(12).text_color(t.muted).child(count));
+
 // A card's chip: `text` in `fg` on `bg`.
 export const chip = (t, text, fg = t.muted, bg = t.raised) => div().px(7).rounded(9).text_size(11).text_color(fg).bg(bg).child(text);
 
@@ -6725,7 +6961,7 @@ export const sessionReasons = (s) =>
 
 export function priorityChip(t, item) {
   if (!item.priority) return null;
-  return toneChip(t, item.priority.name, namedTone(t, item.priority.tone)).id("priority").flex_none();
+  return toneChip(t, item.priority.name, namedTone(t, item.priority.color)).id("priority").flex_none();
 }
 
 // `kids`: the key, on a story its fold and type too.
@@ -7184,7 +7420,7 @@ export async function unclearCreateLines(b, view, due) {
 // item the backlog does not hold (a Task) it cannot tell.
 export function unclearParentLines(due, data) {
   return due.map((u) => {
-    const now = findBacklogItem(data, u.key);
+    const now = findRow(data, u.key);
     if (!now) return { text: `Ob ${u.label} unter ${u.parentLabel} hängt, zeigt der Backlog nicht: ${u.label} ist kein Eintrag von ihm`, warn: true };
     if (now.parent === u.parent) return { text: `${u.label} hängt nach dem Neuladen unter ${u.parentLabel}`, warn: false };
     return { text: `${u.label} hängt nach dem Neuladen nicht unter ${u.parentLabel}`, warn: true };
@@ -9298,13 +9534,13 @@ const backlogColumns = (b, st) => backlogNav(st.data, b.filterText, b.mine);
 
 // How the backlog finds an item, and where one no longer is: what its
 // states and its assignments share.
-const BACKLOG_LOOKUP = { find: findBacklogItem, where: "im Backlog" };
+const BACKLOG_LOOKUP = { find: findRow, where: "im Backlog" };
 // How the backlog finds, changes and shows its items' states
 // (actions/state.js). A state that landed is the item's own: nothing is
 // read again for it.
 const BACKLOG_STATES = { ...BACKLOG_LOOKUP, withState: withBacklogState, stateOf: (_data, item) => item.state, again: false };
 // How the backlog finds and changes its items' assignees (actions/assign.js).
-const BACKLOG_ASSIGN = { ...BACKLOG_LOOKUP, withItem: withBacklogItem };
+const BACKLOG_ASSIGN = { ...BACKLOG_LOOKUP, withItem: withRow };
 
 // The widths of a row's cells (the title takes the rest).
 const WIDTH = { key: 80, type: 110, state: 120, sprint: 120, assignee: 150 };
@@ -9377,30 +9613,14 @@ function drawBacklog(b, t, mono, view, st) {
       .child(div().w(WIDTH.sprint).flex_none().child("Sprint"))
       .child(div().w(WIDTH.assignee).flex_none().child("Zugewiesen")));
   if (!col.shown.length) {
-    const what = data.rows.length ? "Nichts passt zum Filter oder zu „nur meine“" : "Der Backlog ist leer";
+    const what = data.rows.length ? NOTHING_SHOWS : "Der Backlog ist leer";
     return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));
   }
   const row = (r) => {
-    const selected = st.sel?.key === r.key;
     const session = itemSessions(sessions, r)[0] ?? null;
     const line = typeLine(t, r, data.meta.typeColors?.[r.type]);
-    return h_flex()
-      .id(`row-${r.key}`)
-      .relative()
-      .flex_none()
-      .gap(12)
-      .px(18)
+    return listRow(b, t, view, st, r)
       .py(7)
-      .items_center()
-      .border_l(2)
-      .map(selectedLook(t, selected, t.background))
-      .opacity(st.pending[r.key] ? 0.7 : 1)
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => {
-        // A click on a row (clickItem).
-        if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
-      })
       .child(div().w(WIDTH.key).flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
       .child(cell(WIDTH.type, r.type ?? ""))
       .child(h_flex().flex_1().min_w(0).gap(6).items_center()
@@ -9660,7 +9880,7 @@ export const boardShape = {
     ...unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
     ...view.hide.filter((n) => data.columns.some((c) => c.name === n && !hideable(c))).map(notHideable),
     ...(data.meta.ownColumn === false ? [`Ansicht „${view.name}“ nennt kein Feld für ihre Spalten: das Board nimmt „${data.meta.fieldName}“, wie GitHub`] : []),
-    ...(data.meta.unreadable ?? []).map((n) => `Ansicht „${view.name}“ sortiert oder gruppiert nach „${n}“, einem Feld, das das Board nicht liest: es ordnet ohne`),
+    ...unreadableOrder(view, data.meta.unreadable ?? []),
   ],
   settle: (b, view, due, data, cx) =>
     tellOutcomes(b, [...unclearMoveLines(due.filter((u) => u.kind === "move"), data), ...unclearAssignLines(due.filter((u) => u.kind === "assign"), data, BOARD_ASSIGN)], cx),
@@ -9732,14 +9952,11 @@ const dropOn = (b, view, ci, col) => (el) => el
     if (from !== col.id) b.chooseDropped(view, key, cx);
   });
 
-// What a board without a card says: with the filter its query sent (the
-// view's, and with columns hidden the terms that leave them out), which
-// GitHub answers with no items also where it cannot read it.
+// What a board without a card says (noItemsText): with the view's filter,
+// and with columns hidden the terms that leave them out.
 function emptyText(data) {
   const hidden = data.columns.some((c) => c.hidden);
-  const filter = hidden ? data.meta?.query : data.meta?.filter;
-  const where = hidden ? " in den gezeigten Spalten" : "";
-  return filter ? `Keine Einträge${where} für den Filter „${filter}“ (auch einen Filter, den GitHub nicht versteht, beantwortet es so)` : `Keine Einträge${where}`;
+  return noItemsText(hidden ? data.meta?.query : data.meta?.filter, hidden ? " in den gezeigten Spalten" : "");
 }
 
 // A waiting column's count: GitHub's h<i> count, read while it was hidden.
@@ -9875,10 +10092,7 @@ function drawLanes(b, t, mono, view, st, cols, sessions, dragged) {
   }));
   const rowEl = (row, i) => {
     if (row.head) {
-      return h_flex().id(`lane-${row.lane.id}`).flex_none().h(LANE_HEAD).gap(8).items_center().px(4).border_b(1).border_color(t.border)
-        .child(div().size(9).flex_none().rounded(5).bg(toneColor(t, row.lane.color)))
-        .child(div().text_size(12.5).font_semibold().child(row.lane.name))
-        .child(div().text_size(12).text_color(t.muted).child(String(row.count)));
+      return groupHead(t, row.lane, String(row.count)).id(`lane-${row.lane.id}`).h(LANE_HEAD).px(4);
     }
     if (layout && !inBand(kept.band, layout.tops[i], layout.heights[i])) return div().flex_none().h(layout.heights[i]);
     return h_flex().flex_none().gap(COLUMN_GAP).items_start().children(row.cards.map((card, ci) => {
@@ -10041,15 +10255,17 @@ function openBoardStatusMenu(b, view) {
 // ==== src/ui/shapes/placeholder.js ====
 
 // The placeholder shape: what a view whose source reads nothing for it yet
-// shows, the text of its kind (KINDS). It has no items, so Enter, o and the
-// arrows are left to herdr. View fields it reads: source, layout, name.
+// shows, the text of its kind (KINDS), or for a kind not there (a GitHub
+// layout the board does not draw) that the board does not know its layout.
+// It has no items, so Enter, o and the arrows are left to herdr. View
+// fields it reads: source, layout, name.
 
 export const placeholderShape = {
   nav: () => [],
   selected: () => null,
   scrollTo() {},
   count: () => null,
-  render: (b, t, mono, view) => div().p(20).text_color(t.muted).child(kindOf(view)?.text?.(view) ?? "Diese Ansicht gibt es noch nicht"),
+  render: (b, t, mono, view) => div().p(20).text_color(t.muted).child(kindOf(view)?.text?.(view) ?? `Ansicht „${view.name}“: Darstellung „${view.layout}“ kennt das Board nicht`),
   items: () => [],
   dirs: [],
   loads: false,
@@ -10146,24 +10362,9 @@ export function sectionCount(section, shown, held) {
 
 function drawPrs(b, t, mono, view, st) {
   const now = Date.now();
-  const row = (r, tone) => {
-    const selected = st.sel?.key === r.key;
-    return h_flex()
-      .id(`row-${r.key}`)
-      .flex_none()
-      .gap(12)
-      .px(18)
+  const row = (r, tone) =>
+    listRow(b, t, view, st, r, toneColor(t, tone))
       .py(8)
-      .items_center()
-      .border_l(2)
-      // Its section's stripe, the accent while it is selected.
-      .map(selectedLook(t, selected, toneColor(t, tone)))
-      .cursor_pointer()
-      .hover((s) => s.bg(t.hover))
-      .on_click((_e, cx) => {
-        // A click on a row (clickItem).
-        if (!b.modal) b.clickItem(view, { col: 0, key: r.key }, cx);
-      })
       .child(div().w(170).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
       .child(div().flex_1().min_w(0).truncate().child(r.title))
       .child(attentionCell(t, r))
@@ -10172,7 +10373,6 @@ function drawPrs(b, t, mono, view, st) {
       .child(div().w(60).flex_none().text_size(12).text_color(t.muted).child(r.draft ? "Entwurf" : ""))
       .when(Boolean(r.checks), (el) => el.child(div().w(70).flex_none().text_size(12).text_color(checkColor(t, r.checks?.state)).child(r.checks?.short ?? "")))
       .child(div().w(70).flex_none().text_size(12).text_color(t.muted).child(ageLabel(r.updatedAt, now)));
-  };
   const children = [];
   for (const [i, s] of st.data.sections.entries()) {
     const kept = keptRows(st.data, s);
@@ -10458,7 +10658,7 @@ function drawSprint(b, t, mono, view, st) {
     return v_flex().flex_1().min_h(0).child(head).child(div().id("sprint-none").p(20).text_color(t.muted).child(note));
   }
   if (!rows.length) {
-    const what = sprintItems(data).length ? "Nichts passt zum Filter oder zu „nur meine“" : "Keine Work Items im Sprint";
+    const what = sprintItems(data).length ? NOTHING_SHOWS : "Keine Work Items im Sprint";
     return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));
   }
   const rowEl = (r) => h_flex()
@@ -10566,6 +10766,235 @@ function drawTask(b, t, mono, view, st, card, ci, col, sessions) {
     .when(Boolean(line), (el) => el.child(line));
 }
 
+// ==== src/kinds/table.js ====
+
+// A GitHub project's table: the rows its list walks, the lines it draws
+// (group rows and item rows), a row's value of a field, a row placed anew
+// after a change, its warnings and the form its saved state takes.
+// parseGithubTable (sources/github.js) builds the data.
+
+// The rows that `visible` lets through, in the table's order, as one list
+// (navigate walks a list as one column).
+export const tableNav = (data, visible) => [{ id: "table", name: data.meta.title, shown: data.rows.filter(visible) }];
+
+// The lines of a table's list, in its order: without groups its rows that
+// `visible` lets through ({ row }); with groups, before each group that
+// holds such a row, its group row ({ group, shown, held: how many rows of
+// it show and how many it holds }), then those rows.
+export function tableLines(data, visible) {
+  if (!data.groups) return data.rows.filter(visible).map((row) => ({ row }));
+  const lines = [];
+  for (const group of data.groups) {
+    const held = data.rows.filter((r) => r.group === group.id);
+    const shown = held.filter(visible);
+    if (!shown.length) continue;
+    lines.push({ group, shown: shown.length, held: held.length });
+    lines.push(...shown.map((row) => ({ row })));
+  }
+  return lines;
+}
+
+// A row's value of the table's field `fieldAt` (its index in data.fields):
+// its cell where the query read the field by name, else its card's as the
+// card is now (cardValue); null for none, also for a field the board does
+// not read.
+export function tableValue(data, row, fieldAt) {
+  const field = data.fields[fieldAt];
+  if (field.from === "cell") return row.cells[fieldAt];
+  return field.from === "card" ? cardValue(field, row) : null;
+}
+
+const fromCard = (field) => field?.from === "card";
+
+// The data with the row `key`'s fields set to those of `patch`; where the
+// view groups or sorts by a field the card holds, the rows are grouped and
+// ordered anew by the cards as they are now.
+export function withTableRow(data, key, patch) {
+  const next = withRow(data, key, patch);
+  const regroup = fromCard(data.groupBy);
+  if (!regroup && !data.sortBy.some((s) => fromCard(s.field))) return next;
+  const entries = next.rows.map((row) => {
+    const value = (field, k) => (fromCard(field) ? cardValue(field, row) : { rank: row.ranks[k] });
+    const entry = orderEntry(row.order, regroup ? data.groupBy : null, data.sortBy, value);
+    return { row, ...entry, group: regroup ? entry.group : row.group };
+  });
+  const groups = regroup ? groupsOf(data.groupBy, entries) : data.groups;
+  const rows = viewOrder(entries, groups, data.sortBy).map((e) => ({ ...e.row, ranks: e.ranks, ...(groups ? { group: e.group } : {}) }));
+  return { ...next, groups, rows };
+}
+
+// The warnings of a table: the fields it shows that the board does not
+// read, whose cells stay empty (one line), and its sort keys and group
+// field of such a kind.
+export function tableWarnings(view, data) {
+  const blank = data.meta.blank ?? [];
+  const named = blank.map((n) => `„${n}“`).join(", ");
+  const shown = blank.length === 1
+    ? [`Ansicht „${view.name}“ zeigt ${named}, ein Feld, das das Board nicht liest: es bleibt leer`]
+    : blank.length ? [`Ansicht „${view.name}“ zeigt ${named}, Felder, die das Board nicht liest: sie bleiben leer`] : [];
+  return [...shown, ...unreadableOrder(view, data.meta.unreadable ?? [])];
+}
+
+// GitHub's address of an issue or pull request, which a saved row leaves
+// out where the item's url is that, as it leaves out its itemId, its key.
+const itemUrl = (row) => `https://github.com/${row.repo}/${row.kind === "pr" ? "pull" : "issues"}/${row.number}`;
+const spread = (prefix, list) => Object.fromEntries(list.map((v, i) => [`${prefix}${i}`, v]));
+const gather = (row, prefix, count) => Array.from({ length: count }, (_, i) => row[`${prefix}${i}`] ?? null);
+
+// A table's data as its saved state keeps it: its rows packed (packRows),
+// each cell and sort key's rank a trait of its own, so that a value many
+// rows hold is kept once; and that form read back.
+export function savedTable(data) {
+  const { rows, ...rest } = data;
+  const kept = rows.map(({ itemId, url, cells, ranks, ...row }) => ({ ...row, ...(url === itemUrl(row) ? {} : { url }), ...spread("cell:", cells), ...spread("rank:", ranks) }));
+  return { ...rest, packed: packRows(kept) };
+}
+
+export function tableFromSaved(data) {
+  const { packed, ...rest } = data;
+  const rows = unpackRows(packed).map((kept) => {
+    const row = Object.fromEntries(Object.entries(kept).filter(([name]) => !name.includes(":")));
+    return { ...row, itemId: row.key, url: Object.hasOwn(row, "url") ? row.url : itemUrl(row), cells: gather(kept, "cell:", data.fields.length), ranks: gather(kept, "rank:", data.sortBy.length) };
+  });
+  return { ...rest, rows };
+}
+
+// ==== src/ui/shapes/table.js ====
+
+// The table shape: a GitHub project's table or roadmap view as GitHub's
+// table draws it, walked as one list: a head row with the view's fields
+// (Title first, as on GitHub), then one row per item, each cell its field's
+// value by the field's kind; where the view groups, a group row before
+// each group (its value's color, name and how many of its rows show), which
+// nothing selects. Like a long board column it draws whole only the rows
+// about its window, the others as empty frames of their height (band.js).
+// The data: parseGithubTable's (sources/github.js). View fields it reads:
+// id and name.
+
+const tableState = (b) => b.shapeState.table;
+
+const TABLE_ASSIGN = { find: findRow, withItem: withTableRow, where: "in der Tabelle" };
+
+// A row's and a group row's height: each is drawn this high, so the band
+// needs no measure.
+export const TABLE_ROW_H = 32;
+export const TABLE_GROUP_H = 28;
+
+// A field's width, its head's and its cells', by the field's kind; the
+// title takes the rest, at least TITLE_MIN_W.
+export const FIELD_W = {
+  SINGLE_SELECT: 120, ITERATION: 120, NUMBER: 70, DATE: 80, TEXT: 160, ASSIGNEES: 150, LABELS: 200, MILESTONE: 120, REPOSITORY: 130,
+  PARENT_ISSUE: 180, SUB_ISSUES_PROGRESS: 80, LINKED_PULL_REQUESTS: 70, ISSUE_TYPE: 100,
+};
+const OTHER_W = 100;
+const TITLE_MIN_W = 200;
+const fieldWidth = (field) => FIELD_W[field.type] ?? OTHER_W;
+
+const visibleIn = (b, data) => (r) => b.visible(r, data);
+const linesOf = (b, data) => tableLines(data, visibleIn(b, data));
+const lineHeight = (line) => (line.row ? TABLE_ROW_H : TABLE_GROUP_H);
+
+export const tableShape = {
+  state() {
+    const scroll = ScrollHandle.new();
+    return { scroll, band: bandState(), windowed: readsScroll(scroll) };
+  },
+  nav: (b, st) => tableNav(st.data, visibleIn(b, st.data)),
+  selected: (b, st) => tableNav(st.data, visibleIn(b, st.data))[0].shown.find((r) => r.key === st.sel?.key) ?? null,
+  scrollTo(b, view, sel) {
+    const st = b.state(view.id);
+    const s = tableState(b);
+    const lines = linesOf(b, st.data);
+    const at = lines.findIndex((l) => l.row?.key === sel.key);
+    if (at < 0) return;
+    if (s.windowed) {
+      const { tops, content } = rowTops(lines.map(lineHeight), 0);
+      revealCard(s.band, scrollOf(s.scroll), content, tops[at], lineHeight(lines[at]));
+    }
+    s.scroll.scroll_to_item(at);
+  },
+  bandsLeft(b) {
+    const s = tableState(b);
+    return s.windowed && leftBand(s.band, scrollOf(s.scroll));
+  },
+  items: (data) => data.rows,
+  count: (b, data) => ({ shown: data.rows.filter(visibleIn(b, data)).length, total: data.rows.length }),
+  render: (b, t, mono, view, st) => drawTable(b, t, mono, view, st),
+  dirs: ["up", "down"],
+  loads: true,
+  received: (data) => data,
+  toSaved: savedTable,
+  fromSaved: tableFromSaved,
+  warnings: tableWarnings,
+  settle: (b, view, due, data, cx) => tellOutcomes(b, unclearAssignLines(due.filter((u) => u.kind === "assign"), data, TABLE_ASSIGN), cx),
+  assign: TABLE_ASSIGN,
+};
+
+const textCell = (t, text) => div().min_w(0).truncate().text_color(t.muted).child(text);
+
+// A cell's look by its field's kind, for a value (tableValue); a kind not
+// here shows the value's name.
+const CELLS = {
+  SINGLE_SELECT: (t, value) => toneChip(t, value.name, value.color ?? "muted").min_w(0).truncate(),
+  DATE: (t, value) => textCell(t, dayText(value.name, new Date().getFullYear()) ?? value.name),
+  LABELS: (t, _value, row) => h_flex().min_w(0).gap(5).overflow_hidden().children(row.labels.map((l) => labelChip(t, row, l).flex_none())),
+  MILESTONE: (t, value) => toneChip(t, value.name, "muted").min_w(0).truncate(),
+  ISSUE_TYPE: (t, _value, row) => typeChip(t, row),
+};
+const nameCell = (t, value) => textCell(t, value.name);
+
+function drawTable(b, t, mono, view, st) {
+  const data = st.data;
+  const s = tableState(b);
+  const sessions = b.sessionsNow();
+  const lines = linesOf(b, data);
+  const heights = lines.map(lineHeight);
+  const at = s.windowed ? scrollOf(s.scroll) : null;
+  const layout = at && rowTops(heights, 0);
+  if (at) placeBand(s.band, layout.content, at);
+  const rest = data.fields.slice(1);
+  const head = h_flex().id("table-head").flex_none().gap(12).pl(20).pr(18).pt(10).pb(6).text_size(11).text_color(t.dim)
+    .child(div().flex_1().min_w(TITLE_MIN_W).truncate().child(data.fields[0]?.name ?? "Title"))
+    .children(rest.map((f, i) => div().id(`table-field-${i + 1}`).w(fieldWidth(f)).flex_none().truncate().child(f.name)));
+  const cell = (f, r, i) => {
+    const value = tableValue(data, r, i);
+    const content = value ? (CELLS[f.type] ?? nameCell)(t, value, r) : null;
+    return h_flex().w(fieldWidth(f)).flex_none().min_w(0).overflow_hidden().items_center().text_size(12).when(Boolean(content), (el) => el.child(content));
+  };
+  const row = (r) => {
+    const session = itemSessions(sessions, r)[0] ?? null;
+    const line = typeLine(t, r, null);
+    return listRow(b, t, view, st, r)
+      .h(TABLE_ROW_H)
+      .child(h_flex().flex_1().min_w(TITLE_MIN_W).gap(6).items_center()
+        .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
+        .child(div().min_w(0).truncate().child(r.title))
+        .when(Boolean(session), (el) => el.child(sessionChip(t, session).flex_none())))
+      .children(rest.map((f, i) => cell(f, r, i + 1)))
+      .when(Boolean(line), (el) => el.child(line));
+  };
+  const groupRow = (g) => groupHead(t, g.group, shownOf(g.shown, g.held)).id(`group-${g.group.id}`).h(TABLE_GROUP_H).px(20);
+  const lineEl = (l, i) => {
+    if (layout && !inBand(s.band, layout.tops[i], heights[i])) return div().flex_none().h(heights[i]);
+    return l.row ? row(l.row) : groupRow(l);
+  };
+  const box = v_flex().flex_1().min_h(0).child(head);
+  if (!lines.length) {
+    const what = data.rows.length ? NOTHING_SHOWS : data.partial ? null : noItemsText(data.meta.filter);
+    return box.when(Boolean(what), (el) => el.child(div().p(20).text_color(t.muted).child(what)));
+  }
+  return box
+    .child(v_flex().id("table-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(s.scroll)
+      .when(s.windowed, (el) => el.on_scroll_wheel((_e, cx) => {
+        // GPUI moved the list before the event reached it.
+        if (leftBand(s.band, scrollOf(s.scroll))) cx.notify();
+      }))
+      .children(lines.map(lineEl)))
+    .when(Boolean(data.limited) && !data.partial, (el) =>
+      el.child(div().px(16).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
+        .child(`Nur die ersten ${data.count} von ${data.total} Einträgen; den Filter enger fassen`)));
+}
+
 // ==== src/ui/shapes/index.js ====
 
 // The shapes a view's data is drawn and worked in, by name: data carries
@@ -10590,13 +11019,14 @@ function drawTask(b, t, mono, view, st, card, ci, col, sessions) {
 // where it is known) and enterHint (Enter's hint);
 // columnCount (how many columns it draws side by side, which the detail
 // panel's share of the width is no narrower than one of: detailWidth; a list
-// has none), bandsLeft (b: whether a column scrolled past the cards it drew
-// whole, which the Board asks every BAND_MS), detailParts (its rows in the
-// detail panel), settle (b, view, due, data, cx: says how the unclear writes
-// of its items ended up), withView (data, view: the data as the view's
-// settings show it now, the same data where they change nothing for it),
-// toggleRepo (b, view, repo, cx: turns a repo off or on, beside the repo
-// menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu with
+// has none), bandsLeft (b: whether a column or list scrolled past the items
+// it drew whole, which the Board asks every BAND_MS), toSaved and fromSaved
+// (data: the data as its saved state keeps it, and back), detailParts (its
+// rows in the detail panel), settle (b, view, due, data, cx: says how the
+// unclear writes of its items ended up), withView (data, view: the data as
+// the view's settings show it now, the same data where they change nothing
+// for it), toggleRepo (b, view, repo, cx: turns a repo off or on, beside the
+// repo menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu with
 // statusField (b, view: the name of what the status menu sets, where it is
 // not the status; null for none), navigate (its own keyboard movement in
 // place of navigate's, select.js), pickStatus (what a pick in the status
@@ -10611,7 +11041,7 @@ function drawTask(b, t, mono, view, st, card, ci, col, sessions) {
 // made while a view draws ("cannot run during render"). A new way to draw
 // is a module here and its entry in SHAPES.
 
-export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, placeholder: placeholderShape };
+export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, table: tableShape, placeholder: placeholderShape };
 
 // ==== src/description.js ====
 
@@ -11318,14 +11748,15 @@ export default class Board extends View {
   // one, { id, name } as the sprint picker chose it, null for the current
   // one; never stored), saved (the data drawn is the saved state, or what a
   // read drew over it so far), restored (the saved state was looked for),
-  // progress ({ page, pages }) and unavailable (the last read since
+  // unsaved (why the store did not take its last read: UNSAVED; null where
+  // it did), progress ({ page, pages }) and unavailable (the last read since
   // views.json was read found its source unavailable).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
       related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)), chosenFolds: new Map(), sprint: null,
-      saved: false, restored: false, progress: null, unavailable: false,
+      saved: false, restored: false, unsaved: null, progress: null, unavailable: false,
     };
     return this.views[id];
   }
@@ -11692,8 +12123,6 @@ export default class Board extends View {
       cx.timer.after(0, () => this.guarded("Gespeicherter Stand", () => this.viewsNow().forEach((v) => this.restore(v))));
       if (!shown || !this.loader(shown)) this.schedulePrefetch(cx);
       if (!shown) return;
-      const learning = this.learningView(shown);
-      if (learning) return void this.refresh(learning, cx);
       this.sources[shown.source]?.forget?.(shown);
       // The open details' related items are read again too.
       this.state(shown.id).related.clear();
@@ -11831,8 +12260,9 @@ export default class Board extends View {
       const saved = readSaved(text, view, this.hiddenFor(view));
       const shape = SHAPES[saved?.data.shape];
       if (!shape?.loads) return;
-      const data = shape.received(saved.data, st, view);
-      const warnings = [...saved.warnings, ...shape.warnings(view, saved.data)];
+      const kept = shape.fromSaved ? shape.fromSaved(saved.data) : saved.data;
+      const data = shape.received(kept, st, view);
+      const warnings = [...saved.warnings, ...shape.warnings(view, kept)];
       Object.assign(st, { data, warnings, at: saved.at, saved: true });
       this.keepSelection(view);
     } catch (e) {
@@ -11843,13 +12273,19 @@ export default class Board extends View {
     }
   }
 
-  // After the draw the data came with. Where the store does not take the
-  // read, the entry before goes too: a restart would draw it as the last.
+  // After the draw the data came with, in the form its shape stores. Where
+  // the store does not take the read, the entry before goes too: a restart
+  // would draw it as the last; the view says so beside its age (unsaved).
   save(view, hidden, read, at, cx) {
-    cx.timer.after(0, () => this.guarded("Speichern", () => {
+    cx.timer.after(0, (cx) => this.guarded("Speichern", () => {
       const key = savedKey(view.id);
-      const text = savedText(view, hidden, read, at);
+      const shape = SHAPES[read.data.shape];
+      const text = savedText(view, hidden, { ...read, data: shape.toSaved ? shape.toSaved(read.data) : read.data }, at);
       const refused = text === null ? `more than ${SAVED_MAX} bytes` : store.setText(key, text);
+      const st = this.state(view.id);
+      const unsaved = refused === null ? null : text === null ? UNSAVED.big : UNSAVED.refused;
+      if (st.unsaved !== unsaved) cx.notify();
+      st.unsaved = unsaved;
       if (refused === null) return;
       store.remove(key);
       boardLog.write(`board: ${key} not saved: ${refused}`);
@@ -12856,7 +13292,7 @@ export default class Board extends View {
   // refresh. Without a valid views.json the first row holds only the
   // board's name.
   toolbar(t, view, st) {
-    const { reading, age } = readLabels(st, Date.now());
+    const { reading, age, unsaved } = readLabels(st, Date.now());
     const context = this.context();
     const tab = this.tab();
     const row = () => h_flex().gap(12).px(16).items_center();
@@ -12891,6 +13327,7 @@ export default class Board extends View {
       )
       .when(Boolean(reading), (el) => el.child(div().id("reading").flex_none().text_size(12).text_color(t.muted).child(reading)))
       .when(Boolean(age), (el) => el.child(div().id("age").flex_none().text_size(12).text_color(t.muted).child(age)))
+      .when(Boolean(unsaved), (el) => el.child(div().id("unsaved").flex_none().text_size(12).text_color(t.dim).child(unsaved)))
       .child(button(t, "refresh", svg(REFRESH_ICON).size(14).when(Boolean(st?.loading), (el) => el.spin(1000)), false, (cx) => this.reload(cx)));
     return v_flex().id("top-bar").flex_none().border_b(1).border_color(t.border).child(nav).child(tools);
   }
@@ -13004,10 +13441,7 @@ export default class Board extends View {
     if (!view) return message("Keine Ansicht verfügbar");
     const shape = this.shape(view);
     const errorLine = (text) => div().px(16).pt(14).text_color(toneColor(t, NOTE_TONES.error)).child(text);
-    if (shape.loads === false) {
-      const error = this.learnError(view);
-      return box.when(Boolean(error), (el) => el.child(errorLine(error))).child(shape.render(this, t, mono, view, st));
-    }
+    if (shape.loads === false) return box.child(shape.render(this, t, mono, view, st));
     if (!st.data && !st.error) return st.loading ? loading() : message("Noch nichts geladen");
     let shown = box;
     if (st.error) shown = shown.child(errorLine(st.error));
@@ -13015,19 +13449,6 @@ export default class Board extends View {
     if (warnings.length) shown = shown.children(warnings.map((w) => div().px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(w)));
     if (!st.data) return shown;
     return shown.child(shape.render(this, t, mono, view, st));
-  }
-
-  // For a project's view that reads nothing itself (a table's), the view
-  // that reads for it at its start and on r: the one that reads its
-  // project's views (projectView without one shown); null for any other.
-  learningView(view) {
-    return view.tab?.kind === "project" && !this.loader(view) ? projectView(view.tab, null, view.address.view) : null;
-  }
-
-  // The error of that read (learningView), drawn on the view it reads for.
-  learnError(view) {
-    const learning = this.learningView(view);
-    return learning ? this.views[learning.id]?.error ?? null : null;
   }
 
   // With "nur meine" on and no login the data was read as: what the text

@@ -20,13 +20,14 @@
 // where it is known) and enterHint (Enter's hint);
 // columnCount (how many columns it draws side by side, which the detail
 // panel's share of the width is no narrower than one of: detailWidth; a list
-// has none), bandsLeft (b: whether a column scrolled past the cards it drew
-// whole, which the Board asks every BAND_MS), detailParts (its rows in the
-// detail panel), settle (b, view, due, data, cx: says how the unclear writes
-// of its items ended up), withView (data, view: the data as the view's
-// settings show it now, the same data where they change nothing for it),
-// toggleRepo (b, view, repo, cx: turns a repo off or on, beside the repo
-// menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu with
+// has none), bandsLeft (b: whether a column or list scrolled past the items
+// it drew whole, which the Board asks every BAND_MS), toSaved and fromSaved
+// (data: the data as its saved state keeps it, and back), detailParts (its
+// rows in the detail panel), settle (b, view, due, data, cx: says how the
+// unclear writes of its items ended up), withView (data, view: the data as
+// the view's settings show it now, the same data where they change nothing
+// for it), toggleRepo (b, view, repo, cx: turns a repo off or on, beside the
+// repo menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu with
 // statusField (b, view: the name of what the status menu sets, where it is
 // not the status; null for none), navigate (its own keyboard movement in
 // place of navigate's, select.js), pickStatus (what a pick in the status
@@ -46,5 +47,6 @@ import { boardShape } from "./board.js";
 import { placeholderShape } from "./placeholder.js";
 import { prsShape } from "./prs.js";
 import { sprintShape } from "./sprint.js";
+import { tableShape } from "./table.js";
 
-export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, placeholder: placeholderShape };
+export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, table: tableShape, placeholder: placeholderShape };

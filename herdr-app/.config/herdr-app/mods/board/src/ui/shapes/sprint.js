@@ -26,10 +26,10 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
-import { cardLabel, itemLabel, partOfText } from "../../shared.js";
+import { NOTHING_SHOWS, cardLabel, dayText, itemLabel, partOfText } from "../../shared.js";
 import { applyMoves, findCard, hasStep, stepTarget } from "../../kinds/board.js";
 import {
-  NO_STORY, dayText, findSprintItem, foldedStories, foldsOf, isTask, rowCounts, rowOf, rowTasks, shownRows, shownState, sprintIs, sprintItems, sprintNav, sprintNavigate, sprintStories,
+  NO_STORY, findSprintItem, foldedStories, foldsOf, isTask, rowCounts, rowOf, rowTasks, shownRows, shownState, sprintIs, sprintItems, sprintNav, sprintNavigate, sprintStories,
   sprintWarnings, storyProgress, toggledFolds, withItemState, withSprintItem, withoutFolded,
 } from "../../kinds/sprint.js";
 import { itemSessions } from "../../sessions.js";
@@ -248,7 +248,7 @@ function drawSprint(b, t, mono, view, st) {
     return v_flex().flex_1().min_h(0).child(head).child(div().id("sprint-none").p(20).text_color(t.muted).child(note));
   }
   if (!rows.length) {
-    const what = sprintItems(data).length ? "Nichts passt zum Filter oder zu „nur meine“" : "Keine Work Items im Sprint";
+    const what = sprintItems(data).length ? NOTHING_SHOWS : "Keine Work Items im Sprint";
     return v_flex().flex_1().min_h(0).child(head).child(div().p(20).text_color(t.muted).child(what));
   }
   const rowEl = (r) => h_flex()

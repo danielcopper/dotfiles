@@ -1,7 +1,7 @@
 // How views load beyond one read: each view's last good data kept on disk
 // (the saved state, drawn at once after a restart), what a load draws before
 // its end, the order the prefetch reads the other views in, and the top
-// bar's words for a read and an age.
+// bar's words for a read, an age and a state not saved.
 
 // herdr's store refuses a value whose JSON string takes more than 1 MiB in
 // UTF-8, and a file of more than 8 MiB for all keys (gpui-kit's
@@ -9,8 +9,12 @@
 export const SAVED_MAX = 1000000;
 export const SAVED_PREFIX = "board:data:";
 // Raised when what a shape draws from changes, so that no older data is drawn.
-export const SAVED_VERSION = 4;
+export const SAVED_VERSION = 5;
 export const savedKey = (id) => `${SAVED_PREFIX}${id}`;
+// What a view says beside its age where the store did not take its last
+// read: more than SAVED_MAX bytes, or refused by the store itself (the 8
+// MiB of all keys, say).
+export const UNSAVED = { big: "Stand nicht gespeichert: zu groß", refused: "Stand nicht gespeichert: vom Speicher abgelehnt" };
 
 // Data read for other hidden columns, another form of the view or another
 // organisation, project or team of its Azure tab is not its data; where its
@@ -38,6 +42,39 @@ export function storeBytes(text) {
 export function savedText(view, hidden, { data, warnings }, at) {
   const text = JSON.stringify({ sig: savedSig(view, hidden), at, data, warnings });
   return storeBytes(text) <= SAVED_MAX ? text : null;
+}
+
+// Rows (objects) as a shape keeps them in its saved state (toSaved): per
+// trait (a row's property), the values its rows hold, each once, and each
+// row's index into them (-1: the row lacks the trait; none where each row
+// holds a value of its own, in their order); unpackRows makes the rows of
+// them again, rows that share a value sharing it.
+export function packRows(rows) {
+  const names = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+  return {
+    count: rows.length,
+    traits: names.map((trait) => {
+      const seen = new Map();
+      const values = [];
+      const index = rows.map((r) => {
+        if (!Object.hasOwn(r, trait)) return -1;
+        const text = JSON.stringify(r[trait]);
+        if (!seen.has(text)) seen.set(text, values.push(r[trait]) - 1);
+        return seen.get(text);
+      });
+      return index.every((k, i) => k === i) ? { trait, values } : { trait, values, index };
+    }),
+  };
+}
+
+export function unpackRows({ count, traits }) {
+  const rows = Array.from({ length: count }, () => ({}));
+  for (const { trait, values, index = values.map((_, i) => i) } of traits) {
+    index.forEach((k, i) => {
+      if (k >= 0) rows[i][trait] = values[k];
+    });
+  }
+  return rows;
 }
 
 export function readSaved(text, view, hidden) {
@@ -85,7 +122,7 @@ export function sinceLabel(at, now) {
 }
 
 export function readLabels(st, now) {
-  if (!st) return { reading: "", age: "" };
+  if (!st) return { reading: "", age: "", unsaved: "" };
   const page = st.progress?.pages > 1 ? ` Seite ${st.progress.page} von ${st.progress.pages}` : "";
-  return { reading: st.loading ? `lädt …${page}` : "", age: st.at ? `Stand ${sinceLabel(st.at, now)}` : "" };
+  return { reading: st.loading ? `lädt …${page}` : "", age: st.at ? `Stand ${sinceLabel(st.at, now)}` : "", unsaved: st.unsaved ?? "" };
 }
