@@ -151,7 +151,19 @@ export const hasStep = (board, key, step) => Boolean(stepTarget(board, key, step
 
 // A view's columns with the person's hidden set applied.
 export function withHidden(board, hidden) {
-  return { ...board, columns: board.columns.map((c) => ({ ...c, hidden: hidden.has(c.name) })) };
+  return { ...board, columns: board.columns.map((c) => ({ ...c, hidden: hideable(c) && hidden.has(c.name) })) };
+}
+
+export const waitsForCards = (column) => !column.hidden && Boolean(column.cardsNotRead);
+
+export function withOlderCards(board, before) {
+  if (before?.shape !== board.shape || !board.columns.some(waitsForCards)) return board;
+  const drawnKeys = new Set(board.columns.filter((c) => !waitsForCards(c)).flatMap((c) => c.cards.map((card) => card.key)));
+  const older = new Map(before.columns.map((c) => [c.name, c.cards]));
+  return {
+    ...board,
+    columns: board.columns.map((c) => (waitsForCards(c) && older.has(c.name) ? { ...c, cards: older.get(c.name).filter((card) => !drawnKeys.has(card.key)) } : c)),
+  };
 }
 
 // The columns as the board shows them: hidden ones left out, the others with

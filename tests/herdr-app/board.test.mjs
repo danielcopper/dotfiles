@@ -1409,6 +1409,24 @@ test("names in hide that match no column are reported", () => {
   assert.deepEqual(board.unknownHidden(view, githubBoard().columns), ["Doen"]);
 });
 
+test("a name in hide that matches the column without a value, which is always shown, is reported as such", () => {
+  const view = { ...githubView(), hide: ["Ohne Status", "Done"] };
+  assert.deepEqual(board.SHAPES.board.warnings(view, casesBoard()), ["„Ohne Status“ lässt sich nicht ausblenden"]);
+  assert.deepEqual(board.SHAPES.board.warnings(githubView(), casesBoard()), []);
+});
+
+test("the items' query leaves out no column for a name in hide that matches the column without a value, and counts none for it", () => {
+  const plan = planOf(projectFor(FIXTURE_OPTIONS["github-board-cases.json"]));
+  const hidden = new Set(["Ohne Status", "Done"]);
+  const value = (args, name) => args.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1);
+  const first = board.githubBoardArgs(githubView(), plan, hidden);
+  assert.deepEqual(["filter", "h0", "h1"].map((n) => value(first, n)), ['assignee:@me -status:"Done"', 'assignee:@me status:"Done"', undefined]);
+  assert.doesNotMatch(value(first, "query"), /\$h1/);
+  assert.equal(value(board.githubBoardPageArgs(githubView(), plan, hidden, "c1", 100), "filter"), 'assignee:@me -status:"Done"', "nor do its later pages");
+  const data = board.parseGithubBoard(json("github-board-cases.json"), githubView(), hidden, [], plan);
+  assert.deepEqual([data.meta.query, data.columns.find((c) => c.name === "Done").count], ['assignee:@me -status:"Done"', 265], "Done's count is the answer's h0");
+});
+
 // ---- GitHub board ----
 
 test("the items' query takes the view's filter, leaves its hidden columns out by its column field and counts them in the same request", () => {
@@ -1682,6 +1700,38 @@ test("a part missing from GitHub's answers is explained by the error at its path
     { message: "Projekt „Mine“: no access to a repository" });
   assert.throws(items({ repositoryOwner: { projectV2: noItems } }, []), { message: "Projekt „Mine“ lieferte keine Einträge" });
   assert.throws(items({ repositoryOwner: { projectV2: null } }, [{ type: "NOT_FOUND", path: ["repositoryOwner", "projectV2"], message: "gone meanwhile" }]), { message: "Projekt „Mine“: gone meanwhile" });
+});
+
+test("a board's read marks the columns its query left out (cardsNotRead), which stay so when they are shown since; a shown one of them waits for its cards (waitsForCards)", () => {
+  const data = board.parseGithubBoard(json("github-board-cases.json"), githubView(), HIDDEN, [], planOf());
+  assert.deepEqual(data.columns.map((c) => [c.name, c.hidden, c.cardsNotRead]), [
+    ["Ohne Status", false, false], ["Backlog", true, true], ["Ready", false, false], ["In progress", false, false], ["In review", false, false], ["Done", true, true],
+  ]);
+  assert.deepEqual(data.columns.filter(board.waitsForCards), [], "a hidden one waits for nothing");
+  const shown = board.withHidden(data, new Set(["Ready"]));
+  assert.deepEqual(shown.columns.map((c) => [c.name, c.hidden, c.cardsNotRead, board.waitsForCards(c)]), [
+    ["Ohne Status", false, false, false], ["Backlog", false, true, true], ["Ready", true, false, false], ["In progress", false, false, false], ["In review", false, false, false], ["Done", false, true, true],
+  ]);
+});
+
+test("a hidden set that names the column without a value leaves it shown (withHidden), as the column menu does", () => {
+  const data = board.parseGithubBoard(json("github-board-cases.json"), githubView(), HIDDEN, [], planOf());
+  const hidden = board.withHidden(data, new Set(["Ohne Status", "Ready"]));
+  assert.deepEqual(hidden.columns.filter((c) => c.hidden).map((c) => c.name), ["Ready"]);
+});
+
+test("a column waiting for its cards holds the cards the data before had in it, less those the new data has in another column, hidden ones included; one the data before did not have, or data of another shape, gives it none (withOlderCards)", () => {
+  const card = (key, column) => ({ key, column });
+  const col = (name, cards, more = {}) => ({ id: name, name, hidden: false, cardsNotRead: false, cards, ...more });
+  const before = { shape: "board", columns: [col("A", [card("k1", "A"), card("k2", "A"), card("k3", "A")]), col("B", [card("k4", "B")]), col("C", [card("k5", "C")])] };
+  const now = { shape: "board", columns: [col("A", [], { cardsNotRead: true }), col("B", [card("k2", "B")]), col("C", [card("k3", "C")], { hidden: true }), col("D", [], { cardsNotRead: true })] };
+  const held = board.withOlderCards(now, before);
+  assert.deepEqual(held.columns.map((c) => [c.name, c.cards.map((k) => k.key)]), [["A", ["k1"]], ["B", ["k2"]], ["C", ["k3"]], ["D", []]]);
+  assert.deepEqual(board.withOlderCards(held, held), held, "over itself, as a failed read draws the data before it again");
+  assert.equal(board.withOlderCards(now, { ...before, shape: "sprint" }), now);
+  assert.equal(board.withOlderCards(now, null), now);
+  const hiddenNow = { ...now, columns: now.columns.map((c) => ({ ...c, hidden: true })) };
+  assert.equal(board.withOlderCards(hiddenNow, before), hiddenNow, "a hidden one waits for nothing");
 });
 
 test("a board with more items than one page says it is cut", () => {
@@ -4920,6 +4970,132 @@ test("UI: the column menu says the column without status is always shown, and le
   await press(b, cx, "enter");
   assert.equal(st().data.columns[0].hidden, false);
   assert.equal(b.notice.text, "„Ohne Status“ lässt sich nicht ausblenden");
+});
+
+// boardPage's answer with the items `moved` names (by id) in the column of
+// that name (one of BOARD_OPTIONS).
+function pageWith(moved, from, to, next, options) {
+  const page = boardPage(from, to, next, options);
+  for (const node of page.data.repositoryOwner.projectV2.items.nodes) {
+    const name = moved[node.id];
+    if (name) node.fieldValueByName = { optionId: BOARD_OPTIONS.find((o) => o.name === name).id, name };
+  }
+  return page;
+}
+// tender#3005 and #3007 (Ready in github-board.json) in Backlog.
+const IN_BACKLOG = { PVTI_rec5: "Backlog", PVTI_rec6: "Backlog" };
+const backlogPage = (...args) => pageWith(IN_BACKLOG, ...args);
+// Whether a spinner turns in `el`.
+const turns = (el) => Boolean(el?.with?.frames) || (el?.kids ?? []).some(turns);
+// How the board draws its shown column `name` now: null where it draws none,
+// else its texts and whether a spinner turns in it.
+function drawnColumn(b, name) {
+  const at = b.navColumns(b.view()).findIndex((c) => c.name === name);
+  const el = at < 0 ? null : byId(b.render(), `col-${at}`);
+  return el && { texts: texts(el), spins: turns(el) };
+}
+const shownNames = (b) => b.navColumns(b.view()).map((c) => c.name);
+const shownCards = (b, name) => b.navColumns(b.view()).find((c) => c.name === name).shown.map((c) => c.number);
+const cardOpacity = (b, name) => b.navColumns(b.view()).find((c) => c.name === name).shown.map((c) => byId(b.render(), `card-${c.key}`).with.opacity[0]);
+const columnNamed = (st, name) => st.data.columns.find((c) => c.name === name);
+const toggle = async (b, cx, st, name) => {
+  cx.call((own) => b.toggleColumn(b.view(), columnNamed(st, name), own));
+  await settle();
+};
+const ghFailed = { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" };
+
+test("UI: a column hidden and shown again while a read that leaves it out runs stays drawn when that read lands, with the cards it had dimmed (one that read has in another column there alone) and „Lädt …“ with the spinner below its head, until a read brings its cards; where the read after it fails, the cards stay dimmed and it says its cards are not read", async () => {
+  const { b, cx, host, st } = await openBoard({ files: { [MACHINE_FILE]: JSON.stringify(mineHidden(["Done"])) }, answer: JSON.stringify(backlogPage(0, 6, null)) });
+  const first = drawnColumn(b, "Backlog");
+  assert.deepEqual([first.texts.slice(0, 2), first.spins], [["Backlog", "2"], false]);
+  await toggle(b, cx, st(), "Backlog");
+  assert.deepEqual(shownNames(b), ["Ready", "In progress", "In review"], "hidden at once");
+  assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Done","Backlog"'), "and read without it");
+  await click(b, cx, "show-opt-backlog");
+  const again = drawnColumn(b, "Backlog");
+  assert.deepEqual([again.texts.slice(0, 2), again.spins, shownCards(b, "Backlog"), cardOpacity(b, "Backlog")], [["Backlog", "2"], false, [3005, 3007], [1, 1]],
+    "shown again at once, with the cards read before it was hidden");
+  // GitHub's answer to a query without Backlog: not #3007, still in Backlog; #3005, moved to Ready meanwhile.
+  const landed = boardPage(0, 6, null);
+  const items = landed.data.repositoryOwner.projectV2.items;
+  items.nodes = items.nodes.filter((n) => n.id !== "PVTI_rec6");
+  await host.answer("gh", ok(JSON.stringify(landed)), isBoardCall);
+  const waiting = drawnColumn(b, "Backlog");
+  assert.ok(waiting, "the read that left it out lands: it stays");
+  assert.deepEqual([waiting.texts.slice(0, 3), waiting.spins], [["Backlog", "957", "Lädt …"], true], "with GitHub's count of it and the spinner below its head");
+  assert.deepEqual([shownCards(b, "Backlog"), cardOpacity(b, "Backlog"), shownCards(b, "Ready")], [[3007], [0.5], [3004, 3005]], "the card it had dimmed; the one that read has in Ready drawn there alone");
+  assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Done"'), "the read after it asks for its cards");
+  await host.answer("gh", ghFailed, isBoardCall);
+  const failed = drawnColumn(b, "Backlog");
+  assert.deepEqual([failed.texts.slice(0, 3), failed.spins, shownCards(b, "Backlog"), cardOpacity(b, "Backlog")], [["Backlog", "957", "Karten nicht gelesen – r liest neu"], false, [3007], [0.5]],
+    "that read fails: the card it had stays dimmed, and the column says its cards are not read");
+  await press(b, cx, "r");
+  await host.answer("gh", ok(JSON.stringify(backlogPage(0, 3, "c1"))), isBoardCall);
+  assert.deepEqual([drawnColumn(b, "Backlog").texts.slice(0, 3), shownCards(b, "Backlog"), cardOpacity(b, "Backlog")], [["Backlog", "957", "Lädt …"], [3007], [0.5]],
+    "a first page draws nothing over data this session read");
+  await host.answer("gh", ok(JSON.stringify(backlogPage(3, 6, null, { first: false }))), isBoardCall);
+  const filled = drawnColumn(b, "Backlog");
+  assert.equal(filled.spins, false);
+  assert.deepEqual([filled.texts.slice(0, 2), shownCards(b, "Backlog"), cardOpacity(b, "Backlog"), shownCards(b, "Ready")], [["Backlog", "2"], [3005, 3007], [1, 1], [3004]]);
+  assert.ok(!filled.texts.includes("Lädt …"));
+});
+
+test("UI: columns shown and hidden quickly, one after the other, while reads run: each shown one stays drawn and each hidden one stays gone through every read and page that lands; after the last read every shown column has its cards", async () => {
+  const { b, cx, host, st } = await openBoard();
+  const moved = { PVTI_rec5: "Backlog", PVTI_rec6: "Done" };
+  await toggle(b, cx, st(), "Backlog");
+  await toggle(b, cx, st(), "Done");
+  await toggle(b, cx, st(), "Ready");
+  const shown = ["Backlog", "In progress", "In review", "Done"];
+  const look = (why) => {
+    assert.deepEqual(shownNames(b), shown, why);
+    for (const name of shown) assert.ok(drawnColumn(b, name), `${name}: ${why}`);
+  };
+  look("at once");
+  assert.deepEqual(["Backlog", "Done"].map((n) => drawnColumn(b, n).spins), [true, true], "the two shown wait for their cards");
+  assert.equal(host.open("gh").length, 1, "one read under way; the toggles after it ask for one more");
+  await host.answer("gh", ok(JSON.stringify(pageWith({ PVTI_rec5: "Backlog" }, 0, 6, null))), isBoardCall);
+  look("the read from before Done and Ready changed landed");
+  assert.deepEqual(["Backlog", "Done"].map((n) => drawnColumn(b, n).spins), [false, true], "it read Backlog's cards, not Done's");
+  assert.ok(host.open("gh").at(-1).args.includes('filter=assignee:@me -status:"Ready"'));
+  await host.answer("gh", ok(JSON.stringify(pageWith(moved, 0, 3, "c1"))), isBoardCall);
+  look("its first page");
+  await host.answer("gh", ok(JSON.stringify(pageWith(moved, 3, 6, null, { first: false }))), isBoardCall);
+  look("the last read");
+  assert.equal(host.open("gh").length, 0);
+  assert.deepEqual(shown.map((n) => drawnColumn(b, n).spins), [false, false, false, false], "none waits");
+  const cards = (name) => b.navColumns(b.view()).find((c) => c.name === name).shown.map((c) => c.number);
+  assert.deepEqual(shown.map(cards), [[3005], [3000, 3001, 3003], [], [3007]]);
+});
+
+test("UI: a column shown again draws while the columns shown before have no card, its head without a count where GitHub gave none for it; where the read after it fails, it says its cards are not read, without a spinner", async () => {
+  const empty = boardPage(0, 0, null, { total: 0 });
+  delete empty.data.repositoryOwner.projectV2.h0;
+  const { b, cx, host, st } = await openBoard({ answer: JSON.stringify(empty) });
+  assert.equal(byId(b.render(), "columns"), null, "no card: the board says so in place of its columns");
+  await click(b, cx, "show-opt-backlog");
+  assert.deepEqual(drawnColumn(b, "Backlog"), { texts: ["Backlog", "", "Lädt …"], spins: true });
+  await host.answer("gh", ghFailed, isBoardCall);
+  assert.equal(st().error, "GitHub antwortete mit HTTP 502: Bad Gateway");
+  assert.deepEqual(drawnColumn(b, "Backlog"), { texts: ["Backlog", "", "Karten nicht gelesen – r liest neu"], spins: false });
+});
+
+test("UI: on a board with swimlanes a column shown again has the spinner in its head while a read runs, and says its cards are not read where that read fails, until a read brings its cards; the other heads have neither", async () => {
+  const project = () => ok(JSON.stringify(projectFor(BOARD_OPTIONS, { views: [{ lane: "Size" }] })));
+  const { b, cx, host } = await openBoard({ projectAnswer: project });
+  const head = (name) => {
+    const at = b.navColumns(b.view()).findIndex((c) => c.name === name);
+    return byId(byId(b.render(), "lane-heads"), `col-${at}`);
+  };
+  const look = (name) => [texts(head(name)), turns(head(name))];
+  await click(b, cx, "show-opt-backlog");
+  assert.deepEqual([look("Backlog"), look("Ready")], [[["Backlog", "265"], true], [["Ready", "3"], false]]);
+  await host.answer("gh", ghFailed, isBoardCall);
+  assert.deepEqual([look("Backlog"), look("Ready")], [[["Backlog", "265", "nicht gelesen – r liest neu"], false], [["Ready", "3"], false]], "no read runs: no spinner");
+  await press(b, cx, "r");
+  assert.deepEqual(look("Backlog"), [["Backlog", "265"], true], "r reads again");
+  await host.answer("gh", ok(JSON.stringify(backlogPage(0, 6, null))), isBoardCall);
+  assert.deepEqual(look("Backlog"), [["Backlog", "2"], false]);
 });
 
 test("UI: a second move of a card is refused while the first is written; a refusal moves it back", async () => {
@@ -17238,6 +17414,47 @@ test("UI: a read that fails keeps the saved state, its age and says why; a write
   assert.ok(host.open("gh").some((c) => c.args.some((a) => String(a).includes("updateProjectV2ItemFieldValue"))), "on read data the move is written");
 });
 
+test("UI: over the saved state, a column hidden and shown again while the read that leaves it out draws page by page stays drawn from the moment it shows, „Lädt …“ with the spinner and GitHub's count of it, until the read after it brings its cards", async () => {
+  const at = realNow() - 5 * MIN;
+  const shownDone = new Set(["Done"]);
+  const view = { ...testView(MINE), hide: ["Done"] };
+  const data = board.parseGithubBoard(backlogPage(0, 6, null), view, shownDone, [], planOf(projectFor()));
+  const { b, cx, host, st } = await bootBoard({ files: { [MACHINE_FILE]: JSON.stringify(mineHidden(["Done"])) }, raw: { [board.savedKey(MINE)]: board.savedText(view, shownDone, { data, warnings: [] }, at) } });
+  assert.deepEqual([st().saved, drawnColumn(b, "Backlog").texts.slice(0, 2)], [true, ["Backlog", "2"]], "the saved state draws Backlog with its cards");
+  await host.answer("gh", ghFailed, isBoardCall);
+  assert.equal(st().saved, true, "a failed read keeps it");
+  await toggle(b, cx, st(), "Backlog");
+  assert.deepEqual(shownNames(b), ["Ready", "In progress", "In review"], "hidden at once");
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
+  assert.deepEqual(shownNames(b), ["Ready", "In progress", "In review"], "its read's first page draws over the saved state");
+  await click(b, cx, "show-opt-backlog");
+  const steps = [["shown again", null], ["the read that left it out ends", boardPage(3, 6, null, { first: false })], ["the read after it: its first page", backlogPage(0, 3, "c1")]];
+  for (const [step, page] of steps) {
+    if (page) await host.answer("gh", ok(JSON.stringify(page)), isBoardCall);
+    assert.deepEqual(drawnColumn(b, "Backlog"), { texts: ["Backlog", "957", "Lädt …"], spins: true }, step);
+  }
+  await host.answer("gh", ok(JSON.stringify(backlogPage(3, 6, null, { first: false }))), isBoardCall);
+  const filled = drawnColumn(b, "Backlog");
+  assert.deepEqual([filled.texts.slice(0, 2), filled.spins], [["Backlog", "2"], false], "its cards came");
+  assert.deepEqual(b.navColumns(b.view()).find((c) => c.name === "Backlog").shown.map((c) => c.number), [3005, 3007]);
+});
+
+test("UI: over the saved state, a read whose later page fails draws the saved state again with the columns hidden and shown as set now: a column shown during that read waits with none of the cards its first page drew, one hidden during it is gone", async () => {
+  const saved = savedBoard();
+  const progress = saved.columns.find((c) => c.name === "In progress");
+  progress.cards = progress.cards.filter((c) => c.number !== 3000);
+  const { b, cx, host, st } = await bootBoard({ raw: { [board.savedKey(MINE)]: savedFor(MINE, saved, realNow() - 5 * MIN) } });
+  await host.answer("gh", ghFailed, isBoardCall);
+  await click(b, cx, "show-opt-backlog");
+  await host.answer("gh", ok(JSON.stringify(pageWith({ PVTI_rec1: "Backlog" }, 0, 3, "c1"))), isBoardCall);
+  assert.deepEqual([shownCards(b, "Backlog"), shownCards(b, "In progress")], [[3000], [3001, 3003]], "its first page draws over the saved state");
+  await toggle(b, cx, st(), "Ready");
+  await host.answer("gh", ghFailed, isBoardCall);
+  assert.deepEqual([st().saved, shownNames(b)], [true, ["Backlog", "In progress", "In review"]]);
+  assert.deepEqual([shownCards(b, "Backlog"), shownCards(b, "In progress"), allCards(st().data).some((c) => c.title === "Gespeicherter Titel")], [[], [3001, 3003], true], "the saved cards");
+  assert.deepEqual(drawnColumn(b, "Backlog"), { texts: ["Backlog", "265", "Lädt …"], spins: true }, "the read after it runs");
+});
+
 test("the saved state: an entry is a view's only while its form and hidden columns are the same; one the store would take more than SAVED_MAX bytes for is none, counted as the store counts, and a board at its limit of 1000 items fits; gone views' entries are named", () => {
   const view = testView(MINE);
   const hidden = board.hiddenColumns(view, null);
@@ -17267,16 +17484,16 @@ test("the saved state: an entry is a view's only while its form and hidden colum
   assert.deepEqual(board.goneSaved(["board:data:mine", "board:data:gone", "data:gone", "source", "hidden:gone"], new Set(["mine"])), ["board:data:gone"]);
 });
 
-test("the saved state of each shipped view signs as SAVED_VERSION 3 has it, a project's view once the board knows it; where its settings lie, its tab's folders and views and the repos a PR tab turns off are no form of it", () => {
+test("the saved state of each shipped view signs as SAVED_VERSION 4 has it, a project's view once the board knows it; where its settings lie, its tab's folders and views and the repos a PR tab turns off are no form of it", () => {
   const known = { get: () => ({ title: "P", url: null, views: [{ number: 1, name: "Board", layout: "board", filter: "" }] }) };
   const sigs = board.viewsOf(board.readConfig(shippedConfig()).config, known).map((v) => {
     const text = board.savedText(v, board.hiddenColumns(v), { data: { shape: "board" }, warnings: [] }, 1);
     return [board.viewKind(v), createHash("sha256").update(JSON.parse(text).sig).digest("hex").slice(0, 16)];
   });
   assert.deepEqual(sigs, [
-    ["github board", "b1c229c54cb1f210"], ["github list", "34e1bece88ff07f1"],
-    ["azure sprint", "65b422051eac227c"], ["azure backlog", "5d90583d3f0e4a8c"], ["azure prs", "b5340eab381a464d"],
-    ["azure sprint", "93ef5e022ce1eac3"], ["azure backlog", "65eb3bf5a8507200"], ["azure prs", "fdeaf359f18da938"],
+    ["github board", "a115dce1d2b18501"], ["github list", "30dc57ce5fab2e00"],
+    ["azure sprint", "d53a6847f4d1df40"], ["azure backlog", "0c370d1ff1167bdf"], ["azure prs", "68461a98a97b29a3"],
+    ["azure sprint", "96069af2bc294b34"], ["azure backlog", "ae097c5af922705e"], ["azure prs", "358f8303ecdd0ed5"],
   ]);
   const view = githubView();
   const text = board.savedText(view, HIDDEN, { data: githubBoard(), warnings: [] }, 1);
@@ -17306,7 +17523,7 @@ test("what each shape keeps in its saved data is the form SAVED_VERSION names: a
     board: githubBoard(), prs: board.parseGithubList(json("github-list.json"), testView("prs")), sprint: sprintData(), backlog: backlogData(),
   };
   assert.deepEqual({ version: board.SAVED_VERSION, ...Object.fromEntries(Object.entries(shapes).map(([k, d]) => [k, print(d)])) },
-    { version: 3, board: "34406265ae07", prs: "a995da7f9b5f", sprint: "e4b71886155b", backlog: "fd167b2a10f0" });
+    { version: 4, board: "178614242c7b", prs: "a995da7f9b5f", sprint: "e4b71886155b", backlog: "fd167b2a10f0" });
 });
 
 test("UI: a PR tab's repos turned off apply to a saved state it draws and to a read that ends after the switch", async () => {

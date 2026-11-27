@@ -9,7 +9,7 @@
 export const SAVED_MAX = 1000000;
 export const SAVED_PREFIX = "board:data:";
 // Raised when what a shape draws from changes, so that no older data is drawn.
-export const SAVED_VERSION = 3;
+export const SAVED_VERSION = 4;
 export const savedKey = (id) => `${SAVED_PREFIX}${id}`;
 
 // Data read for other hidden columns, another form of the view or another

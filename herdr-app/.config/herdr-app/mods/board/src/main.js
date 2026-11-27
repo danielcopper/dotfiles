@@ -207,7 +207,7 @@ import { AGENT_STATUS, itemSessions, placeKey, placed, readClaudeSessions, secon
 import { makeSources } from "./sources/index.js";
 import { readProjectMeta } from "./sources/github.js";
 import { keptRelated, lineAt, lineCount, lineId, lineIndex, lineNow, pathLabel, pickedLine, relatedLines, sectionOf, stepLine, wholeSection } from "./related.js";
-import { store, boardShown, inPlace, observesReleases, shownOf, button, detailSection, detailWidth, selectedLook, sessionReasons, toggleSwitch, CANDIDATE, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
+import { store, boardShown, inPlace, observesReleases, shownOf, button, detailSection, detailWidth, selectedLook, sessionReasons, spinner, toggleSwitch, CANDIDATE, DETAIL_MIN_W, DETAIL_MAX_W } from "./ui/helpers.js";
 import { layers } from "./ui/layer.js";
 import { NOTE_TONES, toneColor } from "./ui/tones.js";
 import { SHAPES } from "./ui/shapes/index.js";
@@ -273,7 +273,6 @@ export * from "./ui/modals/status.js";
 
 const TICK_MS = 30000;
 export const PREFETCH_GAP_MS = 1500;
-export const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
 // From the application root (gpui-kit's svg).
 export const REFRESH_ICON = "mods/board/refresh.svg";
 // on_mouse_down_out fires for each of them.
@@ -984,7 +983,7 @@ export default class Board extends View {
         // A failed read keeps what showed before it, not what it drew on its
         // way.
         if (drew) {
-          st.data = before.data && SHAPES[before.data.shape].received(before.data, st, this.viewById(view.id) ?? view);
+          st.data = before.data && SHAPES[before.data.shape].received(before.data, st, this.viewById(view.id) ?? view, before.data);
           st.warnings = before.warnings;
           if (st.data) this.keepSelection(view);
           else Object.assign(st, { sel: null, picked: null, detail: false });
@@ -2193,7 +2192,7 @@ export default class Board extends View {
   main(t, mono, view, st) {
     const box = v_flex().flex_1().min_w(0).min_h(0);
     const message = (text) => box.child(div().p(20).text_color(t.muted).child(text));
-    const loading = () => box.child(h_flex().id("loading").p(20).gap(8).text_color(t.muted).child(div().frames(SPINNER_FRAMES, 150)).child("Lädt …"));
+    const loading = () => box.child(h_flex().id("loading").p(20).gap(8).text_color(t.muted).child(spinner()).child("Lädt …"));
     if (!this.config) return this.configErrors.length ? message(`Keine gültige Ansicht in ${CONFIG_NAME}.json`) : loading();
     if (!view) return message("Keine Ansicht verfügbar");
     const shape = this.shape(view);

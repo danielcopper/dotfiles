@@ -215,10 +215,14 @@ function itemFields(plan) {
 
 const filterWith = (plan, term) => [plan.shown.filter, term].filter(Boolean).join(" ");
 
+const noValueName = (plan) => `Ohne ${plan.column.name}`;
+// The column without a value is always shown: its name asks GitHub for nothing.
+const queriedHidden = (plan, hidden) => [...hidden].filter((n) => n !== noValueName(plan));
+
 // The filter of a board's shown items: the view's, with its hidden columns
 // left out.
 function boardFilter(plan, hidden) {
-  const names = [...hidden];
+  const names = queriedHidden(plan, hidden);
   return filterWith(plan, names.length ? `-${fieldKey(plan.column.name)}:${names.map(quoted).join(",")}` : "");
 }
 
@@ -258,7 +262,7 @@ function boardArgs(view, plan, hidden, doc) {
 // The first page of a board's items, as boardPlan says to read them, and
 // the counts of its hidden columns (first: 0), for the column menu.
 export function githubBoardArgs(view, plan, hidden) {
-  const names = [...hidden];
+  const names = queriedHidden(plan, hidden);
   const key = fieldKey(plan.column.name);
   const counts = names.map((_, i) => `\n        h${i}: items(first: 0, query: $h${i}) { totalCount }`).join("");
   const vars = names.map((_, i) => `, $h${i}: String!`).join("");
@@ -462,13 +466,14 @@ function nodeValue(plan, node, card, field) {
 
 function boardColumns(plan, hidden, answer, held) {
   const field = plan.column;
-  const names = [...hidden];
+  const names = queriedHidden(plan, hidden);
   const base = field.type === "ITERATION"
     ? field.iterations.filter((i) => !i.completed || held.has(i.id) || hidden.has(i.title)).map((i) => ({ id: i.id, name: i.title, color: "muted" }))
     : field.options.map((o) => ({ id: o.id, name: o.name, color: GITHUB_COLORS[o.color] ?? "muted" }));
   return base.map((c) => ({
     ...c,
     hidden: hidden.has(c.name),
+    cardsNotRead: hidden.has(c.name),
     count: hidden.has(c.name) ? answer[`h${names.indexOf(c.name)}`]?.totalCount ?? null : 0,
     target: true,
     cards: [],
@@ -531,7 +536,7 @@ export function parseGithubBoard(json, view, hidden, errors, plan) {
       return a.i - b.i;
     });
   if (ordered.some((c) => !byId.has(c.column))) {
-    const none = { id: NO_VALUE, name: `Ohne ${plan.column.name}`, color: "dim", hidden: false, count: 0, target: false, cards: [] };
+    const none = { id: NO_VALUE, name: noValueName(plan), color: "dim", hidden: false, cardsNotRead: false, count: 0, target: false, cards: [] };
     columns.unshift(none);
     byId.set(NO_VALUE, none);
   }

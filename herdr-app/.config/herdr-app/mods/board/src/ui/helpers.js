@@ -88,6 +88,9 @@ export const inPlace = (from, to) => !from || !to || Math.hypot(to.x - from.x, t
 // herdr before 0.1.18 has no on_window_mouse_up.
 export const observesReleases = (el) => typeof el.on_window_mouse_up === "function";
 
+export const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
+export const spinner = () => div().frames(SPINNER_FRAMES, 150);
+
 // "<shown>/<total>" where the filter or "nur meine" hides some, else the
 // total.
 export const shownOf = (shown, total) => (shown < total ? `${shown}/${total}` : String(total));

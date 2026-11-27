@@ -5,23 +5,27 @@
 // the line below the columns names the hidden ones and a click on a name
 // shows it again; the command menu's "Spalten…" opens the column menu
 // (modals/columns.js). The data: { shape: "board", meta, columns: [{ id,
-// name, color, hidden, count, target, cards }], lanes ([{ id, name,
-// color }], each card's `lane` one of them; null without), total, limited,
-// viewer, count, partial (while later pages are still to come) }
+// name, color, hidden, cardsNotRead (its read's query left its cards out),
+// count, target, cards }], lanes ([{ id, name, color }], each card's `lane`
+// one of them; null without), total, limited, viewer, count, partial
+// (while later pages are still to come) }
 // (parseGithubBoard). View fields it reads: id, source, layout, name and
 // hide (the columns hidden by default).
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { cardLabel, cardType, epicLabel, partOfText } from "../../shared.js";
-import { applyMoves, canDrop, findCard, hasStep, hideable, laneNavigate, laneRows, shownColumns, stepTarget, targetsFor, toggledHidden, unknownHidden, withCard } from "../../kinds/board.js";
+import {
+  applyMoves, canDrop, findCard, hasStep, hiddenColumns, hideable, laneNavigate, laneRows, shownColumns, stepTarget, targetsFor, toggledHidden, unknownHidden, waitsForCards, withCard, withHidden, withOlderCards,
+} from "../../kinds/board.js";
 import { hidePath } from "../../config.js";
 import { itemSessions } from "../../sessions.js";
 import { moveCardTo, unclearMoveLines } from "../../actions/move.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import {
-  CARD_EDGE, button, cardEdge, cardEnd, cardFoot, cardHead, cardMeta, chip, columnHead, footLines, inPlace, labelChip, selectedLook, showsMeta, shownOf, statusPill, typeChip, typeLine, unzoomed,
+  CARD_EDGE, button, cardEdge, cardEnd, cardFoot, cardHead, cardMeta, chip, columnHead, footLines, inPlace, labelChip, selectedLook, showsMeta, shownOf, spinner, statusPill, typeChip, typeLine,
+  unzoomed,
 } from "../helpers.js";
 import { NOTE_TONES, dropBg, toneColor } from "../tones.js";
 import { rowTops } from "../../scroll.js";
@@ -70,6 +74,8 @@ export function columnsKept(b, ids) {
 // Unlike columnKept, claims no state and counts no use.
 export const keptOf = (b, id) => boardState(b).byId.get(id);
 
+const notHideable = (name) => `„${name}“ lässt sich nicht ausblenden`;
+
 export const boardShape = {
   state() {
     // A state's `id`: the column holding it, null for none; `used`: the
@@ -116,9 +122,10 @@ export const boardShape = {
   },
   canMove: (st, item, by) => hasStep(st.data, item.key, by),
   canHide: hideable,
-  received: (data, st) => applyMoves(data, st.moves),
+  received: (data, st, view, before = st.data) => applyMoves(withOlderCards(withHidden(data, hiddenColumns(view)), before), st.moves),
   warnings: (view, data) => [
     ...unknownHidden(view, data.columns).map((n) => `„${n}“ aus hide passt zu keiner Spalte`),
+    ...view.hide.filter((n) => data.columns.some((c) => c.name === n && !hideable(c))).map(notHideable),
     ...(data.meta.ownColumn === false ? [`Ansicht „${view.name}“ nennt kein Feld für ihre Spalten: das Board nimmt „${data.meta.fieldName}“, wie GitHub`] : []),
     ...(data.meta.unreadable ?? []).map((n) => `Ansicht „${view.name}“ sortiert oder gruppiert nach „${n}“, einem Feld, das das Board nicht liest: es ordnet ohne`),
   ],
@@ -202,6 +209,24 @@ function emptyText(data) {
   return filter ? `Keine Einträge${where} für den Filter „${filter}“ (auch einen Filter, den GitHub nicht versteht, beantwortet es so)` : `Keine Einträge${where}`;
 }
 
+// A waiting column's count: GitHub's h<i> count, read while it was hidden.
+function headCount(col) {
+  if (waitsForCards(col)) return col.count === null ? "" : String(col.count);
+  const filtered = col.cards.length - col.shown.length;
+  return filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length);
+}
+
+function cardsComing(b, t, st) {
+  const line = h_flex().flex_none().gap(8).text_size(12).text_color(t.muted);
+  return st.loading ? line.child(spinner()).child("Lädt …") : line.child(`Karten nicht gelesen – ${b.keyShown("reload")} liest neu`);
+}
+
+function laneHeadCount(b, st, col) {
+  if (!waitsForCards(col)) return headCount(col);
+  const line = h_flex().gap(6);
+  return st.loading ? line.child(spinner()).child(headCount(col)) : line.child(headCount(col)).child(`nicht gelesen – ${b.keyShown("reload")} liest neu`);
+}
+
 function drawBoard(b, t, mono, view, st) {
   const cols = b.navColumns(view);
   const sessions = b.sessionsNow();
@@ -213,7 +238,7 @@ function drawBoard(b, t, mono, view, st) {
     const focusedCol = st.sel?.col === ci;
     const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
     const ground = t.chrome;
-    const head = columnHead(t, col, filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length), ground);
+    const head = columnHead(t, col, headCount(col), ground);
     const kept = states[ci];
     const at = windowed ? scrollOf(kept.scroll) : null;
     const layout = at && columnLayout(b, col, kept, at.width);
@@ -239,6 +264,7 @@ function drawBoard(b, t, mono, view, st) {
       }))
       .map(dropOn(b, view, ci, col))
       .child(head)
+      .when(waitsForCards(col), (el) => el.child(cardsComing(b, t, st)))
       .child(
         v_flex()
           .id(`cards-${ci}`)
@@ -251,12 +277,12 @@ function drawBoard(b, t, mono, view, st) {
             if (!layout) return whole(card, null);
             return inBand(kept.band, layout.tops[i], layout.heights[i]) ? whole(card, cardMeasure(b, kept, card, layout.heights[i])) : cardFrame(t, st, card, layout.heights[i]);
           }))
-          .when(!col.shown.length, (el) => el.child(div().text_size(12).text_color(t.muted).child(filtered ? `keine Karten (${filtered} ausgeblendet)` : "keine Karten"))),
+          .when(!col.shown.length && !waitsForCards(col), (el) => el.child(div().text_size(12).text_color(t.muted).child(filtered ? `keine Karten (${filtered} ausgeblendet)` : "keine Karten"))),
       );
   };
   const body = () => {
     if (!cols.length) return div().p(20).text_color(t.muted).child(`Alle Spalten sind ausgeblendet: ein Name unten oder „${b.actionName("columns")}“ im Befehlsmenü (${b.keyShown("commands")}) zeigt eine wieder`);
-    if (!st.data.partial && !st.data.columns.some((c) => c.cards.length)) return div().p(20).text_color(t.muted).child(emptyText(st.data));
+    if (!st.data.partial && !st.data.columns.some((c) => c.cards.length) && !cols.some(waitsForCards)) return div().p(20).text_color(t.muted).child(emptyText(st.data));
     if (st.data.lanes) return drawLanes(b, t, mono, view, st, cols, sessions, dragged);
     return h_flex().id("columns").flex_1().min_h(0).gap(COLUMN_GAP).p(14).items_start().children(cols.map(columnEl));
   };
@@ -309,11 +335,10 @@ function drawLanes(b, t, mono, view, st, cols, sessions, dragged) {
   const layout = at && laneLayout(b, rows, kept, at.width, cols.length);
   if (at) placeBand(kept.band, layout.content, at);
   const heads = h_flex().id("lane-heads").flex_none().gap(COLUMN_GAP).px(14).pt(14).children(cols.map((col, ci) => {
-    const filtered = col.cards.length - col.shown.length;
     const target = Boolean(dragged) && b.over === ci && b.drag.from !== col.id && canDrop(st.data, dragged, col);
     return div().id(`col-${ci}`).flex_1().min_w(0).rounded(10).border_1().border_color(target ? t.accent : t.border).bg(target ? dropBg(t, t.chrome) : t.chrome).p(6)
       .map(dropOn(b, view, ci, col))
-      .child(columnHead(t, col, filtered ? shownOf(col.shown.length, col.count ?? col.cards.length) : String(col.count ?? col.shown.length), t.chrome));
+      .child(columnHead(t, col, laneHeadCount(b, st, col), t.chrome));
   }));
   const rowEl = (row, i) => {
     if (row.head) {
@@ -434,7 +459,7 @@ function drawCard(b, t, mono, view, st, card, col, ci, sessions, measure) {
     .rounded(8)
     .border_1()
     .map(selectedLook(t, selected, t.border, t.background))
-    .opacity(dragging ? 0.5 : st.pending[card.key] ? 0.7 : 1)
+    .opacity(dragging || waitsForCards(col) ? 0.5 : st.pending[card.key] ? 0.7 : 1)
     .cursor_pointer()
     .when(Boolean(measure), (el) => el.on_size_change(measure))
     .on_mouse_down("left", (e, cx) => {
@@ -466,7 +491,7 @@ function drawCard(b, t, mono, view, st, card, col, ci, sessions, measure) {
 function toggleBoardColumn(b, view, col, cx) {
   const st = b.state(view.id);
   if (!st.data) return;
-  if (!boardShape.canHide(col)) return b.say(`„${col.name}“ lässt sich nicht ausblenden`, "info", cx);
+  if (!boardShape.canHide(col)) return b.say(notHideable(col.name), "info", cx);
   const before = { id: view.id, columns: b.navColumns(view) };
   b.changeSetting(hidePath(view), toggledHidden(b.viewById(view.id) ?? view, col), cx, before);
 }
