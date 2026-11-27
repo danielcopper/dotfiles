@@ -220,7 +220,7 @@ import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
 import {
-  SOURCES, contextViews, contextsOf, firstContextOf, firstViewId, goneProjects, hasViews, tabViewName, pick, projectKey, tabView, viewOf, viewsOf, hasViewSwitch, shownContextMoves, shownIndex, stepIndex, tabViewAfter, tabViewKey,
+  SOURCES, contextViews, contextsOf, firstContextOf, firstViewId, goneProjects, hasViews, tabViewName, pick, projectKey, tabView, viewOf, viewsOf, hasViewSwitch, shownContextMoves, shownIndex, stepIndex, tabViewAfter, tabViewKey, viewsOfTab,
 } from "./contexts.js";
 import { call, toolPaths, what } from "./tools.js";
 import { SAVED_MAX, UNSAVED, goneSaved, prefetchOrder, readLabels, readSaved, refreshDue, savedKey, savedText } from "./loading.js";
@@ -2200,15 +2200,19 @@ export default class Board extends View {
     return this.segmentBox(t, "context").children(parts);
   }
 
-  // The shown context's tabs: number, name and, for a view with data, how
-  // many items it holds ("…" while it loads without data; shownOf while the
-  // filter or "nur meine" hides some).
   tabRow(t, shown) {
     const count = (c) => {
       const st = this.state(this.viewFor(c).id);
-      if (st.loading && !st.data) return "…";
       const n = st.data ? SHAPES[st.data.shape].count(this, st.data) : null;
-      return n ? shownOf(n.shown, n.total) : "";
+      const countText = n ? shownOf(n.shown, n.total) : "";
+      const slot = div().flex_none().text_size(12).text_color(t.muted);
+      if (!this.tabLoading(c)) return slot.child(countText);
+      if (!n) return slot.child(spinner());
+      // The unseen count under the spinner keeps the tab's width.
+      return slot
+        .relative()
+        .child(div().opacity(0).child(countText))
+        .child(div().absolute().inset_0().flex().items_center().justify_center().child(spinner()));
     };
     // Too narrow for all, the names give way first (cut with …).
     return h_flex()
@@ -2235,9 +2239,13 @@ export default class Board extends View {
             })
             .child(div().flex_none().text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
             .child(div().min_w(0).truncate().child(c.name))
-            .child(div().flex_none().text_size(12).text_color(t.muted).child(count(c))),
+            .child(count(c)),
         ),
       );
+  }
+
+  tabLoading(tab) {
+    return viewsOfTab(tab).some((v) => this.views[v.id]?.loading);
   }
 
   mineToggle(t) {

@@ -18410,7 +18410,7 @@ test("UI: a GitHub board without data draws each page as it comes, with its warn
   assert.ok(texts(root).includes("Ein Fehler der ersten Seite"), "with its warnings");
   assert.equal(readingOf(root), "lädt … Seite 2 von 2");
   assert.equal(texts(root).some((x) => x.startsWith("Nur die ersten")), false, "no note before the last page");
-  assert.equal(texts(byId(root, `tab-${MINE_TAB}`)).includes("…"), false, "the tab counts what is drawn");
+  assert.deepEqual(tabCount(b, MINE_TAB), { texts: ["3"], spins: true, unseen: true }, "the tab counts what is drawn, under the spinner");
   const page = (total) => boardPage(0, 3, "c1", { total });
   assert.deepEqual([board.pageCount(board.PROJECT_ITEMS, page(250), 10), board.pageCount(board.PROJECT_ITEMS, page(250), 2), board.pageCount(board.PROJECT_ITEMS, page(0), 10)], [3, 2, 1],
     "the pages by the count GitHub names, no more than the calls; a page more than it names counts as one more");
@@ -18430,8 +18430,9 @@ test("UI: a refresh over a board read since the start, by r or by the timer, dra
     const late = allCards(st().data)[5].key;
     b.choose(b.view(), { col: board.columnOf(b.navColumns(b.view()), late), key: late }, cx);
     st().detail = true;
-    const count = () => texts(byId(b.render(), `tab-${MINE_TAB}`)).at(-1);
+    const count = () => tabCount(b, MINE_TAB);
     const before = count();
+    assert.deepEqual([before.texts.length, before.spins], [1, false], how);
     if (how === "r") await press(b, cx, "r");
     else {
       advance(3 * MIN);
@@ -18439,7 +18440,7 @@ test("UI: a refresh over a board read since the start, by r or by the timer, dra
     }
     assert.deepEqual(host.open("gh").filter((c) => isMineCall(c.args)).length, 1, `${how}: read`);
     await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1", { total: 6 }))), isMineCall);
-    assert.deepEqual([allCards(st().data).length, st().sel.key, st().picked, st().detail, count()], [6, late, late, true, before], `${how}: the board as it was`);
+    assert.deepEqual([allCards(st().data).length, st().sel.key, st().picked, st().detail, count()], [6, late, late, true, { ...before, spins: true, unseen: true }], `${how}: the board as it was`);
     assert.equal(readingOf(b.render()), "lädt … Seite 2 von 2", how);
     await host.answer("gh", ok(JSON.stringify(boardPage(3, 6, null, { first: false, total: 6 }))), isMineCall);
     assert.deepEqual([st().loading, allCards(st().data).length, st().sel.key, st().detail], [false, 6, late, true], `${how}: the new read, the card still chosen`);
@@ -18919,6 +18920,56 @@ test("UI: „Lädt …“ in an empty view has a spinner before it; the ↻ turn
   root = b.render();
   assert.deepEqual([refreshSpins(root), Boolean(byId(root, "columns"))], [true, true], "a refresh over the data drawn");
   assert.match(readFileSync(join(modDir, "refresh.svg"), "utf8"), /^<svg [^>]*stroke="currentColor"/, "tinted with the text color");
+});
+
+// unseen: the count stands invisible in its place under the spinner.
+function tabCount(b, id) {
+  const slot = byId(b.render(), `tab-${id}`).kids.at(-1);
+  const [count, over] = slot.kids;
+  const unseen = slot.styles.includes("relative") && count?.with?.opacity?.[0] === 0 && Boolean(over?.styles.includes("absolute") && over.styles.includes("inset_0"));
+  return { texts: texts(slot), spins: turns(slot), unseen };
+}
+const SPINS_ALONE = { texts: [], spins: true, unseen: false };
+
+test("UI: a tab shows the spinner in its count's place while a read of its view runs, the shown tab's and the prefetch's: alone without data, over the count kept unseen with data; the count comes back once the read ends", async () => {
+  const { b, cx, host } = await bootBoard();
+  assert.deepEqual([tabCount(b, MINE_TAB), tabCount(b, OTHER_TAB)], [SPINS_ALONE, { texts: [""], spins: false, unseen: false }], "the shown tab's first read");
+  await host.answer("gh", ok(fixture("github-board.json")), isMineCall);
+  assert.deepEqual(tabCount(b, MINE_TAB), { texts: ["6"], spins: false, unseen: false });
+  await cx.fire();
+  assert.deepEqual([tabCount(b, MINE_TAB).spins, tabCount(b, OTHER_TAB)], [false, SPINS_ALONE], "the prefetch's tab");
+  await host.answer("gh", ok(fixture("github-board.json")), isOtherCall);
+  const other = tabCount(b, OTHER_TAB);
+  assert.deepEqual([other.spins, other.texts.length], [false, 1]);
+  advance(3 * MIN);
+  await cx.tick();
+  assert.deepEqual(tabCount(b, MINE_TAB), { texts: ["6"], spins: true, unseen: true }, "the refresh every refreshMinutes, over data");
+  assert.ok(byId(b.render(), `tab-${MINE_TAB}`).kids.at(-1).styles.includes("flex_none"), "the name gives way, not the count's place");
+  await host.answer("gh", ok(fixture("github-board.json")), isMineCall);
+  assert.deepEqual(tabCount(b, MINE_TAB), { texts: ["6"], spins: false, unseen: false });
+});
+
+test("UI: a tab with views shows the spinner while a read of any of them runs, also of a view it does not show", async () => {
+  const { b, cx, host } = await openIssues();
+  const shown = tabCount(b, ISSUES_TAB);
+  assert.deepEqual([shown.spins, shown.texts.length], [false, 1]);
+  await press(b, cx, "v");
+  await press(b, cx, "v");
+  assert.deepEqual([b.view().id, b.state(CLOSED_ISSUES).loading], [OPEN_ISSUES, true]);
+  assert.deepEqual(tabCount(b, ISSUES_TAB), { ...shown, spins: true, unseen: true }, "over the shown view's count");
+  await host.answer("gh", ok(fixture("github-issues-closed.json")), isIssuesCall);
+  assert.deepEqual(tabCount(b, ISSUES_TAB), shown);
+});
+
+test("UI: a PR tab read together with the shown one shows the spinner in its context's top bar", async () => {
+  const { b, cx, host } = await openPrList({ config: JSON.stringify(twoContexts()), list: contextList() });
+  advance(MIN);
+  await press(b, cx, "r");
+  assert.equal(tabCount(b, "github:prs").spins, true);
+  await press(b, cx, "}");
+  assert.deepEqual([b.context().name, b.state("org-prs").loading, tabCount(b, "github:org-prs").spins], ["Sample-Org", true, true]);
+  await host.answer("gh", ok(contextList()), isListCall);
+  assert.equal(tabCount(b, "github:org-prs").spins, false);
 });
 
 test("UI: ↻ with hidden columns the storage kept since moves them into this machine's settings and reads the shown view, the ↻ turning", async () => {

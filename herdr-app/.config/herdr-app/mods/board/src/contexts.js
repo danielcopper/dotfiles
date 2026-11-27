@@ -155,10 +155,9 @@ const TAB_KINDS = {
 
 export const viewOf = (tab, viewId) => TAB_KINDS[tab.kind].viewOf(tab, viewId);
 
-// Every view of a context or a config: one per tab, one per view of a team
-// or of a project (a project the board knows no views of: the view that
-// learns them).
-export const contextViews = (context) => context.tabs.flatMap((t) => (hasViews(t) && t.views.length ? t.views.map((v) => viewOf(t, v)) : [viewOf(t, null)]));
+// A project the board knows no views of has one view: the one that learns them.
+export const viewsOfTab = (t) => (hasViews(t) && t.views.length ? t.views.map((v) => viewOf(t, v)) : [viewOf(t, null)]);
+export const contextViews = (context) => context.tabs.flatMap(viewsOfTab);
 export const viewsOf = (config, known = NO_PROJECTS) => contextsOf(config, known).flatMap(contextViews);
 
 // The first context of `source`, which a source alone names.

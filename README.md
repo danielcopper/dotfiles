@@ -566,9 +566,12 @@ by that run. Which files of the package git tracks is set in the root
   dialog is busy, so a switch to such a tab shows it at once. After that a view
   refreshes only while it shows, as above, a GitHub PR tab also with the
   others. While a read of the shown view runs, `↻` turns, and an empty view
-  shows a spinner before "Lädt …". Each gh, az and sh run (checkout, the Repo
-  field's repos, finding gh and az, the Claude Code sessions and their task
-  lists) writes one line to herdr's log (console.log), without its arguments:
+  shows a spinner before "Lädt …". While a read of any of a tab's views runs,
+  also in the background, the tab in the top bar shows the spinner in its
+  count's place, over the count kept unseen, so a tab with a count keeps its
+  width. Each gh, az and sh run (checkout, the Repo field's repos, finding gh
+  and az, the Claude Code sessions and their task lists) writes one line to
+  herdr's log (console.log), without its arguments:
   `board: <gh|az|sh> <kind> <ms> ms <ok|exit n|failed> view=<view id>`.
   Keys: `1 2 3` or `[ ]` switch the tab, `{ }` the context (also as AltGr types
   them, on a German layout AltGr+7 and AltGr+0), `g` and a digit go to that
