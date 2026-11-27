@@ -37,8 +37,8 @@ import { h_flex, v_flex, TextView } from "gpui-base";
 import { itemLabel } from "../shared.js";
 import { prsHead, relatedLines, subIssuesHead } from "../related.js";
 import { stateDone } from "../kinds/states.js";
-import { LINE_PX, motionOf, offsetOf, revealSpan, rowTops, scrollBy, spanShows, thumbOf } from "../scroll.js";
-import { FRAME, checksSection, chip, detailNote, sectionTitle, selectedLook, stateChip, unzoomed, wheelMove } from "./helpers.js";
+import { LINE_PX, motionOf, offsetOf, revealSpan, scrollBy, spanShows, spanStarts, thumbOf } from "../scroll.js";
+import { FRAME, checksSection, chip, detailNote, sectionTitle, selectedLook, stateChip, thumbLook, unzoomed, wheelMove } from "./helpers.js";
 import { NOTE_TONES, toneColor } from "./tones.js";
 
 export const FOLDED_H = 12 * LINE_PX;
@@ -73,7 +73,7 @@ function lineSpan(ui, item, entry, n) {
   const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
   if (i < 0) return null;
   const heights = rows.map((r, j) => ui.sizes.get(rowId(r, j)) ?? LINE_PX);
-  return { top: rowTops(heights, FRAME.gap, FRAME.py).tops[i], height: heights[i] };
+  return { top: spanStarts(heights, FRAME.gap, FRAME.py).starts[i], height: heights[i] };
 }
 
 // Scrolls line `n` into view.
@@ -237,7 +237,7 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     .border_color(t.border)
     .child(windowEl)
     .when(Boolean(thumb), (el) => el.child(
-      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).transition("top", motion)
-        .w(3).h(thumb?.height ?? 0).rounded(2).bg(t.muted).opacity(0.6),
+      div().id("related-thumb").absolute().right(3).top(thumb?.start ?? 0).transition("top", motion)
+        .w(3).h(thumb?.length ?? 0).map(thumbLook(t)),
     ));
 }

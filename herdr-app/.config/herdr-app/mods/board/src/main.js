@@ -1935,6 +1935,7 @@ export default class Board extends View {
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
       if (shape.dirs.includes(dir)) this.choose(view, shape.navigate ? shape.navigate(this, view, st, dir) : navigate(this.navColumns(view), st.sel, dir), cx);
+      else if (shape.sideways && (dir === "left" || dir === "right")) shape.sideways(this, view, dir === "right" ? 1 : -1);
       return done();
     }
     // With nothing selected (loading, failed, empty, a placeholder) Enter

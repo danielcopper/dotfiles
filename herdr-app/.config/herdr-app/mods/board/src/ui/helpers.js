@@ -159,7 +159,7 @@ export function menuPanel(t, { id, rowId, width, title, rows, at, pick, head = [
     .when(Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => wheel(wheelMove(e), cx)))
     .children(rows.flatMap((kids, n) => [...(heads[n] ? [heading(heads[n], n)] : []), row(kids, n)]))
     .when(count > rows.length, (el) => el.child(
-      div().id(`${id}-thumb`).absolute().right(0).top(share(from)).w(3).h(share(rows.length)).rounded(2).bg(t.muted).opacity(0.6),
+      div().id(`${id}-thumb`).absolute().right(0).top(share(from)).w(3).h(share(rows.length)).map(thumbLook(t)),
     ));
   return v_flex()
     .id(`${id}-menu`)
@@ -184,6 +184,14 @@ export function menuPanel(t, { id, rowId, width, title, rows, at, pick, head = [
 export const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
 
 export const wheelMove = (e) => -unzoomed(e.delta?.y ?? 0);
+
+export function sideMove(e) {
+  const x = e.delta?.x ?? 0;
+  if (Math.abs(x) > Math.abs(e.delta?.y ?? 0)) return -unzoomed(x);
+  return e.modifiers?.shift ? wheelMove(e) : 0;
+}
+
+export const thumbLook = (t) => (el) => el.rounded(2).bg(t.muted).opacity(0.6);
 
 // How many rows a menu with a filter shows at once (menuWindow).
 const MENU_ROWS = 10;
@@ -496,15 +504,19 @@ export function typeLine(t, item, hex, inset = 0) {
 export const selectedLook = (t, selected, rest, restBg = null) => (el) =>
   el.border_color(selected ? t.accent : rest).when(selected || Boolean(restBg), (e) => e.bg(selected ? selectedBg(t) : restBg));
 
+export const ROW_GAP = 12;
+export const ROW_PAD = 18;
+export const ROW_BORDER = 2;
+
 export const listRow = (b, t, view, st, item, rest = t.background) =>
   h_flex()
     .id(`row-${item.key}`)
     .relative()
     .flex_none()
-    .gap(12)
-    .px(18)
+    .gap(ROW_GAP)
+    .px(ROW_PAD)
     .items_center()
-    .border_l(2)
+    .border_l(ROW_BORDER)
     .map(selectedLook(t, st.sel?.key === item.key, rest))
     .opacity(st.pending[item.key] ? 0.7 : 1)
     .cursor_pointer()

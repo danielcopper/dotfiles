@@ -14710,11 +14710,11 @@ test("the details block's offset stays within its content; a span comes into vie
   assert.deepEqual([board.spanShows(s, 50, 100), board.spanShows(s, 49, 10), board.spanShows(s, 140, 11), board.spanShows({ ...s, viewport: 0 }, 900, 10)], [true, false, false, true],
     "not measured yet: shown");
   assert.deepEqual([board.thumbOf(s), board.thumbOf({ ...s, offset: 0 }), board.thumbOf({ ...s, offset: 200 }), board.thumbOf({ offset: 0, content: 90, viewport: 100 })],
-    [{ top: 17, height: 33 }, { top: 0, height: 33 }, { top: 67, height: 33 }, null]);
-  assert.deepEqual(board.thumbOf({ offset: 0, content: 10000, viewport: 100 }), { top: 0, height: 16 }, "never thinner than 16");
+    [{ start: 17, length: 33 }, { start: 0, length: 33 }, { start: 67, length: 33 }, null]);
+  assert.deepEqual(board.thumbOf({ offset: 0, content: 10000, viewport: 100 }), { start: 0, length: 16 }, "never shorter than 16");
   assert.deepEqual([board.thumbOf({ offset: 0, content: 300, viewport: 0 }), board.thumbOf({ offset: 0, content: 100, viewport: 100 })], [null, null],
     "a window not measured, or content as tall as it: none");
-  assert.deepEqual([board.rowTops([18, 40, 18], 6, 12), board.rowTops([], 6, 12)], [{ tops: [12, 36, 82], content: 100 }, { tops: [], content: 12 }]);
+  assert.deepEqual([board.spanStarts([18, 40, 18], 6, 12), board.spanStarts([], 6, 12)], [{ starts: [12, 36, 82], content: 100 }, { starts: [], content: 12 }]);
 });
 
 test("UI: in the details panel ctrl-d and ctrl-u scroll the block half its window, clamped at both ends; without the panel's keyboard they do nothing; the hint line leaves them out", async () => {
@@ -16355,6 +16355,29 @@ test("UI: a full draw of a table of 1000 rows whose list herdr laid out 900 pixe
   }
 });
 
+test("UI: a full draw of a table of 1000 rows of 14 fields after the title, too many for its table 1200 pixels wide and scrolled sideways, draws in each row drawn whole only the cells its strip shows, and makes fewer elements than with all its fields drawn: 1000 to 2000 elements and 6 to 100 conversions, in copper-dark and catppuccin-mocha, each draw on a new theme object as herdr gives it", async () => {
+  const { b, cx, host } = await openTable({ view: { visibleFields: ALL_FIELDS }, answer: largeTableAnswer(tablePlanOf(tableProject({ visibleFields: ALL_FIELDS })), 1000) });
+  Object.assign(tableHandle(b), { width: 1200, height: 900 });
+  const fields = b.state(b.view().id).data.fields;
+  assert.equal(fields.length, 15);
+  measureTable(b, cx, 4000);
+  const whole = drawCost(b, host).elements;
+  measureTable(b, cx, 1200);
+  for (const _ of [1, 2, 3]) await press(b, cx, "l");
+  const { from, to } = board.stripRange(board.fieldStrip(fields.slice(1), 1200), stripAt(b));
+  const list = tableList(b);
+  assert.ok(from > 0 && to < 14, `fields ${from} to ${to} show`);
+  assert.ok(wholeRows(list).every((i) => stripBoxOf(list.kids[i]).kids.length === to - from), "only the cells the strip shows");
+  for (const [name, t] of [["copper-dark", copperTheme("dark")], ["catppuccin-mocha", catppuccinTheme()]]) {
+    host.theme = () => ({ ...t });
+    for (const draw of [1, 2]) {
+      const cost = drawCost(b, host);
+      assert.ok(cost.conversions >= 6 && cost.conversions <= 100, `${name}, draw ${draw}: ${cost.conversions} conversions`);
+      assert.ok(cost.elements >= 1000 && cost.elements <= 2000 && cost.elements < whole, `${name}, draw ${draw}: ${cost.elements} elements, ${whole} with all fields`);
+    }
+  }
+});
+
 test("UI: on a table a key that selects a row outside the band scrolls to it and draws it whole while herdr has not run the scroll yet; the wheel, and every BAND_MS the timer, ask a draw only where the list left its band", async () => {
   const { b, cx, host, st } = await longTable();
   b.render();
@@ -16380,6 +16403,148 @@ test("UI: on a herdr whose ScrollHandle reads nothing back (before 0.1.18) every
   const { b } = await longTable({ oldScroll: true });
   const list = tableList(b);
   assert.deepEqual([wholeRows(list).length, list.with.on_scroll_wheel, b.shapeState.table.windowed], [1000, undefined, false]);
+});
+
+// The fields of the first table test: after the title 150, 120, 200, 70,
+// 80, 80, 120, 180 and 100 pixels wide (FIELD_W), 12 apart, 1196 in all,
+// which fit beside the title's 200 in a table 1446 wide and no narrower.
+const WIDE_FIELDS = ["Title", "Assignees", "Status", "Labels", "Linked pull requests", "Sub-issues progress", "Target date", "Milestone", "Parent issue", "Created"];
+const wideStrip = (width) => board.fieldStrip(tablePlanOf(tableProject({ visibleFields: WIDE_FIELDS })).fields.slice(1), width);
+const measureTable = (b, cx, width, zoom = 1) => notifies(cx, (own) => byId(b.render(), "table-box").with.on_size_change[0](scaled({ width, height: 600 }, zoom), own));
+function stripBoxOf(el) {
+  const [win] = el.kids.slice(1);
+  const content = win.kids[0];
+  return { width: win.with.w[0], clips: win.styles.includes("overflow_hidden"), kids: content.kids, left: content.with.left[0] };
+}
+const fieldIds = (root) => stripBoxOf(byId(root, "table-head")).kids.map((k) => k.with.id[0]);
+const stripAt = (b) => b.shapeState.table.stripAt.get(b.view().id);
+
+test("a table's fields scroll as a strip only where they do not fit beside the title at 200 pixels with the head's room left and right (fieldStrip); the fields that show at an offset (stripRange); h/l's step to the next field's left edge or the one before's, up to where the last field ends at the right edge (stripStep)", () => {
+  assert.equal(wideStrip(0), null, "not measured yet");
+  assert.equal(wideStrip(NaN), null, "a measure without a width");
+  assert.equal(wideStrip(1446), null, "fits to the pixel");
+  assert.equal(wideStrip(1445).viewport, 1195, "a pixel short");
+  const strip = wideStrip(900);
+  assert.deepEqual(strip, { widths: [150, 120, 200, 70, 80, 80, 120, 180, 100], lefts: [0, 162, 294, 506, 588, 680, 772, 904, 1096], content: 1196, viewport: 650, start: 232 });
+  assert.equal(board.fieldStrip([], 300), null, "the title alone");
+  assert.equal(wideStrip(250), null, "no room beside the title");
+  assert.deepEqual(board.stripRange(strip, 0), { from: 0, to: 5 }, "Sub-issues progress cut at the right edge, Target date not drawn");
+  assert.deepEqual(board.stripRange(strip, 30), { from: 0, to: 5 }, "Target date just beyond the right edge");
+  assert.deepEqual(board.stripRange(strip, 149), { from: 0, to: 7 });
+  assert.deepEqual(board.stripRange(strip, 150), { from: 1, to: 7 }, "Assignees gone at its end");
+  assert.deepEqual(board.stripRange(strip, 546), { from: 3, to: 9 });
+  const steps = (from, by, n) => {
+    const at = [from];
+    for (let i = 0; i < n; i++) at.push(board.stripStep(strip, at.at(-1), by));
+    return at.slice(1);
+  };
+  assert.deepEqual(steps(0, 1, 5), [162, 294, 506, 546, 546], "stops where Created ends at the right edge");
+  assert.deepEqual(steps(546, -1, 5), [506, 294, 162, 0, 0]);
+  assert.deepEqual([board.stripStep(strip, 100, 1), board.stripStep(strip, 100, -1)], [162, 0], "from within a field");
+  assert.equal(board.stripStep(wideStrip(340), 1100, 1), 1106, "a window narrower than the last field: from within it to its end");
+});
+
+test("UI: where a table's fields do not fit and it has room beside the title, the title stays 200 pixels wide on the left and the fields scroll sideways as one strip, the head's with the rows', each head above its cells; a cell outside the strip's window is not drawn; a group row spans the table; a thin bar below the rows shows where the strip stands and how much of it shows; where they fit, all is as before", async () => {
+  const { b, cx, host } = await openTable({ view: { visibleFields: WIDE_FIELDS, group: "Status" } });
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  const before = b.render();
+  assert.deepEqual([byId(before, "table-head").kids.length, byId(before, "table-strip-bar")], [10, null], "not measured yet: as before");
+  assert.equal(measureTable(b, cx, 900), 1, "a new width asks a draw");
+  assert.equal(measureTable(b, cx, 900), 0, "the same width none");
+  const root = b.render();
+  const head = byId(root, "table-head");
+  assert.deepEqual([head.kids.length, head.kids[0].with.w[0], head.kids[0].styles.includes("flex_none"), head.kids[0].styles.includes("flex_1"), texts(head.kids[0])], [2, 200, true, false, ["Title"]], "the title pinned");
+  assert.deepEqual(fieldIds(root), ["table-field-1", "table-field-2", "table-field-3", "table-field-4", "table-field-5"]);
+  assert.deepEqual([stripBoxOf(head).width, stripBoxOf(head).clips, stripBoxOf(head).left], [650, true, 0]);
+  const row = byId(root, "row-PVTI_rec1");
+  assert.deepEqual([row.kids[0].with.w[0], row.kids[0].styles.includes("flex_none")], [200, true]);
+  assert.deepEqual(stripBoxOf(row).kids.map((k) => k.with.w[0]), [150, 120, 200, 70, 80], "the cells of the head's fields, no more");
+  assert.deepEqual([stripBoxOf(row).width, stripBoxOf(row).clips, stripBoxOf(row).left], [650, true, 0]);
+  assert.deepEqual(texts(row.kids[1]), ["sample-user", "In progress", "enhancement", "area:architecture", "epic", "2", "15/22"]);
+  const group = byId(root, "group-v:opt-in-progress");
+  assert.deepEqual([texts(group), group.kids.length], [["In progress", "3"], 3], "spans the table");
+  const edge = row.with.px[0] + row.with.border_l[0];
+  assert.deepEqual([head.with.pl[0], head.with.gap[0], head.kids[1].kids[0].with.gap[0], head.with.pr[0], group.with.px[0]], [edge, row.with.gap[0], row.with.gap[0], row.with.px[0], edge],
+    "each field's head above its cells, the group's name above the rows' titles");
+  const bar = byId(root, "table-strip-bar");
+  assert.deepEqual([bar.with.w[0], bar.with.ml[0], bar.with.h[0]], [650, 232, 3], "under the strip's window");
+  const thumb = byId(bar, "table-strip-thumb");
+  assert.deepEqual([thumb.with.left[0], thumb.with.w[0], thumb.with.h[0], thumb.with.bg[0], thumb.with.opacity[0]], [0, 353, 3, t.muted, 0.6], "650 of 1196 pixels, in the details' thumb's look");
+  assert.deepEqual(byId(root, "table-box").kids.map((k) => k.with.id[0]), ["table-head", "table-rows", "table-strip-bar"], "below the rows");
+  measureTable(b, cx, 1446);
+  const wide = b.render();
+  const wideHead = byId(wide, "table-head");
+  assert.deepEqual([wideHead.kids.length, wideHead.kids[0].styles.includes("flex_1"), wideHead.kids[0].with.min_w[0], wideHead.with.on_scroll_wheel], [10, true, 200, undefined], "all fits: as before");
+  assert.deepEqual([byId(wide, "row-PVTI_rec1").kids.length, byId(wide, "table-strip-bar"), byId(wide, "row-PVTI_rec1").with.on_scroll_wheel, byId(wide, "group-v:opt-in-progress").with.on_scroll_wheel], [10, null, undefined, undefined]);
+});
+
+test("UI: on a herdr whose ScrollHandle reads nothing back (before 0.1.18) a table's fields scroll sideways too, its list taking the sideways wheel", async () => {
+  const { b, cx } = await openTable({ oldScroll: true, view: { visibleFields: WIDE_FIELDS } });
+  measureTable(b, cx, 900);
+  const asked = notifies(cx, (own) => byId(b.render(), "table-rows").with.on_scroll_wheel[0]({ delta: { x: -100, y: 0 }, modifiers: {} }, own));
+  assert.deepEqual([asked, stripAt(b), fieldIds(b.render())[0]], [1, 100, "table-field-1"]);
+});
+
+test("UI: on a table that scrolls sideways l and the right arrow bring the next field to the strip's left edge, h and the left arrow the one before, up to where the last field ends at the right edge, while j/k and the up and down arrows move the selection; Shift with the wheel and a sideways wheel scroll it over the head, a row, a group row, the list and the bar, taken by the strip, which a plain wheel scrolls as before; each view keeps its own place, which a wider table or fewer fields clamp; where all fits h/l do nothing", async () => {
+  const views = [{ layout: "table", column: null, visibleFields: WIDE_FIELDS, group: "Status" }, { number: 7, name: "Breit", layout: "table", column: null, visibleFields: WIDE_FIELDS }];
+  const { b, cx, host, plan, st } = await openTable({ extra: { views } });
+  host.settings = () => ({ zoom: 2 });
+  assert.equal(measureTable(b, cx, 900, 2), 1);
+  const at = () => [fieldIds(b.render())[0], stripBoxOf(byId(b.render(), "table-head")).left, stripBoxOf(byId(b.render(), "row-PVTI_rec1")).left];
+  assert.deepEqual(at(), ["table-field-1", 0, 0]);
+  const sel = st().sel.key;
+  await press(b, cx, "l");
+  assert.deepEqual([at(), st().sel.key], [["table-field-2", 0, 0], sel], "the selection stays");
+  await press(b, cx, "right");
+  await press(b, cx, "l");
+  assert.deepEqual(at(), ["table-field-4", 0, 0]);
+  await press(b, cx, "l");
+  await press(b, cx, "l");
+  assert.deepEqual([at(), stripAt(b), fieldIds(b.render()).at(-1)], [["table-field-4", -40, -40], 546, "table-field-9"], "Created's end at the right edge: 1096 + 100 - 546 = 650");
+  assert.deepEqual([byId(b.render(), "table-strip-thumb").with.left[0]], [297], "the thumb at the bar's end");
+  await press(b, cx, "h");
+  await press(b, cx, "left");
+  assert.equal(stripAt(b), 294);
+  const shown = at();
+  const moved = [];
+  for (const key of ["j", "up", "down", "k"]) {
+    await press(b, cx, key);
+    moved.push([stripAt(b), at(), st().sel.key === sel]);
+  }
+  assert.deepEqual(moved, [[294, shown, false], [294, shown, true], [294, shown, false], [294, shown, true]],
+    "j/k and the up and down arrows move the selection, not the strip");
+  const wheel = (id, delta, modifiers = {}) => {
+    const stopped = cx.stopped;
+    const asked = notifies(cx, (own) => byId(b.render(), id).with.on_scroll_wheel[0]({ delta, modifiers }, own));
+    return [asked, cx.stopped - stopped, stripAt(b)];
+  };
+  assert.deepEqual(wheel("table-head", { x: 0, y: -200 }, { shift: true }), [1, 1, 394], "Shift and the wheel down: right, by its move at herdr's zoom");
+  assert.deepEqual(wheel("row-PVTI_rec1", { x: 60, y: 0 }), [1, 1, 364], "a sideways wheel: left");
+  assert.deepEqual(wheel("row-PVTI_rec1", { x: -20, y: -100 }), [0, 0, 364], "more down than sideways: the list's");
+  assert.deepEqual(wheel("row-PVTI_rec1", { x: -50, y: -50 }), [0, 0, 364], "as much down as sideways too");
+  assert.deepEqual(wheel("group-v:opt-in-progress", { x: -2000, y: 0 }), [1, 1, 546], "a group row too; up to the end");
+  assert.deepEqual(wheel("table-strip-bar", { x: -10, y: 0 }), [0, 1, 546], "at the end: nothing to draw, still taken by the strip");
+  assert.deepEqual(wheel("table-rows", { x: 0, y: 400 }, { shift: true }), [1, 1, 346], "the list below its rows");
+  assert.deepEqual(wheel("table-rows", { x: 0, y: -400 }), [0, 0, 346], "a plain wheel: the list's");
+  await press(b, cx, "v");
+  await host.answer("gh", ok(JSON.stringify(tableAnswer(plan))), "items(first");
+  assert.deepEqual([b.view().id, at()], [`${MINE_TAB}:7`, ["table-field-1", 0, 0]], "another view: its own place");
+  await press(b, cx, "l");
+  await press(b, cx, "v");
+  assert.deepEqual([b.view().id, stripAt(b)], [MINE, 346], "back: where it stood");
+  await press(b, cx, "l");
+  await press(b, cx, "l");
+  assert.equal(stripAt(b), 546);
+  assert.equal(measureTable(b, cx, 1000, 2), 1);
+  b.render();
+  assert.equal(stripAt(b), 446, "a wider table clamps it: 1196 - 750");
+  measureTable(b, cx, 1446, 2);
+  await press(b, cx, "l");
+  assert.deepEqual([stripAt(b), byId(b.render(), "table-strip-bar")], [446, null], "all fits: l does nothing");
+  measureTable(b, cx, 900, 2);
+  st().data = { ...st().data, fields: st().data.fields.slice(0, 6) };
+  assert.deepEqual([at(), stripAt(b)], [["table-field-1", -18, -18], 18], "fewer fields clamp it: 668 - 650");
 });
 
 test("UI: a board with swimlanes draws the columns' heads once and below them, scrolling as one, each band's head and rows; only the rows about its window whole; h/l keep the band, and the list scrolls to the row of the card chosen", async () => {
@@ -16535,7 +16700,7 @@ function measureWhole(b, cx, height, zoom = 1) {
 
 // Where each card of a list stands: a whole one `card` high (measured), a
 // frame as tall as it is drawn, 6 pixels between them.
-const topsOf = (list, card = 100) => board.rowTops(list.kids.map((k) => (isFrame(k) ? k.with.h[0] : card)), 6).tops;
+const topsOf = (list, card = 100) => board.spanStarts(list.kids.map((k) => (isFrame(k) ? k.with.h[0] : card)), 6).starts;
 // The cards whole in a list scrolled `offset` down: those in its window and
 // half a window above and below.
 const bandAt = (list, offset) => topsOf(list).flatMap((top, i) => (top < offset + LIST_H * 1.5 && top + (isFrame(list.kids[i]) ? list.kids[i].with.h[0] : 100) > offset - LIST_H / 2 ? [i] : []));
@@ -16883,8 +17048,8 @@ test("UI: on a herdr whose ScrollHandle reads nothing back (before 0.1.18) every
 
 test("the band's sums: a handle read, a window herdr has not laid out yet as VIEWPORT_GUESS high; the band about the offset, kept within the content; whether a window left it; a key's reveal, which the band follows until the handle moved; a card's height before it is measured", async () => {
   await openBoard();
-  assert.deepEqual(board.rowTops([100, 50, 80], 6), { tops: [0, 106, 162], content: 242 });
-  assert.deepEqual(board.rowTops([], 6), { tops: [], content: 0 });
+  assert.deepEqual(board.spanStarts([100, 50, 80], 6), { starts: [0, 106, 162], content: 242 });
+  assert.deepEqual(board.spanStarts([], 6), { starts: [], content: 0 });
   const s = board.bandState();
   board.placeBand(s, 1000, { offset: 900, viewport: 500 });
   assert.deepEqual([s.lo, s.hi, s.content], [250, 1250, 1000], "kept within the content: its end at the window's");

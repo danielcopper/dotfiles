@@ -691,6 +691,13 @@ by that run. Which files of the package git tracks is set in the root
   them), the issue type as a chip and how many pull requests are linked; nothing
   for no value. Each field's head and cells are as wide as its kind takes
   (`FIELD_W` in `mods/board/src/ui/shapes/table.js`), and a longer value is cut.
+  Where the fields do not fit and the table has room beside the title, the title
+  keeps its 200 pixels on the left and the other fields scroll sideways as one,
+  their heads with them: `h/l` and the left and right arrows by a field, Shift
+  with the wheel or a sideways wheel by its move, up to where the last field
+  ends at the right edge; a thin bar below the rows shows where they stand, a
+  group row spans the table, and each view keeps its place while the board runs.
+  A table with no room beside the title stays as before.
   A field the board cannot read (reviewers, the dates an item keeps) keeps its
   head and stays empty below it, and one warning names them all. The rows follow
   the view's sort keys as a board's cards do; where the view groups them, each

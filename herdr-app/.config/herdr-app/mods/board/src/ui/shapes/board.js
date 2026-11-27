@@ -28,7 +28,7 @@ import {
   typeLine, unzoomed,
 } from "../helpers.js";
 import { NOTE_TONES, dropBg, toneColor } from "../tones.js";
-import { rowTops } from "../../scroll.js";
+import { spanStarts } from "../../scroll.js";
 import { bandState, inBand, leftBand, placeBand, readsScroll, revealCard, revealTop, scrollOf } from "../band.js";
 import { navigate } from "../../select.js";
 
@@ -95,8 +95,8 @@ export const boardShape = {
     const kept = columnKept(b, col.id);
     if (boardState(b).windowed) {
       const at = scrollOf(kept.scroll);
-      const { heights, tops, content } = columnLayout(b, col, kept, at.width);
-      revealCard(kept.band, at, content, tops[row], heights[row]);
+      const { heights, starts, content } = columnLayout(b, col, kept, at.width);
+      revealCard(kept.band, at, content, starts[row], heights[row]);
     }
     kept.scroll.scroll_to_item(row);
   },
@@ -164,7 +164,7 @@ function heightOf(b, kept, card, width) {
 
 function columnLayout(b, col, kept, listWidth) {
   const heights = col.shown.map((card) => heightOf(b, kept, card, listWidth));
-  return { heights, ...rowTops(heights, CARD_GAP) };
+  return { heights, ...spanStarts(heights, CARD_GAP) };
 }
 
 const MEASURE_SLACK = 2;
@@ -272,7 +272,7 @@ function drawBoard(b, t, mono, view, st) {
           .track_scroll(kept.scroll)
           .children(col.shown.map((card, i) => {
             if (!layout) return whole(card, null);
-            return inBand(kept.band, layout.tops[i], layout.heights[i]) ? whole(card, cardMeasure(b, kept, card, layout.heights[i])) : cardFrame(t, st, card, layout.heights[i]);
+            return inBand(kept.band, layout.starts[i], layout.heights[i]) ? whole(card, cardMeasure(b, kept, card, layout.heights[i])) : cardFrame(t, st, card, layout.heights[i]);
           }))
           .when(!col.shown.length && !waitsForCards(col), (el) => el.child(div().text_size(12).text_color(t.muted).child(filtered ? `keine Karten (${filtered} ausgeblendet)` : "keine Karten"))),
       );
@@ -308,7 +308,7 @@ function laneLayout(b, rows, kept, width, count) {
   const cardWidth = Math.max(60, ((width || LIST_W_GUESS * count) - COLUMN_GAP * (count - 1)) / Math.max(1, count));
   const cardHeight = (card) => heightOf(b, kept, card, cardWidth);
   const heights = rows.map((r) => (r.head ? LANE_HEAD : Math.max(...r.cards.map((c) => (c ? cardHeight(c) : 0)))));
-  return { heights, cardHeight, ...rowTops(heights, LANE_GAP) };
+  return { heights, cardHeight, ...spanStarts(heights, LANE_GAP) };
 }
 
 function scrollToLaneCard(b, view, st, sel) {
@@ -319,7 +319,7 @@ function scrollToLaneCard(b, view, st, sel) {
   if (boardState(b).windowed) {
     const where = scrollOf(kept.scroll);
     const layout = laneLayout(b, rows, kept, where.width, b.navColumns(view).length);
-    revealCard(kept.band, where, layout.content, layout.tops[at], layout.heights[at]);
+    revealCard(kept.band, where, layout.content, layout.starts[at], layout.heights[at]);
   }
   kept.scroll.scroll_to_item(at);
 }
@@ -341,7 +341,7 @@ function drawLanes(b, t, mono, view, st, cols, sessions, dragged) {
     if (row.head) {
       return groupHead(t, row.lane, String(row.count)).id(`lane-${row.lane.id}`).h(LANE_HEAD).px(4);
     }
-    if (layout && !inBand(kept.band, layout.tops[i], layout.heights[i])) return div().flex_none().h(layout.heights[i]);
+    if (layout && !inBand(kept.band, layout.starts[i], layout.heights[i])) return div().flex_none().h(layout.heights[i]);
     return h_flex().flex_none().gap(COLUMN_GAP).items_start().children(row.cards.map((card, ci) => {
       const cell = div().id(`cell-${i}-${ci}`).flex_1().min_w(0).map(dropOn(b, view, ci, cols[ci]));
       return card ? cell.child(drawCard(b, t, mono, view, st, card, cols[ci], ci, sessions, layout ? cardMeasure(b, kept, card, layout.cardHeight(card)) : null)) : cell;
@@ -429,7 +429,7 @@ export function cardHeightGuess(card, width) {
   const titleLines = Math.max(1, Math.ceil(((card.title ?? "").length * TITLE_CHAR_PX) / room));
   const foot = footLines((cardType(card) ? 1 : 0) + cardLabels(card).length, card.sub, card.assignees.length);
   const lines = [LINE_GUESS, CARD.titleLine * titleLines, ...[showsMeta(card, partOfText(card)), foot.chips, foot.progress].filter(Boolean).map(() => LINE_GUESS)];
-  return 2 * (CARD.py + CARD.border) + rowTops(lines, CARD.lineGap).content;
+  return 2 * (CARD.py + CARD.border) + spanStarts(lines, CARD.lineGap).content;
 }
 
 function drawCard(b, t, mono, view, st, card, col, ci, sessions, measure) {

@@ -65,26 +65,21 @@ export function revealOffset(s, top, height) {
 // Whether the span shows whole; true while the window is not measured yet.
 export const spanShows = (s, top, height) => !s.viewport || (top >= s.offset && top + height <= s.offset + s.viewport);
 
-// The thumb that shows the position: { top, height } within the window, at
-// least `min` high; null where the content fits or the window is not
-// measured.
 export function thumbOf(s, min = 16) {
   if (!(s.content > s.viewport) || s.viewport <= 0) return null;
-  const height = Math.max(min, Math.round((s.viewport * s.viewport) / s.content));
-  const top = Math.round(((s.viewport - height) * clampOffset(s.offset, s.content, s.viewport)) / (s.content - s.viewport));
-  return { top, height };
+  const length = Math.max(min, Math.round((s.viewport * s.viewport) / s.content));
+  const start = Math.round(((s.viewport - length) * clampOffset(s.offset, s.content, s.viewport)) / (s.content - s.viewport));
+  return { start, length };
 }
 
-// Where each row of a column of rows stands, `gap` between them, after `pad`
-// above the first → { tops, content }, content down to the last row's end.
-export function rowTops(heights, gap, pad = 0) {
-  const tops = [];
+export function spanStarts(lengths, gap, pad = 0) {
+  const starts = [];
   let at = pad;
-  for (const h of heights) {
-    tops.push(at);
-    at += h + gap;
+  for (const length of lengths) {
+    starts.push(at);
+    at += length + gap;
   }
-  return { tops, content: heights.length ? at - gap : pad };
+  return { starts, content: lengths.length ? at - gap : pad };
 }
 
 // The block's offset when it draws the details of the item `key`: 0 for

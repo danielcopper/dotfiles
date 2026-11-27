@@ -6548,7 +6548,7 @@ export function menuPanel(t, { id, rowId, width, title, rows, at, pick, head = [
     .when(Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => wheel(wheelMove(e), cx)))
     .children(rows.flatMap((kids, n) => [...(heads[n] ? [heading(heads[n], n)] : []), row(kids, n)]))
     .when(count > rows.length, (el) => el.child(
-      div().id(`${id}-thumb`).absolute().right(0).top(share(from)).w(3).h(share(rows.length)).rounded(2).bg(t.muted).opacity(0.6),
+      div().id(`${id}-thumb`).absolute().right(0).top(share(from)).w(3).h(share(rows.length)).map(thumbLook(t)),
     ));
   return v_flex()
     .id(`${id}-menu`)
@@ -6573,6 +6573,14 @@ export function menuPanel(t, { id, rowId, width, title, rows, at, pick, head = [
 export const unzoomed = (px) => px / (Number(settings()?.zoom) || 1);
 
 export const wheelMove = (e) => -unzoomed(e.delta?.y ?? 0);
+
+export function sideMove(e) {
+  const x = e.delta?.x ?? 0;
+  if (Math.abs(x) > Math.abs(e.delta?.y ?? 0)) return -unzoomed(x);
+  return e.modifiers?.shift ? wheelMove(e) : 0;
+}
+
+export const thumbLook = (t) => (el) => el.rounded(2).bg(t.muted).opacity(0.6);
 
 // How many rows a menu with a filter shows at once (menuWindow).
 const MENU_ROWS = 10;
@@ -6885,15 +6893,19 @@ export function typeLine(t, item, hex, inset = 0) {
 export const selectedLook = (t, selected, rest, restBg = null) => (el) =>
   el.border_color(selected ? t.accent : rest).when(selected || Boolean(restBg), (e) => e.bg(selected ? selectedBg(t) : restBg));
 
+export const ROW_GAP = 12;
+export const ROW_PAD = 18;
+export const ROW_BORDER = 2;
+
 export const listRow = (b, t, view, st, item, rest = t.background) =>
   h_flex()
     .id(`row-${item.key}`)
     .relative()
     .flex_none()
-    .gap(12)
-    .px(18)
+    .gap(ROW_GAP)
+    .px(ROW_PAD)
     .items_center()
-    .border_l(2)
+    .border_l(ROW_BORDER)
     .map(selectedLook(t, st.sel?.key === item.key, rest))
     .opacity(st.pending[item.key] ? 0.7 : 1)
     .cursor_pointer()
@@ -7643,26 +7655,21 @@ export function revealOffset(s, top, height) {
 // Whether the span shows whole; true while the window is not measured yet.
 export const spanShows = (s, top, height) => !s.viewport || (top >= s.offset && top + height <= s.offset + s.viewport);
 
-// The thumb that shows the position: { top, height } within the window, at
-// least `min` high; null where the content fits or the window is not
-// measured.
 export function thumbOf(s, min = 16) {
   if (!(s.content > s.viewport) || s.viewport <= 0) return null;
-  const height = Math.max(min, Math.round((s.viewport * s.viewport) / s.content));
-  const top = Math.round(((s.viewport - height) * clampOffset(s.offset, s.content, s.viewport)) / (s.content - s.viewport));
-  return { top, height };
+  const length = Math.max(min, Math.round((s.viewport * s.viewport) / s.content));
+  const start = Math.round(((s.viewport - length) * clampOffset(s.offset, s.content, s.viewport)) / (s.content - s.viewport));
+  return { start, length };
 }
 
-// Where each row of a column of rows stands, `gap` between them, after `pad`
-// above the first → { tops, content }, content down to the last row's end.
-export function rowTops(heights, gap, pad = 0) {
-  const tops = [];
+export function spanStarts(lengths, gap, pad = 0) {
+  const starts = [];
   let at = pad;
-  for (const h of heights) {
-    tops.push(at);
-    at += h + gap;
+  for (const length of lengths) {
+    starts.push(at);
+    at += length + gap;
   }
-  return { tops, content: heights.length ? at - gap : pad };
+  return { starts, content: lengths.length ? at - gap : pad };
 }
 
 // The block's offset when it draws the details of the item `key`: 0 for
@@ -7766,7 +7773,7 @@ function lineSpan(ui, item, entry, n) {
   const i = rows.findIndex((r) => r.kind === "line" && r.n === n);
   if (i < 0) return null;
   const heights = rows.map((r, j) => ui.sizes.get(rowId(r, j)) ?? LINE_PX);
-  return { top: rowTops(heights, FRAME.gap, FRAME.py).tops[i], height: heights[i] };
+  return { top: spanStarts(heights, FRAME.gap, FRAME.py).starts[i], height: heights[i] };
 }
 
 // Scrolls line `n` into view.
@@ -7930,8 +7937,8 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     .border_color(t.border)
     .child(windowEl)
     .when(Boolean(thumb), (el) => el.child(
-      div().id("related-thumb").absolute().right(3).top(thumb?.top ?? 0).transition("top", motion)
-        .w(3).h(thumb?.height ?? 0).rounded(2).bg(t.muted).opacity(0.6),
+      div().id("related-thumb").absolute().right(3).top(thumb?.start ?? 0).transition("top", motion)
+        .w(3).h(thumb?.length ?? 0).map(thumbLook(t)),
     ));
 }
 
@@ -9848,8 +9855,8 @@ export const boardShape = {
     const kept = columnKept(b, col.id);
     if (boardState(b).windowed) {
       const at = scrollOf(kept.scroll);
-      const { heights, tops, content } = columnLayout(b, col, kept, at.width);
-      revealCard(kept.band, at, content, tops[row], heights[row]);
+      const { heights, starts, content } = columnLayout(b, col, kept, at.width);
+      revealCard(kept.band, at, content, starts[row], heights[row]);
     }
     kept.scroll.scroll_to_item(row);
   },
@@ -9917,7 +9924,7 @@ function heightOf(b, kept, card, width) {
 
 function columnLayout(b, col, kept, listWidth) {
   const heights = col.shown.map((card) => heightOf(b, kept, card, listWidth));
-  return { heights, ...rowTops(heights, CARD_GAP) };
+  return { heights, ...spanStarts(heights, CARD_GAP) };
 }
 
 const MEASURE_SLACK = 2;
@@ -10025,7 +10032,7 @@ function drawBoard(b, t, mono, view, st) {
           .track_scroll(kept.scroll)
           .children(col.shown.map((card, i) => {
             if (!layout) return whole(card, null);
-            return inBand(kept.band, layout.tops[i], layout.heights[i]) ? whole(card, cardMeasure(b, kept, card, layout.heights[i])) : cardFrame(t, st, card, layout.heights[i]);
+            return inBand(kept.band, layout.starts[i], layout.heights[i]) ? whole(card, cardMeasure(b, kept, card, layout.heights[i])) : cardFrame(t, st, card, layout.heights[i]);
           }))
           .when(!col.shown.length && !waitsForCards(col), (el) => el.child(div().text_size(12).text_color(t.muted).child(filtered ? `keine Karten (${filtered} ausgeblendet)` : "keine Karten"))),
       );
@@ -10061,7 +10068,7 @@ function laneLayout(b, rows, kept, width, count) {
   const cardWidth = Math.max(60, ((width || LIST_W_GUESS * count) - COLUMN_GAP * (count - 1)) / Math.max(1, count));
   const cardHeight = (card) => heightOf(b, kept, card, cardWidth);
   const heights = rows.map((r) => (r.head ? LANE_HEAD : Math.max(...r.cards.map((c) => (c ? cardHeight(c) : 0)))));
-  return { heights, cardHeight, ...rowTops(heights, LANE_GAP) };
+  return { heights, cardHeight, ...spanStarts(heights, LANE_GAP) };
 }
 
 function scrollToLaneCard(b, view, st, sel) {
@@ -10072,7 +10079,7 @@ function scrollToLaneCard(b, view, st, sel) {
   if (boardState(b).windowed) {
     const where = scrollOf(kept.scroll);
     const layout = laneLayout(b, rows, kept, where.width, b.navColumns(view).length);
-    revealCard(kept.band, where, layout.content, layout.tops[at], layout.heights[at]);
+    revealCard(kept.band, where, layout.content, layout.starts[at], layout.heights[at]);
   }
   kept.scroll.scroll_to_item(at);
 }
@@ -10094,7 +10101,7 @@ function drawLanes(b, t, mono, view, st, cols, sessions, dragged) {
     if (row.head) {
       return groupHead(t, row.lane, String(row.count)).id(`lane-${row.lane.id}`).h(LANE_HEAD).px(4);
     }
-    if (layout && !inBand(kept.band, layout.tops[i], layout.heights[i])) return div().flex_none().h(layout.heights[i]);
+    if (layout && !inBand(kept.band, layout.starts[i], layout.heights[i])) return div().flex_none().h(layout.heights[i]);
     return h_flex().flex_none().gap(COLUMN_GAP).items_start().children(row.cards.map((card, ci) => {
       const cell = div().id(`cell-${i}-${ci}`).flex_1().min_w(0).map(dropOn(b, view, ci, cols[ci]));
       return card ? cell.child(drawCard(b, t, mono, view, st, card, cols[ci], ci, sessions, layout ? cardMeasure(b, kept, card, layout.cardHeight(card)) : null)) : cell;
@@ -10182,7 +10189,7 @@ export function cardHeightGuess(card, width) {
   const titleLines = Math.max(1, Math.ceil(((card.title ?? "").length * TITLE_CHAR_PX) / room));
   const foot = footLines((cardType(card) ? 1 : 0) + cardLabels(card).length, card.sub, card.assignees.length);
   const lines = [LINE_GUESS, CARD.titleLine * titleLines, ...[showsMeta(card, partOfText(card)), foot.chips, foot.progress].filter(Boolean).map(() => LINE_GUESS)];
-  return 2 * (CARD.py + CARD.border) + rowTops(lines, CARD.lineGap).content;
+  return 2 * (CARD.py + CARD.border) + spanStarts(lines, CARD.lineGap).content;
 }
 
 function drawCard(b, t, mono, view, st, card, col, ci, sessions, measure) {
@@ -10861,13 +10868,6 @@ export function tableFromSaved(data) {
 
 // ==== src/ui/shapes/table.js ====
 
-// The table shape: a GitHub project's table or roadmap view as GitHub's
-// table draws it, walked as one list: a head row with the view's fields
-// (Title first, as on GitHub), then one row per item, each cell its field's
-// value by the field's kind; where the view groups, a group row before
-// each group (its value's color, name and how many of its rows show), which
-// nothing selects. Like a long board column it draws whole only the rows
-// about its window, the others as empty frames of their height (band.js).
 // The data: parseGithubTable's (sources/github.js). View fields it reads:
 // id and name.
 
@@ -10889,6 +10889,50 @@ export const FIELD_W = {
 const OTHER_W = 100;
 const TITLE_MIN_W = 200;
 const fieldWidth = (field) => FIELD_W[field.type] ?? OTHER_W;
+const TABLE_PAD = { left: ROW_BORDER + ROW_PAD, right: ROW_PAD };
+
+export function fieldStrip(fields, width) {
+  const widths = fields.map(fieldWidth);
+  const { starts: lefts, content } = spanStarts(widths, ROW_GAP);
+  const start = TABLE_PAD.left + TITLE_MIN_W + ROW_GAP;
+  const viewport = width - start - TABLE_PAD.right;
+  if (!(viewport > 0) || content <= viewport) return null;
+  return { widths, lefts, content, viewport, start };
+}
+
+const stripOf = (s, data) => fieldStrip(data.fields.slice(1), s.width);
+
+export function stripRange(strip, offset) {
+  const { lefts, widths, viewport } = strip;
+  const from = lefts.findIndex((x, i) => x + widths[i] > offset);
+  const to = lefts.findIndex((x) => x >= offset + viewport);
+  return { from, to: to < 0 ? lefts.length : to };
+}
+
+export function stripStep(strip, offset, by) {
+  const next = by > 0 ? strip.lefts.find((x) => x > offset) ?? Infinity : strip.lefts.filter((x) => x < offset).at(-1) ?? 0;
+  return clampOffset(next, strip.content, strip.viewport);
+}
+
+function stripOffset(s, view, strip) {
+  const offset = clampOffset(s.stripAt.get(view.id) ?? 0, strip.content, strip.viewport);
+  s.stripAt.set(view.id, offset);
+  return offset;
+}
+
+function stripWheel(s, view, strip) {
+  return (e, cx) => {
+    const by = sideMove(e);
+    if (!by) return;
+    // GPUI scrolls a list that scrolls only vertically by a sideways move too.
+    cx.stop_propagation();
+    const from = stripOffset(s, view, strip);
+    const to = clampOffset(from + by, strip.content, strip.viewport);
+    if (to === from) return;
+    s.stripAt.set(view.id, to);
+    cx.notify();
+  };
+}
 
 const visibleIn = (b, data) => (r) => b.visible(r, data);
 const linesOf = (b, data) => tableLines(data, visibleIn(b, data));
@@ -10897,7 +10941,7 @@ const lineHeight = (line) => (line.row ? TABLE_ROW_H : TABLE_GROUP_H);
 export const tableShape = {
   state() {
     const scroll = ScrollHandle.new();
-    return { scroll, band: bandState(), windowed: readsScroll(scroll) };
+    return { scroll, band: bandState(), windowed: readsScroll(scroll), width: 0, stripAt: new Map() };
   },
   nav: (b, st) => tableNav(st.data, visibleIn(b, st.data)),
   selected: (b, st) => tableNav(st.data, visibleIn(b, st.data))[0].shown.find((r) => r.key === st.sel?.key) ?? null,
@@ -10908,8 +10952,8 @@ export const tableShape = {
     const at = lines.findIndex((l) => l.row?.key === sel.key);
     if (at < 0) return;
     if (s.windowed) {
-      const { tops, content } = rowTops(lines.map(lineHeight), 0);
-      revealCard(s.band, scrollOf(s.scroll), content, tops[at], lineHeight(lines[at]));
+      const { starts, content } = spanStarts(lines.map(lineHeight), 0);
+      revealCard(s.band, scrollOf(s.scroll), content, starts[at], lineHeight(lines[at]));
     }
     s.scroll.scroll_to_item(at);
   },
@@ -10921,6 +10965,11 @@ export const tableShape = {
   count: (b, data) => ({ shown: data.rows.filter(visibleIn(b, data)).length, total: data.rows.length }),
   render: (b, t, mono, view, st) => drawTable(b, t, mono, view, st),
   dirs: ["up", "down"],
+  sideways(b, view, by) {
+    const s = tableState(b);
+    const strip = stripOf(s, b.state(view.id).data);
+    if (strip) s.stripAt.set(view.id, stripStep(strip, stripOffset(s, view, strip), by));
+  },
   loads: true,
   received: (data) => data,
   toSaved: savedTable,
@@ -10943,6 +10992,19 @@ const CELLS = {
 };
 const nameCell = (t, value) => textCell(t, value.name);
 
+function stripBox(strip, offset, kid) {
+  const { from, to } = stripRange(strip, offset);
+  const kids = Array.from({ length: to - from }, (_, k) => kid(from + k));
+  return h_flex().flex_none().w(strip.viewport).overflow_hidden().items_center()
+    .child(h_flex().flex_none().relative().left(strip.lefts[from] - offset).gap(ROW_GAP).items_center().children(kids));
+}
+
+function stripBar(t, strip, offset, wheel) {
+  const thumb = thumbOf({ offset, content: strip.content, viewport: strip.viewport });
+  return div().id("table-strip-bar").flex_none().relative().h(3).w(strip.viewport).ml(strip.start).mt(4).mb(6).on_scroll_wheel(wheel)
+    .child(div().id("table-strip-thumb").absolute().top(0).left(thumb.start).w(thumb.length).h(3).map(thumbLook(t)));
+}
+
 function drawTable(b, t, mono, view, st) {
   const data = st.data;
   const s = tableState(b);
@@ -10950,14 +11012,22 @@ function drawTable(b, t, mono, view, st) {
   const lines = linesOf(b, data);
   const heights = lines.map(lineHeight);
   const at = s.windowed ? scrollOf(s.scroll) : null;
-  const layout = at && rowTops(heights, 0);
+  const layout = at && spanStarts(heights, 0);
   if (at) placeBand(s.band, layout.content, at);
   const rest = data.fields.slice(1);
-  const head = h_flex().id("table-head").flex_none().gap(12).pl(20).pr(18).pt(10).pb(6).text_size(11).text_color(t.dim)
-    .child(div().flex_1().min_w(TITLE_MIN_W).truncate().child(data.fields[0]?.name ?? "Title"))
-    .children(rest.map((f, i) => div().id(`table-field-${i + 1}`).w(fieldWidth(f)).flex_none().truncate().child(f.name)));
-  const cell = (f, r, i) => {
-    const value = tableValue(data, r, i);
+  const strip = stripOf(s, data);
+  const offset = strip ? stripOffset(s, view, strip) : 0;
+  const wheel = strip && stripWheel(s, view, strip);
+  const fieldKids = (kid) => (strip ? [stripBox(strip, offset, kid)] : rest.map((_f, i) => kid(i)));
+  const titleBox = (el) => (strip ? el.w(TITLE_MIN_W).flex_none() : el.flex_1().min_w(TITLE_MIN_W));
+  const takesSideWheel = (el) => el.when(Boolean(wheel), (e) => e.on_scroll_wheel(wheel));
+  const head = h_flex().id("table-head").flex_none().gap(ROW_GAP).pl(TABLE_PAD.left).pr(TABLE_PAD.right).pt(10).pb(6).text_size(11).text_color(t.dim)
+    .map(takesSideWheel)
+    .child(titleBox(div()).truncate().child(data.fields[0]?.name ?? "Title"))
+    .children(fieldKids((i) => div().id(`table-field-${i + 1}`).w(fieldWidth(rest[i])).flex_none().truncate().child(rest[i].name)));
+  const cell = (i, r) => {
+    const f = rest[i];
+    const value = tableValue(data, r, i + 1);
     const content = value ? (CELLS[f.type] ?? nameCell)(t, value, r) : null;
     return h_flex().w(fieldWidth(f)).flex_none().min_w(0).overflow_hidden().items_center().text_size(12).when(Boolean(content), (el) => el.child(content));
   };
@@ -10966,30 +11036,40 @@ function drawTable(b, t, mono, view, st) {
     const line = typeLine(t, r, null);
     return listRow(b, t, view, st, r)
       .h(TABLE_ROW_H)
-      .child(h_flex().flex_1().min_w(TITLE_MIN_W).gap(6).items_center()
+      .map(takesSideWheel)
+      .child(titleBox(h_flex()).gap(6).items_center()
         .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
         .child(div().min_w(0).truncate().child(r.title))
         .when(Boolean(session), (el) => el.child(sessionChip(t, session).flex_none())))
-      .children(rest.map((f, i) => cell(f, r, i + 1)))
+      .children(fieldKids((i) => cell(i, r)))
       .when(Boolean(line), (el) => el.child(line));
   };
-  const groupRow = (g) => groupHead(t, g.group, shownOf(g.shown, g.held)).id(`group-${g.group.id}`).h(TABLE_GROUP_H).px(20);
+  const groupRow = (g) => groupHead(t, g.group, shownOf(g.shown, g.held)).id(`group-${g.group.id}`).h(TABLE_GROUP_H).px(TABLE_PAD.left).map(takesSideWheel);
   const lineEl = (l, i) => {
-    if (layout && !inBand(s.band, layout.tops[i], heights[i])) return div().flex_none().h(heights[i]);
+    if (layout && !inBand(s.band, layout.starts[i], heights[i])) return div().flex_none().h(heights[i]);
     return l.row ? row(l.row) : groupRow(l);
   };
-  const box = v_flex().flex_1().min_h(0).child(head);
+  const box = v_flex().id("table-box").flex_1().min_h(0)
+    .on_size_change((size, cx) => {
+      const width = unzoomed(size.width);
+      if (width === s.width) return;
+      s.width = width;
+      cx.notify();
+    })
+    .child(head);
   if (!lines.length) {
     const what = data.rows.length ? NOTHING_SHOWS : data.partial ? null : noItemsText(data.meta.filter);
     return box.when(Boolean(what), (el) => el.child(div().p(20).text_color(t.muted).child(what)));
   }
   return box
     .child(v_flex().id("table-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(s.scroll)
-      .when(s.windowed, (el) => el.on_scroll_wheel((_e, cx) => {
+      .when(s.windowed || Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => {
+        if (wheel) wheel(e, cx);
         // GPUI moved the list before the event reached it.
-        if (leftBand(s.band, scrollOf(s.scroll))) cx.notify();
+        if (s.windowed && leftBand(s.band, scrollOf(s.scroll))) cx.notify();
       }))
       .children(lines.map(lineEl)))
+    .when(Boolean(strip), (el) => el.child(stripBar(t, strip, offset, wheel)))
     .when(Boolean(data.limited) && !data.partial, (el) =>
       el.child(div().px(16).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
         .child(`Nur die ersten ${data.count} von ${data.total} Einträgen; den Filter enger fassen`)));
@@ -11029,10 +11109,12 @@ function drawTable(b, t, mono, view, st) {
 // repo menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu with
 // statusField (b, view: the name of what the status menu sets, where it is
 // not the status; null for none), navigate (its own keyboard movement in
-// place of navigate's, select.js), pickStatus (what a pick in the status
-// menu does in place of a move to that column), and assign (how its items'
-// assignees are found and changed: { find(data, key), withItem(data, key,
-// patch) (the data with the item's fields set), where (where an item no
+// place of navigate's, select.js), sideways (b, view, by: h/l and the left
+// and right arrows where its dirs leave them out, its view scrolled sideways
+// one step; by = 1 for l/→, -1 for h/←), pickStatus (what a pick in the
+// status menu does in place of a move to that column), and assign (how its
+// items' assignees are found and changed: { find(data, key), withItem(data,
+// key, patch) (the data with the item's fields set), where (where an item no
 // longer is: "im Sprint") }; a shape that has it takes a, the assignee
 // picker, ui/modals/assign.js, and its settle says the outcomes of unclear
 // assignments, unclearAssignLines).
@@ -13164,6 +13246,7 @@ export default class Board extends View {
     const dir = mod.shift ? null : { j: "down", down: "down", k: "up", up: "up", h: "left", left: "left", l: "right", right: "right" }[k];
     if (dir && st.data) {
       if (shape.dirs.includes(dir)) this.choose(view, shape.navigate ? shape.navigate(this, view, st, dir) : navigate(this.navColumns(view), st.sel, dir), cx);
+      else if (shape.sideways && (dir === "left" || dir === "right")) shape.sideways(this, view, dir === "right" ? 1 : -1);
       return done();
     }
     // With nothing selected (loading, failed, empty, a placeholder) Enter

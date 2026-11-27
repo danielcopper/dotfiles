@@ -30,10 +30,12 @@
 // repo menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu with
 // statusField (b, view: the name of what the status menu sets, where it is
 // not the status; null for none), navigate (its own keyboard movement in
-// place of navigate's, select.js), pickStatus (what a pick in the status
-// menu does in place of a move to that column), and assign (how its items'
-// assignees are found and changed: { find(data, key), withItem(data, key,
-// patch) (the data with the item's fields set), where (where an item no
+// place of navigate's, select.js), sideways (b, view, by: h/l and the left
+// and right arrows where its dirs leave them out, its view scrolled sideways
+// one step; by = 1 for l/→, -1 for h/←), pickStatus (what a pick in the
+// status menu does in place of a move to that column), and assign (how its
+// items' assignees are found and changed: { find(data, key), withItem(data,
+// key, patch) (the data with the item's fields set), where (where an item no
 // longer is: "im Sprint") }; a shape that has it takes a, the assignee
 // picker, ui/modals/assign.js, and its settle says the outcomes of unclear
 // assignments, unclearAssignLines).

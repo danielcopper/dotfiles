@@ -1,10 +1,3 @@
-// The table shape: a GitHub project's table or roadmap view as GitHub's
-// table draws it, walked as one list: a head row with the view's fields
-// (Title first, as on GitHub), then one row per item, each cell its field's
-// value by the field's kind; where the view groups, a group row before
-// each group (its value's color, name and how many of its rows show), which
-// nothing selects. Like a long board column it draws whole only the rows
-// about its window, the others as empty frames of their height (band.js).
 // The data: parseGithubTable's (sources/github.js). View fields it reads:
 // id and name.
 
@@ -15,9 +8,9 @@ import { savedTable, tableFromSaved, tableLines, tableNav, tableValue, tableWarn
 import { itemSessions } from "../../sessions.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
-import { rowTops } from "../../scroll.js";
+import { clampOffset, spanStarts, thumbOf } from "../../scroll.js";
 import { bandState, inBand, leftBand, placeBand, readsScroll, revealCard, scrollOf } from "../band.js";
-import { groupHead, labelChip, listRow, sessionChip, shownOf, toneChip, typeChip, typeLine } from "../helpers.js";
+import { ROW_BORDER, ROW_GAP, ROW_PAD, groupHead, labelChip, listRow, sessionChip, shownOf, sideMove, thumbLook, toneChip, typeChip, typeLine, unzoomed } from "../helpers.js";
 import { NOTE_TONES, toneColor } from "../tones.js";
 
 const tableState = (b) => b.shapeState.table;
@@ -38,6 +31,50 @@ export const FIELD_W = {
 const OTHER_W = 100;
 const TITLE_MIN_W = 200;
 const fieldWidth = (field) => FIELD_W[field.type] ?? OTHER_W;
+const TABLE_PAD = { left: ROW_BORDER + ROW_PAD, right: ROW_PAD };
+
+export function fieldStrip(fields, width) {
+  const widths = fields.map(fieldWidth);
+  const { starts: lefts, content } = spanStarts(widths, ROW_GAP);
+  const start = TABLE_PAD.left + TITLE_MIN_W + ROW_GAP;
+  const viewport = width - start - TABLE_PAD.right;
+  if (!(viewport > 0) || content <= viewport) return null;
+  return { widths, lefts, content, viewport, start };
+}
+
+const stripOf = (s, data) => fieldStrip(data.fields.slice(1), s.width);
+
+export function stripRange(strip, offset) {
+  const { lefts, widths, viewport } = strip;
+  const from = lefts.findIndex((x, i) => x + widths[i] > offset);
+  const to = lefts.findIndex((x) => x >= offset + viewport);
+  return { from, to: to < 0 ? lefts.length : to };
+}
+
+export function stripStep(strip, offset, by) {
+  const next = by > 0 ? strip.lefts.find((x) => x > offset) ?? Infinity : strip.lefts.filter((x) => x < offset).at(-1) ?? 0;
+  return clampOffset(next, strip.content, strip.viewport);
+}
+
+function stripOffset(s, view, strip) {
+  const offset = clampOffset(s.stripAt.get(view.id) ?? 0, strip.content, strip.viewport);
+  s.stripAt.set(view.id, offset);
+  return offset;
+}
+
+function stripWheel(s, view, strip) {
+  return (e, cx) => {
+    const by = sideMove(e);
+    if (!by) return;
+    // GPUI scrolls a list that scrolls only vertically by a sideways move too.
+    cx.stop_propagation();
+    const from = stripOffset(s, view, strip);
+    const to = clampOffset(from + by, strip.content, strip.viewport);
+    if (to === from) return;
+    s.stripAt.set(view.id, to);
+    cx.notify();
+  };
+}
 
 const visibleIn = (b, data) => (r) => b.visible(r, data);
 const linesOf = (b, data) => tableLines(data, visibleIn(b, data));
@@ -46,7 +83,7 @@ const lineHeight = (line) => (line.row ? TABLE_ROW_H : TABLE_GROUP_H);
 export const tableShape = {
   state() {
     const scroll = ScrollHandle.new();
-    return { scroll, band: bandState(), windowed: readsScroll(scroll) };
+    return { scroll, band: bandState(), windowed: readsScroll(scroll), width: 0, stripAt: new Map() };
   },
   nav: (b, st) => tableNav(st.data, visibleIn(b, st.data)),
   selected: (b, st) => tableNav(st.data, visibleIn(b, st.data))[0].shown.find((r) => r.key === st.sel?.key) ?? null,
@@ -57,8 +94,8 @@ export const tableShape = {
     const at = lines.findIndex((l) => l.row?.key === sel.key);
     if (at < 0) return;
     if (s.windowed) {
-      const { tops, content } = rowTops(lines.map(lineHeight), 0);
-      revealCard(s.band, scrollOf(s.scroll), content, tops[at], lineHeight(lines[at]));
+      const { starts, content } = spanStarts(lines.map(lineHeight), 0);
+      revealCard(s.band, scrollOf(s.scroll), content, starts[at], lineHeight(lines[at]));
     }
     s.scroll.scroll_to_item(at);
   },
@@ -70,6 +107,11 @@ export const tableShape = {
   count: (b, data) => ({ shown: data.rows.filter(visibleIn(b, data)).length, total: data.rows.length }),
   render: (b, t, mono, view, st) => drawTable(b, t, mono, view, st),
   dirs: ["up", "down"],
+  sideways(b, view, by) {
+    const s = tableState(b);
+    const strip = stripOf(s, b.state(view.id).data);
+    if (strip) s.stripAt.set(view.id, stripStep(strip, stripOffset(s, view, strip), by));
+  },
   loads: true,
   received: (data) => data,
   toSaved: savedTable,
@@ -92,6 +134,19 @@ const CELLS = {
 };
 const nameCell = (t, value) => textCell(t, value.name);
 
+function stripBox(strip, offset, kid) {
+  const { from, to } = stripRange(strip, offset);
+  const kids = Array.from({ length: to - from }, (_, k) => kid(from + k));
+  return h_flex().flex_none().w(strip.viewport).overflow_hidden().items_center()
+    .child(h_flex().flex_none().relative().left(strip.lefts[from] - offset).gap(ROW_GAP).items_center().children(kids));
+}
+
+function stripBar(t, strip, offset, wheel) {
+  const thumb = thumbOf({ offset, content: strip.content, viewport: strip.viewport });
+  return div().id("table-strip-bar").flex_none().relative().h(3).w(strip.viewport).ml(strip.start).mt(4).mb(6).on_scroll_wheel(wheel)
+    .child(div().id("table-strip-thumb").absolute().top(0).left(thumb.start).w(thumb.length).h(3).map(thumbLook(t)));
+}
+
 function drawTable(b, t, mono, view, st) {
   const data = st.data;
   const s = tableState(b);
@@ -99,14 +154,22 @@ function drawTable(b, t, mono, view, st) {
   const lines = linesOf(b, data);
   const heights = lines.map(lineHeight);
   const at = s.windowed ? scrollOf(s.scroll) : null;
-  const layout = at && rowTops(heights, 0);
+  const layout = at && spanStarts(heights, 0);
   if (at) placeBand(s.band, layout.content, at);
   const rest = data.fields.slice(1);
-  const head = h_flex().id("table-head").flex_none().gap(12).pl(20).pr(18).pt(10).pb(6).text_size(11).text_color(t.dim)
-    .child(div().flex_1().min_w(TITLE_MIN_W).truncate().child(data.fields[0]?.name ?? "Title"))
-    .children(rest.map((f, i) => div().id(`table-field-${i + 1}`).w(fieldWidth(f)).flex_none().truncate().child(f.name)));
-  const cell = (f, r, i) => {
-    const value = tableValue(data, r, i);
+  const strip = stripOf(s, data);
+  const offset = strip ? stripOffset(s, view, strip) : 0;
+  const wheel = strip && stripWheel(s, view, strip);
+  const fieldKids = (kid) => (strip ? [stripBox(strip, offset, kid)] : rest.map((_f, i) => kid(i)));
+  const titleBox = (el) => (strip ? el.w(TITLE_MIN_W).flex_none() : el.flex_1().min_w(TITLE_MIN_W));
+  const takesSideWheel = (el) => el.when(Boolean(wheel), (e) => e.on_scroll_wheel(wheel));
+  const head = h_flex().id("table-head").flex_none().gap(ROW_GAP).pl(TABLE_PAD.left).pr(TABLE_PAD.right).pt(10).pb(6).text_size(11).text_color(t.dim)
+    .map(takesSideWheel)
+    .child(titleBox(div()).truncate().child(data.fields[0]?.name ?? "Title"))
+    .children(fieldKids((i) => div().id(`table-field-${i + 1}`).w(fieldWidth(rest[i])).flex_none().truncate().child(rest[i].name)));
+  const cell = (i, r) => {
+    const f = rest[i];
+    const value = tableValue(data, r, i + 1);
     const content = value ? (CELLS[f.type] ?? nameCell)(t, value, r) : null;
     return h_flex().w(fieldWidth(f)).flex_none().min_w(0).overflow_hidden().items_center().text_size(12).when(Boolean(content), (el) => el.child(content));
   };
@@ -115,30 +178,40 @@ function drawTable(b, t, mono, view, st) {
     const line = typeLine(t, r, null);
     return listRow(b, t, view, st, r)
       .h(TABLE_ROW_H)
-      .child(h_flex().flex_1().min_w(TITLE_MIN_W).gap(6).items_center()
+      .map(takesSideWheel)
+      .child(titleBox(h_flex()).gap(6).items_center()
         .child(div().flex_none().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
         .child(div().min_w(0).truncate().child(r.title))
         .when(Boolean(session), (el) => el.child(sessionChip(t, session).flex_none())))
-      .children(rest.map((f, i) => cell(f, r, i + 1)))
+      .children(fieldKids((i) => cell(i, r)))
       .when(Boolean(line), (el) => el.child(line));
   };
-  const groupRow = (g) => groupHead(t, g.group, shownOf(g.shown, g.held)).id(`group-${g.group.id}`).h(TABLE_GROUP_H).px(20);
+  const groupRow = (g) => groupHead(t, g.group, shownOf(g.shown, g.held)).id(`group-${g.group.id}`).h(TABLE_GROUP_H).px(TABLE_PAD.left).map(takesSideWheel);
   const lineEl = (l, i) => {
-    if (layout && !inBand(s.band, layout.tops[i], heights[i])) return div().flex_none().h(heights[i]);
+    if (layout && !inBand(s.band, layout.starts[i], heights[i])) return div().flex_none().h(heights[i]);
     return l.row ? row(l.row) : groupRow(l);
   };
-  const box = v_flex().flex_1().min_h(0).child(head);
+  const box = v_flex().id("table-box").flex_1().min_h(0)
+    .on_size_change((size, cx) => {
+      const width = unzoomed(size.width);
+      if (width === s.width) return;
+      s.width = width;
+      cx.notify();
+    })
+    .child(head);
   if (!lines.length) {
     const what = data.rows.length ? NOTHING_SHOWS : data.partial ? null : noItemsText(data.meta.filter);
     return box.when(Boolean(what), (el) => el.child(div().p(20).text_color(t.muted).child(what)));
   }
   return box
     .child(v_flex().id("table-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(s.scroll)
-      .when(s.windowed, (el) => el.on_scroll_wheel((_e, cx) => {
+      .when(s.windowed || Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => {
+        if (wheel) wheel(e, cx);
         // GPUI moved the list before the event reached it.
-        if (leftBand(s.band, scrollOf(s.scroll))) cx.notify();
+        if (s.windowed && leftBand(s.band, scrollOf(s.scroll))) cx.notify();
       }))
       .children(lines.map(lineEl)))
+    .when(Boolean(strip), (el) => el.child(stripBar(t, strip, offset, wheel)))
     .when(Boolean(data.limited) && !data.partial, (el) =>
       el.child(div().px(16).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
         .child(`Nur die ersten ${data.count} von ${data.total} Einträgen; den Filter enger fassen`)));
