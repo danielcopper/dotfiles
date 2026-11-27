@@ -73,6 +73,13 @@
 // - written from GitHub's GraphQL reference (Repository's assignableUsers,
 //   Query's viewer), with made-up names, not recorded:
 //   github-assignable.json (one person without a name);
+// - written from GitHub's GraphQL reference (RepositoryOwner's repositories
+//   with its __typename, Query's search with issueCount and pageInfo,
+//   Issue's stateReason and updatedAt beside the fields a card reads), with
+//   made-up names, not recorded: github-issue-repos.json (three repos of
+//   sample-user, by name), github-issues.json (four open issues in two of
+//   them, one reopened, newest updated first) and github-issues-closed.json
+//   (three closed ones, completed, not planned and as a duplicate);
 // - written from GitHub's REST reference (List notifications for the
 //   authenticated user, its threads' unread, reason, repository and
 //   subject: title, url, latest_comment_url, type), with made-up names, not
@@ -529,9 +536,11 @@ test("the shipped views.json is valid: Azure projects, each with a team with Spr
   assert.equal(config.github.contexts.length, 1);
   assert.deepEqual(config.github.contexts[0].tabs.map((v) => [v.entryKind, v.name ?? null, v.source, v.layout ?? null]), [
     ["project", null, "github", null],
+    ["issues", "Issues", "github", null],
     ["prs", "PRs", "github", "list"],
   ]);
-  const [mine, prs] = config.github.contexts[0].tabs;
+  const [mine, issues, prs] = config.github.contexts[0].tabs;
+  assert.deepEqual([issues.id, issues.hideRepos, JSON.parse(shippedConfig()).sources.github.contexts[0].issues], ["github:issues:issues", [], { id: "issues" }], "its Issues tab shows all its repos");
   assert.equal(mine.owner, config.github.contexts[0].owner);
   assert.deepEqual(JSON.parse(shippedConfig()).sources.github.contexts[0].projects, [{ number: mine.number }], "a project is its number alone: the rest comes from GitHub");
   assert.match(prs.sections.map((s) => s.query).join(" "), /author:@me/);
@@ -1773,7 +1782,7 @@ test("a board's next page is one query of its items after the cursor: the same f
   assert.match(board.githubItemsPageArgs({ ...githubView(), limit: 250 }, plan, HIDDEN, "c", 200)[3], /items\(first: 50, after/, "the last page to the limit");
   assert.match(board.githubItemsArgs({ ...githubView(), limit: 30 }, plan, HIDDEN)[3], /items\(first: 30, query/, "a limit below a page");
   const empty = boardPage(0, 0, "c0");
-  const next = board.nextItemsPage(empty, githubView());
+  const next = board.nextPage(board.PROJECT_ITEMS, empty, githubView());
   assert.deepEqual(next, { after: "c0", count: 0 }, "an empty first page that says more follow");
   const after = board.githubItemsPageArgs(githubView(), plan, HIDDEN, next.after, next.count);
   assert.match(after[3], /items\(first: 100, after: \$after, query/, "its next page reads from the cursor it declares");
@@ -1781,41 +1790,41 @@ test("a board's next page is one query of its items after the cursor: the same f
   assert.ok(after.includes("after=c0"));
 });
 
-test("a board's pages add up: each item once, the last page's pageInfo; the next page while GitHub has one and the limit leaves room (addItemsPage, nextItemsPage)", () => {
+test("a board's pages add up: each item once, the last page's pageInfo; the next page while GitHub has one and the limit leaves room (addPage, nextPage)", () => {
   const view = githubView();
   const first = boardPage(0, 3, "c1");
-  assert.deepEqual(board.nextItemsPage(first, view), { after: "c1", count: 3 });
+  assert.deepEqual(board.nextPage(board.PROJECT_ITEMS, first, view), { after: "c1", count: 3 });
   const second = boardPage(2, 6, null, { first: false });
-  board.addItemsPage(first, second);
+  board.addPage(board.PROJECT_ITEMS, first, second);
   const items = first.data.repositoryOwner.projectV2.items;
   assert.deepEqual(items.nodes.map((n) => n.id), ["PVTI_rec1", "PVTI_rec2", "PVTI_rec3", "PVTI_rec4", "PVTI_rec5", "PVTI_rec6"], "the item both pages hold, once");
-  assert.equal(board.nextItemsPage(first, view), null, "no page more");
-  assert.equal(board.nextItemsPage(boardPage(0, 3, "c1"), { ...view, limit: 3 }), null, "the limit read");
+  assert.equal(board.nextPage(board.PROJECT_ITEMS, first, view), null, "no page more");
+  assert.equal(board.nextPage(board.PROJECT_ITEMS, boardPage(0, 3, "c1"), { ...view, limit: 3 }), null, "the limit read");
   const noCursor = boardPage(0, 3, "c1");
   noCursor.data.repositoryOwner.projectV2.items.pageInfo.endCursor = null;
-  assert.throws(() => board.nextItemsPage(noCursor, view), { message: "Projekt „Sample“: GitHub nannte nach 3 Einträgen nicht, wo die nächsten beginnen" },
+  assert.throws(() => board.nextPage(board.PROJECT_ITEMS, noCursor, view), { message: "Projekt „Sample“: GitHub nannte nach 3 Einträgen nicht, wo die nächsten beginnen" },
     "more without a cursor to go on from");
-  assert.equal(board.nextItemsPage(noCursor, { ...view, limit: 3 }), null, "unless the limit is read");
-  assert.equal(board.nextItemsPage({ data: { repositoryOwner: null } }, view), null, "no items: the parser explains");
-  const cut = board.parseGithubBoard(board.addItemsPage(boardPage(0, 3, "c1", { total: 9 }), boardPage(3, 5, "c2", { first: false })), { ...view, limit: 5 }, HIDDEN, [], planOf());
+  assert.equal(board.nextPage(board.PROJECT_ITEMS, noCursor, { ...view, limit: 3 }), null, "unless the limit is read");
+  assert.equal(board.nextPage(board.PROJECT_ITEMS, { data: { repositoryOwner: null } }, view), null, "no items: the parser explains");
+  const cut = board.parseGithubBoard(board.addPage(board.PROJECT_ITEMS, boardPage(0, 3, "c1", { total: 9 }), boardPage(3, 5, "c2", { first: false })), { ...view, limit: 5 }, HIDDEN, [], planOf());
   assert.deepEqual([cut.limited, cut.total, cut.count], [true, 9, 5], "cut: said, with how many it read");
-  const stuck = (page) => () => board.addItemsPage(boardPage(0, 3, "c1"), page);
+  const stuck = (page) => () => board.addPage(board.PROJECT_ITEMS, boardPage(0, 3, "c1"), page);
   const STUCK = { message: "Projekt „Sample“: GitHub kam nach 3 Einträgen nicht weiter" };
   assert.throws(stuck(boardPage(1, 3, "c2", { first: false })), STUCK, "more promised, but only items it holds");
   assert.throws(stuck(boardPage(3, 4, "c1", { first: false })), STUCK, "more promised, from the same cursor");
-  assert.equal(board.addItemsPage(boardPage(0, 3, "c1"), boardPage(1, 3, null, { first: false })).data.repositoryOwner.projectV2.items.nodes.length, 3,
+  assert.equal(board.addPage(board.PROJECT_ITEMS, boardPage(0, 3, "c1"), boardPage(1, 3, null, { first: false })).data.repositoryOwner.projectV2.items.nodes.length, 3,
     "no item new on the last page: the end");
   const missing = { data: { repositoryOwner: { projectV2: { items: null } } } };
-  assert.throws(() => board.addItemsPage(boardPage(0, 3, "c1"), missing, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "items"], message: "no access" }]),
+  assert.throws(() => board.addPage(board.PROJECT_ITEMS, boardPage(0, 3, "c1"), missing, [{ type: "FORBIDDEN", path: ["repositoryOwner", "projectV2", "items"], message: "no access" }]),
     { message: "Projekt „Sample“: no access" });
-  assert.throws(() => board.addItemsPage(boardPage(0, 3, "c1"), missing), { message: "Projekt „Sample“ lieferte die Einträge nach den ersten 3 nicht" });
+  assert.throws(() => board.addPage(board.PROJECT_ITEMS, boardPage(0, 3, "c1"), missing), { message: "Projekt „Sample“ lieferte die Einträge nach den ersten 3 nicht" });
   const gone = { data: { repositoryOwner: { projectV2: null } } };
   const at = (path, message) => ({ type: "NOT_FOUND", path, message });
-  assert.throws(() => board.addItemsPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner"], "owner"), at(["repositoryOwner", "projectV2"], "project gone")]),
+  assert.throws(() => board.addPage(board.PROJECT_ITEMS, boardPage(0, 3, "c1"), gone, [at(["repositoryOwner"], "owner"), at(["repositoryOwner", "projectV2"], "project gone")]),
     { message: "Projekt „Sample“: project gone" }, "the deepest error on the way to the items");
-  assert.throws(() => board.addItemsPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner", "projectV2", "items", "nodes", 0], "an item"), at(["viewer"], "elsewhere")]),
+  assert.throws(() => board.addPage(board.PROJECT_ITEMS, boardPage(0, 3, "c1"), gone, [at(["repositoryOwner", "projectV2", "items", "nodes", 0], "an item"), at(["viewer"], "elsewhere")]),
     { message: "Projekt „Sample“: an item" }, "none on the way: the page's first");
-  assert.throws(() => board.addItemsPage(boardPage(0, 3, "c1"), gone, [at(["repositoryOwner", "projectV2", "items", "nodes", 0], "an item"), at(["repositoryOwner", "projectV2"], "project gone")]),
+  assert.throws(() => board.addPage(board.PROJECT_ITEMS, boardPage(0, 3, "c1"), gone, [at(["repositoryOwner", "projectV2", "items", "nodes", 0], "an item"), at(["repositoryOwner", "projectV2"], "project gone")]),
     { message: "Projekt „Sample“: project gone" }, "an item's error lies past the items, not on the way to them");
 });
 
@@ -3336,6 +3345,38 @@ function withoutMine() {
   return JSON.stringify(config);
 }
 
+// testConfig with an Issues tab for sample-user (`issues`: its entry), its
+// third tab, before the PR tab.
+function issuesConfig(issues = { id: "issues" }) {
+  const config = JSON.parse(testConfig());
+  ghContext(config).issues = issues;
+  return JSON.stringify(config);
+}
+const ISSUES_TAB = "github:issues:issues";
+const OPEN_ISSUES = `${ISSUES_TAB}:open`;
+const CLOSED_ISSUES = `${ISSUES_TAB}:closed`;
+const issueTabs = (config = issuesConfig()) => githubTabs(board.readConfig(config).config);
+const issuesView = (state = "open", config = issuesConfig()) => board.viewsOf(board.readConfig(config).config, knownGet()).find((v) => v.id === `${ISSUES_TAB}:${state}`);
+const ISSUE_REPOS = () => board.parseIssueRepos(json("github-issue-repos.json"), "sample-user");
+// The fixture's open (or closed) issues as the view reads them, the repos
+// `hidden` left out of its search.
+const issuesData = (state = "open", { hidden = [], view = issuesView(state), name = state === "open" ? "github-issues.json" : "github-issues-closed.json" } = {}) =>
+  board.parseGithubIssues(json(name), view, { repos: ISSUE_REPOS().repos, hidden, query: board.issuesQuery(view, false, hidden, ISSUE_REPOS().repos) });
+const isReposCall = (args) => args.some((a) => String(a).includes("repositories(first"));
+const isIssuesCall = (args) => args.some((a) => String(a).includes("search(type: ISSUE, first: $first"));
+const qOf = (call) => call.args.find((a) => a.startsWith("q="))?.slice(2) ?? null;
+// A Board on the Issues tab, its open issues read as github-issues.json
+// answers (`answer`), its repos as github-issue-repos.json.
+async function openIssues({ config = issuesConfig(), answer = fixture("github-issues.json"), stored = {}, ...options } = {}) {
+  const opened = await bootBoard({ config, stored: { context: GITHUB_CONTEXT, [`tab:${GITHUB_CONTEXT}`]: ISSUES_TAB, ...stored }, ...options });
+  await opened.host.answer("gh", ok(fixture("github-issue-repos.json")), isReposCall);
+  if (answer !== null) await opened.host.answer("gh", ok(answer), isIssuesCall);
+  opened.cx.later.splice(0);
+  return { ...opened, st: () => opened.b.views[opened.b.view().id] };
+}
+const issueRows = (b) => byId(b.render(), "issue-rows").kids;
+const issueLineIds = (b) => issueRows(b).map((k) => k.with.id?.[0] ?? null);
+
 // A clock the tests can move: the mod reads Date.now().
 const realNow = Date.now.bind(Date);
 let clockOffset = 0;
@@ -3878,7 +3919,7 @@ test("UI: on the shipped views.json the GitHub source loads its first view", asy
   const st = b.state(b.view().id);
   assert.equal(st.data.columns.length, 5);
   assert.equal(st.sel.key, "PVTI_rec4");
-  assert.deepEqual(b.tabs().map((c) => [c.kind, c.name]), [["project", `P${JSON.parse(shippedConfig()).sources.github.contexts[0].projects[0].number}`], ["view", "PRs"]], "the project named as GitHub names it");
+  assert.deepEqual(b.tabs().map((c) => [c.kind, c.name]), [["project", `P${JSON.parse(shippedConfig()).sources.github.contexts[0].projects[0].number}`], ["issues", "Issues"], ["view", "PRs"]], "the project named as GitHub names it");
   assert.deepEqual(host.asked.filter((a) => a.tool === "az"), []);
 });
 
@@ -3917,6 +3958,18 @@ test("UI: what GitHub says beside a later page's items shows as a warning, as th
   await host.answer("gh", { code: 1, stdout: JSON.stringify(page), stderr: "gh: Resource not accessible by integration" }, isBoardCall);
   assert.deepEqual([st().error, st().warnings], [null, ["Resource not accessible by integration"]]);
   assert.ok(texts(b.render()).includes("Resource not accessible by integration"), "the board says so");
+});
+
+test("UI: what GitHub says beside a project's own answer shows as a warning before what its items' pages say, while they come and after", async () => {
+  const head = { ...defaultProject(7), errors: [{ type: "FORBIDDEN", message: "Some fields are hidden", path: ["repositoryOwner", "projectV2", "fields", "nodes", 9] }] };
+  const projectAnswer = (number) => (number === 7 ? { code: 1, stdout: JSON.stringify(head), stderr: "gh: Some fields are hidden" } : ok(JSON.stringify(defaultProject(number))));
+  const { host, st } = await bootBoard({ projectAnswer });
+  const first = { ...boardPage(0, 3, "c1"), errors: [{ type: "FORBIDDEN", message: "Item 1 is hidden", path: ["repositoryOwner", "projectV2", "items", "nodes", 1, "content"] }] };
+  await host.answer("gh", { code: 1, stdout: JSON.stringify(first), stderr: "gh: Item 1 is hidden" }, isBoardCall);
+  assert.deepEqual([st().loading, st().warnings], [true, ["Some fields are hidden", "Item 1 is hidden"]], "while the next page comes");
+  const page = { ...boardPage(3, 6, null, { first: false }), errors: [{ type: "FORBIDDEN", message: "Resource not accessible by integration", path: ["repositoryOwner", "projectV2", "items", "nodes", 0, "content"] }] };
+  await host.answer("gh", { code: 1, stdout: JSON.stringify(page), stderr: "gh: Resource not accessible by integration" }, isBoardCall);
+  assert.deepEqual([st().error, st().warnings], [null, ["Some fields are hidden", "Item 1 is hidden", "Resource not accessible by integration"]]);
 });
 
 test("UI: a board whose next page fails shows the error, as a failed first page does", async () => {
@@ -5581,7 +5634,7 @@ test("UI: Esc in a choice's list closes only the list, taking nothing; a second 
   assert.equal(b.modal, null);
 });
 
-test("UI: a click on Öffnen in opens its list; a click on a row takes it; a press beside the list closes it, taking nothing", async () => {
+test("UI: a click on Öffnen in opens its list; a click on a row takes it; a press beside the list closes it, taking nothing, and one on a shield drawn before the list or its dialog closed does nothing", async () => {
   const { b, cx, host } = await openBoard();
   host.spaceList = [{ ...host.spaceList[0] }, spaceOf("s3", "work")];
   await openStart(b, cx);
@@ -5599,6 +5652,12 @@ test("UI: a click on Öffnen in opens its list; a click on a row takes it; a pre
   beside.call((own) => shield.with.on_mouse_down[1]({}, own));
   assert.deepEqual([beside.stopped, b.modal.list, openInShown(b), b.handle.held], [1, null, ["work", false], true]);
   assert.equal(byId(b.render(), "choice-list-shield"), null, "no shield without a list");
+  const m = b.modal;
+  fakeCx().call((own) => shield.with.on_mouse_down[1]({}, own));
+  assert.deepEqual([b.modal, m.list], [m, null], "a press on a shield drawn before its list closed does nothing");
+  await press(b, cx, "escape");
+  fakeCx().call((own) => shield.with.on_mouse_down[1]({}, own));
+  assert.equal(b.modal, null, "nor after its dialog closed");
 });
 
 test("UI: a new space needs a name: without one the dialog says so and starts nothing", async () => {
@@ -15262,7 +15321,7 @@ function effectOf(b, cx, host) {
   const st = view ? b.state(view.id) : null;
   return JSON.stringify({
     context: b.context()?.id, tab: b.tab()?.id, view: view?.id, mine: b.mine, filtering: b.filtering, modal: b.modal?.kind ?? null, notice: b.notice?.text ?? null,
-    sel: st?.sel ?? null, detail: st?.detail ?? null, folds: st?.folds ?? null, panel: b.panel, unfolded: b.relatedUi.unfolded,
+    sel: st?.sel ?? null, detail: st?.detail ?? null, folds: st?.folds ?? null, solo: st?.soloRepo ?? null, panel: b.panel, unfolded: b.relatedUi.unfolded,
     opened: cx.opened ?? [], open: host.calls.filter((c) => !c.done).map((c) => [c.tool, ...c.args].join(" ")), runs: host.runs, notes: host.notes.length,
   });
 }
@@ -15326,6 +15385,7 @@ const KEYED = {
   "context-next": { open: openBoard, key: ["}"] },
   "context-previous": { open: openBoard, key: ["{"] },
   "tab-view": { open: () => bootBoard({ stored: { context: AZURE_CONTEXT } }), key: ["v"] },
+  "solo-repo": { open: openIssues, key: ["v", { char: "V", modifiers: { shift: true } }] },
   "move-left": { open: openBoard, key: ["h", { char: "H", modifiers: { shift: true } }] },
   "move-right": { open: openBoard, key: ["l", shiftL] },
   create: { open: openBacklog, key: ["n"] },
@@ -18137,6 +18197,8 @@ test("the saved state of a table at its limit of 1000 rows, each with a value of
   assert.equal(board.SHAPES.table.toSaved(pr).packed.traits.some((t) => t.trait === "url"), false, "no address GitHub gives an issue or a pull request kept");
   const odd = { ...data, rows: data.rows.map((r, i) => (i ? r : { ...r, url: "https://example.com/elsewhere" })) };
   assert.equal(board.SHAPES.table.fromSaved(JSON.parse(JSON.stringify(board.SHAPES.table.toSaved(odd)))).rows[0].url, "https://example.com/elsewhere", "an address of another form kept");
+  const draft = { ...data, rows: data.rows.map((r, i) => (i ? r : { ...r, kind: "draft", repo: "", number: null, url: null })) };
+  assert.deepEqual(board.SHAPES.table.fromSaved(JSON.parse(JSON.stringify(board.SHAPES.table.toSaved(draft)))).rows[0], draft.rows[0], "a draft without an address keeps none");
 });
 
 test("the saved state: an entry is a view's only while its form and hidden columns are the same; one the store would take more than SAVED_MAX bytes for is none, counted as the store counts, and a board at its limit of 1000 items fits; gone views' entries are named", () => {
@@ -18175,7 +18237,7 @@ test("the saved state of each shipped view signs as SAVED_VERSION 5 has it, a pr
     return [board.viewKind(v), createHash("sha256").update(JSON.parse(text).sig).digest("hex").slice(0, 16)];
   });
   assert.deepEqual(sigs, [
-    ["github board", "44363005361199d9"], ["github list", "0dc7d4693c698167"],
+    ["github board", "44363005361199d9"], ["github issues", "032c039735be12aa"], ["github issues", "cec12ed776ab546d"], ["github list", "0dc7d4693c698167"],
     ["azure sprint", "059951778d67152f"], ["azure backlog", "a25ef2a55d9dc776"], ["azure prs", "f1f0b376679f9271"],
     ["azure sprint", "1b79e44e660fddd6"], ["azure backlog", "9327819c47162386"], ["azure prs", "1faefca7ee01bc5b"],
   ]);
@@ -18211,10 +18273,11 @@ test("what each shape keeps in its saved data is the form SAVED_VERSION names: a
     sprint: board.sprintBoard({ ...sprintParts(), items: board.parseWorkItems(azPrioritized("azure-sprint-items.json"), sprintTeam()) }),
     backlog: backlogData({ items: azPrioritized("azure-backlog-items.json") }),
     table: tableData({ visibleFields: ALL_FIELDS, group: "Status", sorts: [["Priority", "ASC"]] }),
+    issues: issuesData("open", { hidden: ["sample-user/quiet"] }),
   };
   for (const k of ["board", "sprint", "backlog"]) assert.match(JSON.stringify(saved(shapes[k])), /"priority":\{"name":/, `${k}: a priority in what it keeps`);
   assert.deepEqual({ version: board.SAVED_VERSION, ...Object.fromEntries(Object.entries(shapes).map(([k, d]) => [k, print(d)])) },
-    { version: 5, board: "ea26d8e02220", prs: "a995da7f9b5f", sprint: "a51de1177e88", backlog: "c4437d013757", table: "2589329862d5" });
+    { version: 5, board: "ea26d8e02220", prs: "a995da7f9b5f", sprint: "a51de1177e88", backlog: "c4437d013757", table: "2589329862d5", issues: "f55335c593ff" });
 });
 
 test("UI: a PR tab's repos turned off apply to a saved state it draws and to a read that ends after the switch", async () => {
@@ -18349,7 +18412,7 @@ test("UI: a GitHub board without data draws each page as it comes, with its warn
   assert.equal(texts(root).some((x) => x.startsWith("Nur die ersten")), false, "no note before the last page");
   assert.equal(texts(byId(root, `tab-${MINE_TAB}`)).includes("…"), false, "the tab counts what is drawn");
   const page = (total) => boardPage(0, 3, "c1", { total });
-  assert.deepEqual([board.itemPages(page(250), testView(MINE), 10), board.itemPages(page(250), { limit: 150 }, 2), board.itemPages(page(0), testView(MINE), 10)], [3, 2, 1],
+  assert.deepEqual([board.pageCount(board.PROJECT_ITEMS, page(250), 10), board.pageCount(board.PROJECT_ITEMS, page(250), 2), board.pageCount(board.PROJECT_ITEMS, page(0), 10)], [3, 2, 1],
     "the pages by the count GitHub names, no more than the calls; a page more than it names counts as one more");
   await host.answer("gh", ok(JSON.stringify(boardPage(3, 6, "c2", { first: false, total: 9 }))), isBoardCall);
   root = b.render();
@@ -18882,4 +18945,690 @@ test("UI: the create dialog on a Backlog that shows its saved state stays open w
   assert.deepEqual([b.state(id).loading, b.state(id).saved, openAzb(host, "levels").length], [false, true, 0], "the read failed");
   await click(b, cx, "create-go");
   assert.deepEqual([b.modal?.error, openAzb(host, "create").length, openAzb(host, "levels").length], [board.SAVED_WRITE, 0, 1], "the read again, still no create");
+});
+
+test("an Issues tab stands after its context's projects and before its PR tab: id, name „Issues“ and a limit of 1000 by default, the repos turned off none; without an entry a context has none", () => {
+  assert.deepEqual(issueTabs().map((t) => [t.entryKind, t.id, t.name]), [
+    ["project", MINE_TAB, undefined], ["project", OTHER_TAB, undefined], ["issues", ISSUES_TAB, "Issues"], ["prs", "prs", "PRs"],
+  ]);
+  const tab = issueTabs()[2];
+  assert.deepEqual([tab.owner, tab.limit, tab.hideRepos, tab.start, tab.hide, tab.settingsPath], ["sample-user", 1000, [], {}, [], ["sources", "github", "contexts", "sample-user", "issues"]]);
+  const own = issueTabs(issuesConfig({ id: "i", name: "Aufgaben", limit: 200, hideRepos: ["sample-user/quiet"], start: { message: "/fix {number}" } }))[2];
+  assert.deepEqual([own.id, own.name, own.limit, own.hideRepos, own.start], ["github:issues:i", "Aufgaben", 200, ["sample-user/quiet"], { message: "/fix {number}" }]);
+  assert.deepEqual(issueTabs(testConfig()).map((t) => t.entryKind), ["project", "project", "prs"]);
+});
+
+test("an Issues tab's entry with problems is left out and each is named: no id, a name that is no text, a limit outside 1 to 1000, repos without their owner, a key it does not take; its id is its own among all contexts' Issues tabs", () => {
+  const problems = (issues) => board.readConfig(issuesConfig(issues)).errors;
+  const at = "GitHub-Kontext 1 („sample-user“), Issues-Tab";
+  assert.deepEqual(problems({}), [`${at}: „id“ fehlt`]);
+  assert.deepEqual(problems({ id: "i", name: 3 }), [`${at}: „name“ muss Text sein`]);
+  assert.deepEqual([problems({ id: "i", limit: 0 }), problems({ id: "i", limit: 1001 }), problems({ id: "i", limit: 1000 })], [[`${at}: „limit“ ist eine ganze Zahl von 1 bis 1000`], [`${at}: „limit“ ist eine ganze Zahl von 1 bis 1000`], []]);
+  assert.deepEqual(problems({ id: "i", hideRepos: ["quiet"] }), [`${at}: „hideRepos“ ist eine Liste von Repos mit Besitzer, etwa ["owner/repo"]`]);
+  assert.deepEqual(problems({ id: "i", sections: [] }), [`${at}: „sections“ gibt es nicht`]);
+  assert.equal(issueTabs(issuesConfig({})).some((t) => t.entryKind === "issues"), false, "left out");
+  const two = JSON.parse(issuesConfig());
+  two.sources.github.contexts.push({ owner: "sample-org", issues: { id: "issues" }, prs: { id: "org-prs" } });
+  const read = board.readConfig(JSON.stringify(two));
+  assert.deepEqual(read.errors, ["GitHub-Kontext 2 („sample-org“), Issues-Tab: „id“ issues gibt es schon"]);
+  const prsNamedIssues = JSON.parse(issuesConfig());
+  prsNamedIssues.sources.github.contexts.push({ owner: "sample-org", prs: { id: "issues" } });
+  assert.deepEqual(board.readConfig(JSON.stringify(prsNamedIssues)).errors, [], "a PR tab's id is its own among PR tabs alone");
+  const sameTab = JSON.parse(issuesConfig());
+  sameTab.sources.github.contexts.push({ owner: "sample-org", prs: { id: "issues:issues" } });
+  const clash = board.readConfig(JSON.stringify(sameTab));
+  assert.deepEqual(clash.errors, ["GitHub-Kontext 2 („sample-org“), PR-Tab: „id“ issues:issues ergibt die Kennung „github:issues:issues“, die schon ein anderer Tab hat"],
+    "but no tab's id is another's");
+  assert.equal(board.contextsOf(clash.config).flatMap((c) => c.tabs).filter((t) => t.id === ISSUES_TAB).length, 1);
+});
+
+test("an Issues tab has the views Offen and Geschlossen, its switch named „Offen/Geschlossen“; each view reads the tab's owner, limit and repos turned off, its settings the tab's", () => {
+  const tab = board.contextsOf(board.readConfig(issuesConfig()).config, knownGet())[0].tabs[2];
+  assert.deepEqual([tab.kind, tab.views, board.hasViews(tab), board.hasViewSwitch(tab), board.viewSwitchHint(tab)], ["issues", ["open", "closed"], true, true, "Offen/Geschlossen"]);
+  const view = board.viewOf(tab, "closed");
+  assert.deepEqual([view.id, view.layout, view.issueState, view.name, view.owner, view.limit, view.hideRepos, view.settingsPath, board.viewKind(view), board.kindOf(view).shape],
+    [CLOSED_ISSUES, "issues", "closed", "Geschlossen", "sample-user", 1000, [], tab.entry.settingsPath, "github issues", "issues"]);
+  assert.deepEqual([board.tabViewName(tab, "open"), board.repoHidePath(view)], ["Offen", ["sources", "github", "contexts", "sample-user", "issues", "hideRepos"]]);
+  assert.deepEqual(board.viewsOf(board.readConfig(issuesConfig()).config, knownGet()).filter((v) => v.layout === "issues").map((v) => v.id), [OPEN_ISSUES, CLOSED_ISSUES]);
+});
+
+test("an Issues tab's repos are the owner's own with issues on, archived ones left out, by name, in pages of 100; its search names the owner by user: or org:, the state shown, archived repos and those turned off left out where the owner's repos have them, newest updated first", () => {
+  const reposDoc = board.githubIssueReposArgs("sample-user")[3];
+  assert.match(reposDoc, /repositories\(first: 100, after: \$after, ownerAffiliations: \[OWNER\], hasIssuesEnabled: true, isArchived: false, orderBy: \{ field: NAME, direction: ASC \}\)/);
+  assert.deepEqual([board.githubIssueReposArgs("sample-user").slice(-2), board.githubIssueReposArgs("sample-user", "c1").slice(-2)], [["-f", "login=sample-user"], ["-f", "after=c1"]]);
+  assert.deepEqual(ISSUE_REPOS(), { org: false, repos: ["sample-user/atlas", "sample-user/quiet", "sample-user/tender"], after: null });
+  const org = json("github-issue-repos.json");
+  org.data.repositoryOwner.__typename = "Organization";
+  org.data.repositoryOwner.repositories.pageInfo.hasNextPage = true;
+  assert.deepEqual([board.parseIssueRepos(org, "sample-org").org, board.parseIssueRepos(org, "sample-org").after], [true, "Y3Vyc29yOjM="]);
+  assert.throws(() => board.parseIssueRepos({ data: { repositoryOwner: null } }, "nobody"), /GitHub kennt „nobody“ nicht/);
+  assert.throws(() => board.parseIssueRepos({ data: { repositoryOwner: null } }, "nobody", [{ path: ["repositoryOwner"], message: "Could not resolve to a User\nmore" }]), { message: "GitHub: Could not resolve to a User" });
+  const view = issuesView("closed");
+  const repos = ISSUE_REPOS().repos;
+  assert.equal(board.issuesQuery(view, false, ["sample-user/quiet", "sample-user/atlas"], repos), "is:issue user:sample-user archived:false is:closed sort:updated-desc -repo:sample-user/quiet -repo:sample-user/atlas");
+  assert.equal(board.issuesQuery(issuesView(), true, [], repos), "is:issue org:sample-user archived:false is:open sort:updated-desc");
+  assert.equal(board.issuesQuery(view, false, ["sample-user/gone", "Sample-User/Quiet"], repos), "is:issue user:sample-user archived:false is:closed sort:updated-desc -repo:Sample-User/Quiet",
+    "a repo turned off that the owner no longer has, archived or gone, is not named");
+  assert.match(board.ISSUES_QUERY, /search\(type: ISSUE, first: \$first, after: \$after, query: \$q\)/);
+  assert.match(board.ISSUES_QUERY, /\.\.\. on Issue \{ id number title url issueType \{ name color \}[^]*subIssuesSummary \{ total completed \} stateReason updatedAt \}/, "the card's fields, the reason and the update");
+  const small = { ...view, limit: 150 };
+  assert.deepEqual([board.githubIssuesArgs(small, "q").slice(-2), board.githubIssuesArgs(small, "q", 100, "c1").slice(-4)], [["-F", "first=100"], ["-F", "first=50", "-f", "after=c1"]]);
+  assert.deepEqual(board.githubIssuesArgs(view, "is:issue").slice(4, 6), ["-f", "q=is:issue"]);
+});
+
+test("an Issues tab's issues are cards as on a project, in GitHub's order, each with why GitHub closed it and when it changed; the data names its query, the repos it read and left out, its counts and who gh is", () => {
+  const data = issuesData("open", { hidden: ["sample-user/quiet"] });
+  assert.deepEqual([data.shape, data.meta, data.repos, data.readHidden, data.hideRepos, data.total, data.limited, data.count, data.viewer], [
+    "issues", { owner: "sample-user", state: "open", query: "is:issue user:sample-user archived:false is:open sort:updated-desc -repo:sample-user/quiet" },
+    ["sample-user/atlas", "sample-user/quiet", "sample-user/tender"], ["sample-user/quiet"], [], 4, false, 4, "sample-user",
+  ]);
+  assert.deepEqual(data.rows.map((r) => [r.key, r.itemId, r.contentId, r.kind, r.number, r.repo, r.stateReason, r.updatedAt]), [
+    ["I_issue12", null, "I_issue12", "issue", 12, "sample-user/tender", null, "2026-11-26T09:00:00Z"],
+    ["I_issue7", null, "I_issue7", "issue", 7, "sample-user/atlas", null, "2026-11-25T09:00:00Z"],
+    ["I_issue9", null, "I_issue9", "issue", 9, "sample-user/tender", "REOPENED", "2026-11-20T09:00:00Z"],
+    ["I_issue5", null, "I_issue5", "issue", 5, "sample-user/atlas", null, "2026-11-02T09:00:00Z"],
+  ], "no item id: an issue here stands on no project");
+  const [first, second, third] = data.rows;
+  assert.deepEqual([first.labels, first.assignees, first.milestone, first.type, first.priority, second.parent, second.parentTitle, third.sub, third.assignees],
+    [["bug"], ["Sample User"], "v1", "Bug", null, 3, "Scanner", { total: 5, done: 2 }, ["sample-other"]]);
+  const cut = json("github-issues.json");
+  cut.data.search.pageInfo.hasNextPage = true;
+  cut.data.search.issueCount = 9;
+  cut.data.search.nodes.push(null);
+  const read = board.parseGithubIssues(cut, issuesView(), { repos: [], hidden: [], query: "q" });
+  assert.deepEqual([read.rows.length, read.count, read.total, read.limited], [4, 5, 9, true], "a node GitHub sent as nothing is no row");
+  const capped = json("github-issues.json");
+  capped.data.search.issueCount = 1500;
+  assert.deepEqual(["total", "count", "limited"].map((k) => board.parseGithubIssues(capped, issuesView(), { repos: [], hidden: [], query: "q" })[k]), [1500, 4, true],
+    "GitHub's search stops at a thousand and says no more follow: a total above what came is cut too");
+  assert.throws(() => board.parseGithubIssues({ data: {} }, issuesView(), { repos: [], hidden: [], query: "q" }), /Die Suche nach Issues fehlt in GitHubs Antwort/);
+  assert.throws(() => board.parseGithubIssues({ data: {} }, issuesView(), { repos: [], hidden: [], query: "q" }, [{ path: ["viewer"], message: "Viewer gone" }, { path: ["search"], message: "Something went wrong" }]), /Die Suche nach Issues: Something went wrong/);
+  assert.throws(() => board.parseGithubIssues({ data: {} }, issuesView(), { repos: [], hidden: [], query: "q" }, [{ message: "API rate limit exceeded" }]), /Die Suche nach Issues: API rate limit exceeded/, "else the answer's first error");
+});
+
+test("an Issues tab's next page adds each issue once and comes while GitHub has more and the limit leaves room; one that says more follow but adds none, or names its cursor again, fails, as does one without the search (addPage, nextPage)", () => {
+  const page = (ids, next) => ({ data: { search: { issueCount: 9, pageInfo: { hasNextPage: Boolean(next), endCursor: next ?? "end" }, nodes: ids.map((id) => ({ id })) } } });
+  const view = { ...issuesView(), limit: 5 };
+  const search = board.ISSUE_SEARCH;
+  const json1 = page(["a", "b"], "c1");
+  assert.deepEqual(board.nextPage(search, json1, view), { after: "c1", count: 2 });
+  board.addPage(search, json1, page(["b", "c", "d"], "c2"));
+  assert.deepEqual([json1.data.search.nodes.map((n) => n.id), json1.data.search.pageInfo.endCursor], [["a", "b", "c", "d"], "c2"]);
+  assert.deepEqual(board.nextPage(search, json1, view), { after: "c2", count: 4 });
+  board.addPage(search, json1, page(["e"], "c3"));
+  assert.equal(board.nextPage(search, json1, view), null, "the limit is read");
+  assert.equal(board.nextPage(search, page(["a"], null), view), null, "GitHub has no more");
+  const STUCK = { message: "Die Suche nach Issues: GitHub kam nach 1 Issues nicht weiter" };
+  assert.throws(() => board.addPage(search, page(["a"], "c1"), page(["a"], "c2")), STUCK);
+  assert.throws(() => board.addPage(search, page(["a"], "c1"), page(["b"], "c1")), STUCK);
+  const noCursor = page(["a"], "c1");
+  noCursor.data.search.pageInfo.endCursor = null;
+  assert.throws(() => board.nextPage(search, noCursor, view), { message: "Die Suche nach Issues: GitHub nannte nach 1 Issues nicht, wo die nächsten beginnen" });
+  assert.throws(() => board.addPage(search, page(["a"], "c1"), { data: {} }), { message: "Die Suche nach Issues lieferte die Issues nach den ersten 1 nicht" });
+  assert.throws(() => board.addPage(search, page(["a"], "c1"), { data: {} }, [{ path: ["search"], message: "Something went wrong\nmore" }]), { message: "Die Suche nach Issues: Something went wrong" });
+  assert.throws(() => board.addPage(search, page(["a"], "c1"), { data: {} }, [{ message: "API rate limit exceeded" }]), { message: "Die Suche nach Issues: API rate limit exceeded" }, "else the page's first error");
+  assert.deepEqual([board.pageCount(search, page(["a"], "c1"), 10), board.pageCount(search, page(["a"], "c1"), 1)], [1, 1], "nine: one page");
+});
+
+test("an Issues tab's lines: per repo with issues that show, where its first issue stands, a group line with its name and count, then its issues; repos turned off show none, one turned on since the read waits in a line of its own; a solo repo shows its issues alone, without a group line", () => {
+  const data = { ...issuesData("open", { hidden: ["sample-user/quiet"] }), hideRepos: [] };
+  const all = () => true;
+  const shape = (lines) => lines.map((l) => (l.row ? l.row.number : l.waiting ? `… ${l.group.name}` : `${l.group.name} ${l.shown}/${l.held}`));
+  assert.deepEqual(shape(board.issueLines(data, all, null)), ["tender 2/2", 12, 9, "atlas 2/2", 7, 5, "… quiet"]);
+  assert.deepEqual(board.issueLines(data, all, null)[0].group, { id: "repo:sample-user/tender", name: "tender", color: "muted" });
+  assert.deepEqual(shape(board.issueLines(data, (r) => r.number !== 9, null)), ["tender 1/2", 12, "atlas 2/2", 7, 5, "… quiet"], "a count of what shows");
+  assert.deepEqual(shape(board.issueLines(data, (r) => r.repo.endsWith("atlas"), null)), ["atlas 2/2", 7, 5, "… quiet"], "a group none of whose issues shows is not drawn");
+  const off = { ...data, hideRepos: ["Sample-User/Tender"] };
+  assert.deepEqual([shape(board.issueLines(off, all, null)), board.keptIssues(off).map((r) => r.number)], [["atlas 2/2", 7, 5, "… quiet"], [7, 5]], "turned off, in any case");
+  assert.deepEqual([board.waitingRepos(data), board.waitingRepos({ ...data, hideRepos: ["sample-user/quiet"] })], [["sample-user/quiet"], []]);
+  assert.deepEqual(board.soloRepos(data), ["sample-user/tender", "sample-user/atlas"]);
+  const counted = (d, visible) => {
+    const count = board.soloCounts(d, visible);
+    return board.issueSoloSwitch(d, null).choices.map((c) => [c.id, c.label, count(c.id).shown, count(c.id).held]);
+  };
+  assert.deepEqual(counted(off, all), [[null, "Alle", 2, 2], ["sample-user/atlas", "atlas", 2, 2]], "a repo turned off not offered");
+  assert.deepEqual(counted(data, (r) => r.number !== 9 && r.number !== 5),
+    [[null, "Alle", 2, 4], ["sample-user/tender", "tender", 1, 2], ["sample-user/atlas", "atlas", 1, 2]], "the switch's choices: „Alle“, then soloRepos's, with how many of their issues show");
+  assert.deepEqual(board.issueSoloSwitch(data, "Sample-User/Atlas").chosen, "sample-user/atlas");
+  assert.deepEqual([board.soloRepoOf(data, "sample-user/ATLAS"), board.soloRepoOf(data, "sample-user/quiet"), board.soloRepoOf(off, "sample-user/tender"), board.soloRepoOf(data, null)],
+    ["sample-user/atlas", null, null, null], "only a repo with issues in the read, turned on");
+  assert.deepEqual(shape(board.issueLines(data, all, "sample-user/atlas")), [7, 5]);
+  assert.deepEqual(shape(board.issueLines(data, (r) => r.number === 5, "sample-user/atlas")), [5]);
+  assert.deepEqual(shape(board.issueLines(off, all, "sample-user/tender")), ["atlas 2/2", 7, 5, "… quiet"], "a solo repo gone: all");
+  assert.deepEqual([null, "sample-user/tender", "Sample-User/Atlas", "sample-user/quiet"].map((c) => board.issueSoloSwitch(data, c).after), ["sample-user/tender", "sample-user/atlas", null, "sample-user/tender"],
+    "the solo repo after each: after the last all, after one not offered the first");
+  assert.deepEqual([board.storedSolo("sample-user/atlas"), board.storedSolo(7), board.storedSolo({ repo: "x" }), board.storedSolo("")], ["sample-user/atlas", null, null, null], "a stored solo repo that is no name is none");
+  assert.deepEqual([board.readsOtherRepos(["sample-user/Quiet"], ["sample-user/quiet"]), board.readsOtherRepos([], ["sample-user/quiet"]), board.readsOtherRepos(["a/b"], [])], [false, true, true]);
+});
+
+test("an Issues tab's solo switch names a repo whose name changed in case only as its first issue does, chooses and counts it by that name and steps past it", () => {
+  const rows = [["a", "sample-user/Atlas"], ["b", "sample-user/atlas"], ["c", "sample-user/tender"]].map(([key, repo]) => ({ key, repo }));
+  const data = { rows, hideRepos: [], readHidden: [], repos: [], owners: { tabOwner: "sample-user", otherOwners: [] } };
+  assert.deepEqual(board.soloRepos(data), ["sample-user/Atlas", "sample-user/tender"]);
+  const solo = board.issueSoloSwitch(data, "sample-user/atlas");
+  assert.deepEqual([solo.choices.map((c) => c.id), solo.chosen, solo.after], [[null, "sample-user/Atlas", "sample-user/tender"], "sample-user/Atlas", "sample-user/tender"]);
+  const count = board.soloCounts(data, (r) => r.key !== "b");
+  assert.deepEqual(solo.choices.map((c) => count(c.id)), [{ held: 3, shown: 2 }, { held: 2, shown: 1 }, { held: 1, shown: 1 }]);
+});
+
+test("an Issues tab's „Repos:“ switches: the repos with issues in the read where their first issue stands, with their counts, then the owner's others turned on, by name, then those turned off and those waiting, without a count", () => {
+  const data = { ...issuesData("open", { hidden: ["sample-user/quiet"] }), hideRepos: ["sample-user/gone"] };
+  const look = (switches) => switches.map((s) => [s.repo, s.name, s.hidden, s.held, s.shown, s.foreign]);
+  assert.deepEqual(look(board.issueSwitches(data, (r) => r.number !== 5)), [
+    ["sample-user/tender", "tender", false, 2, 2, false], ["sample-user/atlas", "atlas", false, 2, 1, false], ["sample-user/quiet", "quiet", false, null, 0, false], ["sample-user/gone", "gone", true, null, 0, false],
+  ]);
+  const read = { ...issuesData("open"), hideRepos: ["sample-org/x"] };
+  assert.deepEqual(look(board.issueSwitches(read, () => true)).map((s) => s.slice(0, 4)), [
+    ["sample-user/tender", "tender", false, 2], ["sample-user/atlas", "atlas", false, 2], ["sample-user/quiet", "quiet", false, 0], ["sample-org/x", "sample-org/x", true, null],
+  ], "a repo of no issues turned on counts none");
+});
+
+test("a closed issue's row has a stripe by why GitHub closed it: violet for completed, grey for not planned, as a duplicate and any other; an open one, reopened too, none", () => {
+  const closed = issuesData("closed");
+  assert.deepEqual(closed.rows.map((r) => [r.number, r.stateReason, board.closedTone(closed, r)]), [[4, "COMPLETED", "ansi5"], [2, "NOT_PLANNED", "muted"], [1, "DUPLICATE", "muted"]]);
+  assert.equal(board.closedTone(closed, { ...closed.rows[0], stateReason: null }), "muted");
+  const open = issuesData();
+  assert.deepEqual(open.rows.map((r) => board.closedTone(open, r)), [null, null, null, null]);
+});
+
+test("an Issues tab's saved state keeps its rows packed, without the ids they share with their key, and their url where it is GitHub's address; it reads back as it was", () => {
+  const data = issuesData();
+  data.rows[1] = { ...data.rows[1], url: "https://example.com/elsewhere" };
+  const saved = board.savedIssues(data);
+  assert.equal(saved.rows, undefined);
+  const traits = saved.packed.traits.map((t) => t.trait);
+  assert.deepEqual([traits.includes("itemId"), traits.includes("contentId"), traits.includes("key")], [false, false, true]);
+  assert.deepEqual(saved.packed.traits.find((t) => t.trait === "url").values, ["https://example.com/elsewhere"]);
+  assert.deepEqual(board.issuesFromSaved(JSON.parse(JSON.stringify(saved))), data);
+});
+
+// The repo menu's rows (R) as drawn, each its texts.
+function repoMenuRows(b) {
+  const rows = [];
+  for (let i = 0; byId(b.render(), `repo-${i}`); i++) rows.push(texts(byId(b.render(), `repo-${i}`)));
+  return rows;
+}
+// Turns the repo `name` off or on in the repo menu (R), which then closes.
+async function toggleInRepoMenu(b, cx, name) {
+  await press(b, cx, "r", { char: "R", modifiers: { shift: true } });
+  const at = repoMenuRows(b).findIndex((r) => r.includes(name));
+  assert.ok(at >= 0, `no ${name} in the repo menu`);
+  await click(b, cx, `repo-${at}`);
+  await press(b, cx, "escape");
+}
+// The repo menu's rows, opened and closed again.
+async function repoMenuNow(b, cx) {
+  await press(b, cx, "r", { char: "R", modifiers: { shift: true } });
+  const rows = repoMenuRows(b);
+  await press(b, cx, "escape");
+  return rows;
+}
+// The Issues tab's field „Repo:“, the name it shows, and the rows its list
+// offers (opened with a click and closed again with Esc), each its texts.
+const soloFieldOf = (b) => byId(b.render(), "solo-repo");
+const soloShown = (b) => texts(soloFieldOf(b))[1];
+async function soloOffered(b, cx) {
+  await click(b, cx, "solo-repo");
+  const rows = listRowsDrawn(b).map(texts);
+  await press(b, cx, "escape");
+  return rows;
+}
+
+test("UI: the Issues tab reads the owner's repos, then its open issues, and draws them grouped by repo: a group row with the repo's name and count, then each issue's key, title, type and labels, milestone, assignees and age; no „Repos:“ line", async () => {
+  const { b, host, st } = await openIssues();
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  const calls = host.calls.filter((c) => c.tool.endsWith("gh"));
+  assert.deepEqual(calls.map((c) => (isReposCall(c.args) ? "repos" : isIssuesCall(c.args) ? qOf(c) : "other")), ["repos", "is:issue user:sample-user archived:false is:open sort:updated-desc"]);
+  assert.deepEqual([b.tabs().map((x) => x.name), b.view().id, st().data.rows.length], [["Mine", "Other", "Issues", "PRs"], OPEN_ISSUES, 4]);
+  assert.deepEqual(issueLineIds(b), ["group-repo:sample-user/tender", "row-I_issue12", "row-I_issue9", "group-repo:sample-user/atlas", "row-I_issue7", "row-I_issue5"]);
+  const rows = issueRows(b);
+  assert.deepEqual([texts(rows[0]), rows[0].with.h[0]], [["tender", "2"], board.ISSUE_GROUP_H]);
+  const row = rows[1];
+  assert.deepEqual(texts(row), ["tender#12", "Export the shelf as CSV", "Bug", "bug", "v1", "Sample User", board.ageLabel("2026-11-26T09:00:00Z", Date.now())]);
+  assert.deepEqual([row.with.h[0], row.with.border_color[0], byId(row, "type-line")?.with.bg[0]], [board.ISSUE_ROW_H, t.accent, board.toneColor(t, board.namedTone(t, "ansi1"))], "selected; its type's line");
+  assert.equal(rows[2].with.border_color[0], t.background, "an open issue keeps the list's look");
+  assert.equal(byId(b.render(), "repo-line"), null, "R chooses the repos");
+  assert.deepEqual(b.hiddenFor(b.view()), new Set(), "no columns hidden");
+});
+
+test("UI: v shows the closed issues, read when they first show; their rows carry the stripe of why GitHub closed them; the hint line names Offen/Geschlossen and the solo switch, the view's choice is kept", async () => {
+  const { b, cx, host } = await openIssues();
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  assert.deepEqual(board.hintsOf(b.situation()).filter(([k]) => ["v", "V"].includes(k)), [["v", "Offen/Geschlossen"], ["V", "Alle/Repo"]]);
+  await press(b, cx, "v");
+  assert.equal(b.view().id, CLOSED_ISSUES);
+  assert.equal(memory.get("issuesView:github:issues:issues"), JSON.stringify("closed"));
+  assert.equal(host.open("gh").some((c) => isReposCall(c.args)), false, "the repos once while the board runs");
+  assert.equal(qOf(host.open("gh")[0]), "is:issue user:sample-user archived:false is:closed sort:updated-desc");
+  await host.answer("gh", ok(fixture("github-issues-closed.json")), isIssuesCall);
+  const stripe = (key) => byId(b.render(), `row-${key}`).with.border_color[0];
+  assert.deepEqual([stripe("I_issue2"), stripe("I_issue1")], [board.toneColor(t, "muted"), board.toneColor(t, "muted")]);
+  await press(b, cx, "j");
+  assert.deepEqual([stripe("I_issue4"), stripe("I_issue1")], [board.toneColor(t, "ansi5"), t.accent], "violet for completed; the selected one the accent");
+});
+
+test("UI: on the Issues tab j/k walk the issues past the group rows, Enter shows the details, a assigns, „nur meine“ and the filter narrow the rows and the groups' counts; the Repos menu lists the issue repos", async () => {
+  const { b, cx, host, st } = await openIssues();
+  assert.equal(st().sel.key, "I_issue12");
+  await press(b, cx, "j");
+  await press(b, cx, "j");
+  assert.equal(st().sel.key, "I_issue7", "past atlas's group row");
+  await press(b, cx, "enter");
+  assert.equal(st().detail, true);
+  assert.ok(host.open("gh").some((c) => isRelatedCall(c.args)), "its related items, as on a project");
+  await press(b, cx, "escape");
+  await press(b, cx, "m");
+  assert.deepEqual(issueLineIds(b), ["group-repo:sample-user/tender", "row-I_issue12"]);
+  assert.deepEqual(texts(issueRows(b)[0]), ["tender", "1/2"]);
+  await press(b, cx, "m");
+  b.filterInput.type("bios");
+  assert.deepEqual(issueLineIds(b), ["group-repo:sample-user/atlas", "row-I_issue7"]);
+  b.filterInput.type("nothing like it");
+  assert.ok(texts(b.render()).includes(board.NOTHING_SHOWS));
+  b.filterInput.type("");
+  await press(b, cx, "r", { char: "R", modifiers: { shift: true } });
+  assert.equal(b.modal?.kind, "repos");
+  const menuTexts = texts(b.render());
+  assert.deepEqual([menuTexts.filter((x) => x === "gezeigt").length, menuTexts.slice(-15).filter((x) => ["tender", "atlas", "quiet"].includes(x))], [3, ["tender", "atlas", "quiet"]], "its three repos, in the line's order");
+  await press(b, cx, "escape");
+  await press(b, cx, "a");
+  assert.equal(b.modal?.kind, "assign", "the assignee picker");
+});
+
+test("UI: a repo turned off in the Issues tab goes at once and is left out of the read that follows; one turned on again gets a group row at the list's end with the spinner until that read brings its issues, and says so where the read fails", async () => {
+  const { b, cx, host, st } = await openIssues();
+  await toggleInRepoMenu(b, cx, "tender");
+  assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { sources: { github: { contexts: { "sample-user": { issues: { hideRepos: ["sample-user/tender"] } } } } } });
+  assert.deepEqual(issueLineIds(b), ["group-repo:sample-user/atlas", "row-I_issue7", "row-I_issue5"], "gone at once");
+  const reads = host.open("gh").filter((c) => isIssuesCall(c.args));
+  assert.deepEqual(reads.map(qOf), ["is:issue user:sample-user archived:false is:open sort:updated-desc -repo:sample-user/tender"], "one read, without it");
+  const without = json("github-issues.json");
+  without.data.search.nodes = without.data.search.nodes.filter((n) => n.repository.nameWithOwner.endsWith("atlas"));
+  await host.answer("gh", ok(JSON.stringify(without)), isIssuesCall);
+  assert.deepEqual(st().data.readHidden, ["sample-user/tender"]);
+  await toggleInRepoMenu(b, cx, "tender");
+  assert.equal(host.open("gh").filter((c) => isIssuesCall(c.args)).length, 1, "read again");
+  const waiting = issueRows(b).at(-1);
+  assert.deepEqual([waiting.with.id[0], texts(waiting), turns(waiting)], ["group-repo:sample-user/tender", ["tender", "", "Lädt …"], true]);
+  assert.deepEqual((await repoMenuNow(b, cx)).map((r) => r.slice(2, 4)), [["atlas", "2"], ["quiet", "0"], ["tender", ""]], "no count while it waits");
+  await host.answer("gh", { code: 1, stdout: "", stderr: "gh: Something went wrong\n" }, isIssuesCall);
+  assert.deepEqual(texts(issueRows(b).at(-1)), ["tender", "", "nicht gelesen – r liest neu"]);
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-issue-repos.json")), isReposCall);
+  await host.answer("gh", ok(fixture("github-issues.json")), isIssuesCall);
+  assert.deepEqual(issueLineIds(b).filter((id) => id.startsWith("group")), ["group-repo:sample-user/tender", "group-repo:sample-user/atlas"], "r reads the repos again too; its issues are in");
+});
+
+test("UI: an Issues tab whose repo is switched while its read runs is read once more after it, and one switch reads no more than that; the closed view, read before, is read again too", async () => {
+  const { b, cx, host } = await openIssues();
+  await press(b, cx, "v");
+  await host.answer("gh", ok(fixture("github-issues-closed.json")), isIssuesCall);
+  await press(b, cx, "v");
+  await toggleInRepoMenu(b, cx, "quiet");
+  const reads = () => host.open("gh").filter((c) => isIssuesCall(c.args)).map(qOf);
+  assert.deepEqual(reads(), [
+    "is:issue user:sample-user archived:false is:open sort:updated-desc -repo:sample-user/quiet", "is:issue user:sample-user archived:false is:closed sort:updated-desc -repo:sample-user/quiet",
+  ]);
+  await toggleInRepoMenu(b, cx, "atlas");
+  assert.equal(reads().length, 2, "the reads under way read with the repos as they were");
+  await host.answer("gh", ok(fixture("github-issues.json")), isIssuesCall);
+  await host.answer("gh", ok(fixture("github-issues-closed.json")), isIssuesCall);
+  assert.deepEqual(reads(), [
+    "is:issue user:sample-user archived:false is:open sort:updated-desc -repo:sample-user/quiet -repo:sample-user/atlas",
+    "is:issue user:sample-user archived:false is:closed sort:updated-desc -repo:sample-user/quiet -repo:sample-user/atlas",
+  ], "each once more, with both");
+  await host.answer("gh", ok(fixture("github-issues.json")), isIssuesCall);
+  await host.answer("gh", ok(fixture("github-issues-closed.json")), isIssuesCall);
+  assert.deepEqual(reads(), [], "and no more");
+});
+
+const shiftV = { char: "V", modifiers: { shift: true } };
+
+test("UI: the field „Repo:“ beside Offen | Geschlossen shows „Alle“ or the repo shown alone; a click opens its list under it, „Alle“ and each repo with issues in the read with its count, the choice marked; ↑ ↓ mark, typing filters, Enter or a click takes one, Esc or a press beside it closes it taking nothing; the hint line says the list's keys while it is open", async () => {
+  const { b, cx, host, st } = await openIssues();
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  const tools = byId(b.render(), "top-bar").kids[1];
+  assert.deepEqual(tools.kids.map((k) => k.with.id?.[0]).filter(Boolean).slice(0, 4), ["tab-view", "choice-solo-list", "mine", "filter"]);
+  const field = soloFieldOf(b);
+  assert.deepEqual([texts(field), field.with.h[0], byId(b.render(), "filter").with.h[0], field.with.w[0], field.with.border_color[0]], [["Repo:", "Alle", "▾"], 32, 32, board.SOLO_W, t.input]);
+  assert.ok(field.kids[1].styles.includes("truncate"), "a long name is cut");
+  await click(b, cx, "solo-repo");
+  assert.equal(b.modal?.kind, "solo");
+  const popup = byId(b.render(), "choice-solo-list");
+  assert.deepEqual([popup.kind, popup.with.anchor, chainTo(popup, hasId("choice-list-rows")) !== null], ["popup", ["top_left"], true], "under the field");
+  assert.deepEqual(listRowsDrawn(b).map(texts), [["Alle", "4"], ["tender", "2"], ["atlas", "2"]]);
+  assert.deepEqual([markedRows(b), soloFieldOf(b).with.border_color[0], b.modal.inputFocused], [["Alle4"], t.accent, true], "the choice marked; the filter has the keyboard");
+  assert.deepEqual(texts(b.hints(t)), [board.LIST_HINT]);
+  b.modal.list.input.type("atl");
+  assert.deepEqual(listRowsDrawn(b).map((k) => texts(k).join("")), ["atlas2"]);
+  pickRow(b, cx);
+  await settle();
+  assert.deepEqual([b.modal, soloShown(b), issueLineIds(b), st().sel.key, st().soloRepo, memory.get(board.soloKey(OPEN_ISSUES))],
+    [null, "atlas", ["row-I_issue7", "row-I_issue5"], "I_issue7", "sample-user/atlas", JSON.stringify("sample-user/atlas")], "atlas alone, without a group row");
+  assert.deepEqual([b.handle.held, soloFieldOf(b).with.w[0]], [true, board.SOLO_W], "the board has the keyboard again; the field as wide");
+  await click(b, cx, "solo-repo");
+  assert.deepEqual(markedRows(b), ["atlas2"], "the repo shown marked");
+  await press(b, cx, "up");
+  await press(b, cx, "up");
+  assert.deepEqual(markedRows(b), ["Alle4"], "↑ up to „Alle“, which keeps the mark");
+  await press(b, cx, "down");
+  assert.deepEqual(markedRows(b), ["tender2"]);
+  await press(b, cx, "escape");
+  assert.deepEqual([b.modal, soloShown(b), st().soloRepo, b.handle.held], [null, "atlas", "sample-user/atlas", true], "Esc takes nothing");
+  assert.notDeepEqual(texts(b.hints(t)), [board.LIST_HINT], "the board's keys again");
+  await click(b, cx, "solo-repo");
+  await click(b, cx, "choice-list-row-0");
+  assert.deepEqual([b.modal, soloShown(b), st().soloRepo, memory.has(board.soloKey(OPEN_ISSUES)), issueLineIds(b).length], [null, "Alle", null, false, 6], "a click on „Alle“: all");
+  await click(b, cx, "solo-repo");
+  const beside = fakeCx();
+  beside.call((own) => byId(b.render(), "choice-list-shield").with.on_mouse_down[1]({}, own));
+  assert.deepEqual([beside.stopped, b.modal, soloShown(b)], [1, null, "Alle"], "a press beside it closes it, taking nothing");
+  await press(b, cx, "m");
+  assert.deepEqual(await soloOffered(b, cx), [["Alle", "1/4"], ["tender", "1/2"], ["atlas", "0/2"]], "the counts „nur meine“ leaves");
+  await press(b, cx, "r", { char: "R", modifiers: { shift: true } });
+  await click(b, cx, "solo-repo");
+  assert.equal(b.modal.kind, "repos", "a click on the field while a dialog is open does nothing");
+  await press(b, cx, "escape");
+  await openStart(b, cx);
+  await openPicker(b, cx);
+  assert.deepEqual([b.modal.kind, byId(b.render(), "choice-solo-list").kids.length], ["start", 1], "another dialog's open list draws under its own field only");
+  assert.deepEqual(texts(b.hints(t)), board.hintsOf(b.situation()).flat(), "and the hint line is the board's, as before");
+});
+
+test("UI: the field „Repo:“ draws no list that another view's dialog opened", async () => {
+  const { b, cx } = await openIssues();
+  board.soloModal.open(b, b.viewById(CLOSED_ISSUES), cx);
+  assert.deepEqual([b.modal.kind, b.modal.list?.choice, byId(b.render(), "choice-solo-list").kids.length], ["solo", "solo", 1]);
+});
+
+test("UI: the field „Repo:“'s list open over a first read's page closes with the data when the read then fails; the board has the keyboard and its hint line again; another view's data gone leaves it open", async () => {
+  const { b, cx, host, st } = await openIssues({ answer: null });
+  const t = copperTheme("dark");
+  host.theme = () => t;
+  const first = json("github-issues.json");
+  first.data.search.pageInfo = { hasNextPage: true, endCursor: "c1" };
+  first.data.search.issueCount = 150;
+  await host.answer("gh", ok(JSON.stringify(first)), isIssuesCall);
+  await click(b, cx, "solo-repo");
+  assert.deepEqual([st().data.partial, b.modal?.kind, b.handle.held], [true, "solo", false]);
+  await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, isIssuesCall);
+  await settle();
+  const r = b.render();
+  assert.deepEqual([st().data, b.modal, byId(r, "solo-repo"), byId(r, "choice-list-shield"), b.handle.held], [null, null, null, null, true]);
+  assert.deepEqual(texts(b.hints(t)), board.hintsOf(b.situation()).flat());
+  await press(b, cx, "r");
+  await host.answer("gh", ok(fixture("github-issue-repos.json")), isReposCall);
+  await host.answer("gh", ok(fixture("github-issues.json")), isIssuesCall);
+  await press(b, cx, "v");
+  const closed = json("github-issues-closed.json");
+  closed.data.search.pageInfo = { hasNextPage: true, endCursor: "c1" };
+  closed.data.search.issueCount = 150;
+  await host.answer("gh", ok(JSON.stringify(closed)), isIssuesCall);
+  assert.equal(b.state(CLOSED_ISSUES).data.partial, true);
+  await press(b, cx, "v");
+  await click(b, cx, "solo-repo");
+  await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, isIssuesCall);
+  await settle();
+  assert.deepEqual([b.state(CLOSED_ISSUES).data, b.modal?.kind, b.modal?.view.id], [null, "solo", OPEN_ISSUES], "another view's data gone: the dialog stays");
+});
+
+test("UI: a failed read that leaves a view no data closes only its dialogs that draw from that data, the repo and column menus, unless busy; the start dialog stays with the message typed", async () => {
+  const fail = { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" };
+  const firstPage = async (host) => {
+    const first = json("github-issues.json");
+    first.data.search.pageInfo = { hasNextPage: true, endCursor: "c1" };
+    first.data.search.issueCount = 150;
+    await host.answer("gh", ok(JSON.stringify(first)), isIssuesCall);
+  };
+  const started = await openIssues({ answer: null });
+  await firstPage(started.host);
+  await openStart(started.b, started.cx);
+  started.b.modal.input.set_value("a long message I typed");
+  const m = started.b.modal;
+  await started.host.answer("gh", fail, isIssuesCall);
+  await settle();
+  assert.deepEqual([started.st().data, started.b.modal === m, m.input.value()], [null, true, "a long message I typed"], "the start dialog stays");
+  for (const busy of [null, "wird gespeichert …"]) {
+    const { b, cx, host, st } = await openIssues({ answer: null });
+    await firstPage(host);
+    await press(b, cx, "r", { char: "R", modifiers: { shift: true } });
+    assert.equal(b.modal?.kind, "repos");
+    b.modal.busy = busy;
+    await host.answer("gh", fail, isIssuesCall);
+    await settle();
+    assert.deepEqual([st().data, b.modal?.kind ?? null], [null, busy ? "repos" : null], busy ? "a busy one stays" : "the repo menu closes");
+  }
+  const { b, cx, host, st } = await bootBoard();
+  await host.answer("gh", ok(JSON.stringify(boardPage(0, 3, "c1"))), isBoardCall);
+  b.openColumns(b.view(), cx);
+  assert.equal(b.modal?.kind, "columns");
+  await host.answer("gh", fail, isBoardCall);
+  assert.deepEqual([st().data, b.modal], [null, null], "the column menu closes");
+});
+
+test("UI: V steps the field „Repo:“ through „Alle“ and each repo, after the last to „Alle“ again, without opening its list; the menu names what it shows next; the choice is the view's, kept in the store", async () => {
+  const { b, cx, host } = await openIssues();
+  const named = () => board.menuActions(b.situation()).find((e) => e.action.id === "solo-repo").name;
+  assert.equal(named(), "Nur tender zeigen");
+  await press(b, cx, "v", shiftV);
+  assert.deepEqual([b.modal, soloShown(b), issueLineIds(b)], [null, "tender", ["row-I_issue12", "row-I_issue9"]]);
+  await press(b, cx, "v", shiftV);
+  assert.deepEqual([soloShown(b), named()], ["atlas", "Alle Repos zeigen"]);
+  await press(b, cx, "v", shiftV);
+  assert.deepEqual([soloShown(b), memory.has(board.soloKey(OPEN_ISSUES)), issueLineIds(b).length], ["Alle", false, 6], "after the last: all");
+  await press(b, cx, "v", shiftV);
+  await press(b, cx, "m");
+  assert.deepEqual(issueLineIds(b), ["row-I_issue12"], "„nur meine“ on top");
+  await press(b, cx, "m");
+  await press(b, cx, "v");
+  await host.answer("gh", ok(fixture("github-issues-closed.json")), isIssuesCall);
+  assert.deepEqual([soloShown(b), b.state(CLOSED_ISSUES).soloRepo], ["Alle", null], "the closed view has its own");
+  const again = await openIssues({ stored: { [board.soloKey(OPEN_ISSUES)]: "sample-user/atlas" } });
+  assert.deepEqual([issueLineIds(again.b), soloShown(again.b)], [["row-I_issue7", "row-I_issue5"], "atlas"], "after a restart too");
+  const odd = await openIssues({ stored: { [board.soloKey(OPEN_ISSUES)]: 7 } });
+  assert.deepEqual([issueLineIds(odd.b).length, odd.st().soloRepo], [6, null], "a stored value that names no repo: all");
+});
+
+test("UI: a solo repo turned off with R falls back to „Alle“, and so does one the next read finds no issues in, which the store then forgets", async () => {
+  const { b, cx, host, st } = await openIssues({ stored: { [board.soloKey(OPEN_ISSUES)]: "sample-user/atlas" } });
+  assert.equal(soloShown(b), "atlas");
+  await toggleInRepoMenu(b, cx, "atlas");
+  assert.deepEqual([(await soloOffered(b, cx)).map((r) => r[0]), soloShown(b)], [["Alle", "tender"], "Alle"], "not offered while it is off");
+  assert.deepEqual(issueLineIds(b), ["group-repo:sample-user/tender", "row-I_issue12", "row-I_issue9"]);
+  const without = json("github-issues.json");
+  without.data.search.nodes = without.data.search.nodes.filter((n) => n.repository.nameWithOwner.endsWith("tender"));
+  await host.answer("gh", ok(JSON.stringify(without)), isIssuesCall);
+  assert.deepEqual([st().soloRepo, memory.has(board.soloKey(OPEN_ISSUES))], [null, false]);
+  await toggleInRepoMenu(b, cx, "atlas");
+  await host.answer("gh", ok(fixture("github-issues.json")), isIssuesCall);
+  assert.equal(issueLineIds(b).length, 6, "turned on again: all, not the repo chosen before");
+});
+
+test("UI: the Issues tab draws each page of its search as it comes, the spinner turning and „lädt … Seite 2 von 3“ above, the note on a cut list after the last; a closed or open view without issues says so", async () => {
+  const config = issuesConfig({ id: "issues", limit: 250 });
+  const { b, host, st } = await openIssues({ config, answer: null });
+  const page = (from, to, next) => {
+    const nodes = Array.from({ length: to - from }, (_, k) => ({ ...json("github-issues.json").data.search.nodes[0], id: `I_page${from + k}`, number: 100 + from + k }));
+    return { data: { viewer: { login: "sample-user" }, search: { issueCount: 300, pageInfo: { hasNextPage: true, endCursor: next }, nodes } } };
+  };
+  assert.match(host.open("gh")[0].args.join(" "), /first=100/);
+  await host.answer("gh", ok(JSON.stringify(page(0, 100, "c1"))), isIssuesCall);
+  assert.deepEqual([st().data.rows.length, st().data.partial, readingOf(b.render()), refreshSpins(b.render())], [100, true, "lädt … Seite 2 von 3", true]);
+  assert.ok(host.open("gh")[0].args.includes("after=c1"));
+  await host.answer("gh", ok(JSON.stringify(page(100, 200, "c2"))), isIssuesCall);
+  assert.match(host.open("gh")[0].args.join(" "), /first=50/);
+  assert.equal(texts(b.render()).some((x) => x.startsWith("Nur die ersten")), false, "not while it reads");
+  await host.answer("gh", ok(JSON.stringify(page(200, 250, "c3"))), isIssuesCall);
+  assert.deepEqual([host.open("gh").length, st().data.rows.length], [0, 250], "the calls of its limit used up");
+  assert.ok(texts(b.render()).includes("Nur die ersten 250 von 300 Issues"));
+  const none = await openIssues({ answer: JSON.stringify({ data: { viewer: { login: "sample-user" }, search: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] } } }) });
+  assert.ok(texts(none.b.render()).includes("Keine offenen Issues"));
+  assert.deepEqual(await soloOffered(none.b, none.cx), [["Alle", "0"]], "the field offers „Alle“ alone");
+  await press(none.b, none.cx, "v");
+  await none.host.answer("gh", ok(JSON.stringify({ data: { viewer: { login: "sample-user" }, search: { issueCount: 0, pageInfo: { hasNextPage: false }, nodes: [] } } })), isIssuesCall);
+  assert.ok(texts(none.b.render()).includes("Keine geschlossenen Issues"));
+});
+
+test("UI: an Issues tab whose answer lacks its search says why by GitHub's error at it", async () => {
+  const { host, st } = await openIssues({ answer: null });
+  const lacking = { data: { viewer: { login: "sample-user" }, search: null }, errors: [{ type: "SERVICE_UNAVAILABLE", message: "Something went wrong", path: ["search"] }] };
+  await host.answer("gh", { code: 1, stdout: JSON.stringify(lacking), stderr: "gh: Something went wrong" }, isIssuesCall);
+  assert.equal(st().error, "Die Suche nach Issues: Something went wrong");
+});
+
+test("UI: the Issues tab's saved state draws at once after a restart, with its age, and the read replaces it", async () => {
+  const at = realNow() - MIN;
+  const view = issuesView();
+  const data = issuesData();
+  data.rows[0].title = "Gespeicherter Titel";
+  const saved = board.savedText(view, new Set(), { data: board.savedIssues(data), warnings: [] }, at);
+  const { b, host, st } = await openIssues({ answer: null, raw: { [board.savedKey(OPEN_ISSUES)]: saved } });
+  assert.deepEqual([st().saved, texts(byId(b.render(), "row-I_issue12"))[1], ageOf(b.render())], [true, "Gespeicherter Titel", "Stand vor 1 min"]);
+  await host.answer("gh", ok(fixture("github-issues.json")), isIssuesCall);
+  assert.deepEqual([st().saved, texts(byId(b.render(), "row-I_issue12"))[1]], [false, "Export the shelf as CSV"]);
+  assert.deepEqual(board.SHAPES.issues.fromSaved(JSON.parse(memory.get(board.savedKey(OPEN_ISSUES))).data).rows.length, 4, "the read is saved");
+});
+
+// GitHub's answer for `n` open issues in five repos, each with labels, an
+// assignee, a milestone and an issue type.
+function largeIssuesAnswer(n) {
+  const base = json("github-issues.json").data.search.nodes[0];
+  const nodes = Array.from({ length: n }, (_, i) => ({
+    ...base, id: `I_large${i}`, number: i + 1, title: `Sample issue ${i}`, repository: { nameWithOwner: `sample-user/repo${i % 5}` },
+    labels: { nodes: [{ name: `area-${i % 7}`, color: ["d73a4a", "0075ca", "a2eeef"][i % 3] }, { name: "triage", color: "ededed" }] },
+  }));
+  return JSON.stringify({ data: { viewer: { login: "sample-user" }, search: { issueCount: n, pageInfo: { hasNextPage: false }, nodes } } });
+}
+const issuesHandle = (b) => b.shapeState.issues.scroll;
+
+test("UI: an Issues tab of 1000 issues draws whole only the lines about where its ScrollHandle says the list stands, half a window above and below, every other line an empty frame of its height; a full draw makes 1000 to 2000 elements and converts 6 to 100 colors, in copper-dark and catppuccin-mocha", async () => {
+  const config = issuesConfig({ id: "issues" });
+  const { b, host, st } = await openIssues({ config, answer: null });
+  const at = await (async () => {
+    const answer = JSON.parse(largeIssuesAnswer(100));
+    answer.data.search.pageInfo = { hasNextPage: true, endCursor: "c1" };
+    await host.answer("gh", ok(JSON.stringify(answer)), isIssuesCall);
+    for (let p = 1; p < 10; p++) {
+      const next = JSON.parse(largeIssuesAnswer(1000));
+      next.data.search.nodes = next.data.search.nodes.slice(p * 100, p * 100 + 100);
+      next.data.search.pageInfo = { hasNextPage: p < 9, endCursor: `c${p + 1}` };
+      await host.answer("gh", ok(JSON.stringify(next)), isIssuesCall);
+    }
+    return st().data.rows.length;
+  })();
+  assert.equal(at, 1000);
+  Object.assign(issuesHandle(b), { width: 1200, height: 900 });
+  const whole = (list) => list.kids.flatMap((k, i) => (k.with.id ? [i] : []));
+  let list = byId(b.render(), "issue-rows");
+  assert.equal(list.kids.length, 1005, "five group rows");
+  const drawn = whole(list);
+  assert.ok(drawn[0] === 0 && drawn.length >= 40 && drawn.length <= 60, `${drawn.length} lines whole at the top`);
+  assert.deepEqual([list.kids[600].kids, list.kids[600].with.h[0], list.kids[600].with.id], [[], board.ISSUE_ROW_H, undefined]);
+  issuesHandle(b).y = 17000;
+  list = byId(b.render(), "issue-rows");
+  assert.ok(!list.kids[0].with.id && list.kids[500].with.id, "scrolled: the band moved");
+  b.filterInput.type("nothing like it");
+  issuesHandle(b).y = 0;
+  b.render();
+  assert.equal(b.shape(b.view()).bandsLeft(b), false, "a list filtered to nothing places its band too, so it asks for no draw");
+  b.filterInput.type("");
+  b.render();
+  for (const [name, t] of [["copper-dark", copperTheme("dark")], ["catppuccin-mocha", catppuccinTheme()]]) {
+    host.theme = () => ({ ...t });
+    for (const draw of [1, 2]) {
+      const cost = drawCost(b, host);
+      assert.ok(cost.conversions >= 6 && cost.conversions <= 100, `${name}, draw ${draw}: ${cost.conversions} conversions`);
+      assert.ok(cost.elements >= 1000 && cost.elements <= 2000, `${name}, draw ${draw}: ${cost.elements} elements`);
+    }
+  }
+});
+
+test("UI: an Issues tab reads the owner's repos page after page, from the cursor of the one before, and an organisation's search names it by org:", async () => {
+  const { b, cx, host } = await bootBoard({ config: issuesConfig(), stored: { context: GITHUB_CONTEXT, [`tab:${GITHUB_CONTEXT}`]: ISSUES_TAB } });
+  const st = () => b.state(OPEN_ISSUES);
+  const first = json("github-issue-repos.json");
+  Object.assign(first.data.repositoryOwner, { __typename: "Organization" });
+  first.data.repositoryOwner.repositories.pageInfo = { hasNextPage: true, endCursor: "r1" };
+  await host.answer("gh", ok(JSON.stringify(first)), isReposCall);
+  const second = host.open("gh");
+  assert.deepEqual([second.length, isReposCall(second[0].args), second[0].args.includes("after=r1")], [1, true, true]);
+  const more = json("github-issue-repos.json");
+  more.data.repositoryOwner.__typename = "Organization";
+  more.data.repositoryOwner.repositories.nodes = [{ nameWithOwner: "sample-user/zebra" }];
+  await host.answer("gh", ok(JSON.stringify(more)), isReposCall);
+  assert.equal(qOf(host.open("gh")[0]), "is:issue org:sample-user archived:false is:open sort:updated-desc");
+  await host.answer("gh", ok(fixture("github-issues.json")), isIssuesCall);
+  assert.deepEqual(st().data.repos, ["sample-user/atlas", "sample-user/quiet", "sample-user/tender", "sample-user/zebra"]);
+  assert.ok((await repoMenuNow(b, cx)).some((r) => r.includes("zebra")));
+});
+
+test("UI: an Issues tab makes at most as many calls as full pages of its limit take, also where GitHub sends shorter pages; where that cuts them, it says how many it read", async () => {
+  const { b, host, st } = await openIssues({ config: issuesConfig({ id: "issues", limit: 150 }), answer: null });
+  const page = (from, next) => {
+    const nodes = Array.from({ length: 60 }, (_, k) => ({ ...json("github-issues.json").data.search.nodes[0], id: `I_short${from + k}`, number: 200 + from + k }));
+    return JSON.stringify({ data: { viewer: { login: "sample-user" }, search: { issueCount: 300, pageInfo: { hasNextPage: true, endCursor: next }, nodes } } });
+  };
+  await host.answer("gh", ok(page(0, "c1")), isIssuesCall);
+  await host.answer("gh", ok(page(60, "c2")), isIssuesCall);
+  assert.deepEqual([host.open("gh").length, st().data.rows.length, st().loading], [0, 120, false], "two calls for 150, though GitHub has more");
+  assert.ok(texts(b.render()).includes("Nur die ersten 120 von 300 Issues"));
+});
+
+test("UI: an Issues tab keeps the solo repo of the store while its pages come and that repo is not among them yet, and shows it alone once its issues come", async () => {
+  const { b, host, st } = await openIssues({ config: issuesConfig({ id: "issues", limit: 200 }), answer: null, stored: { [board.soloKey(OPEN_ISSUES)]: "sample-user/atlas" } });
+  const nodes = json("github-issues.json").data.search.nodes;
+  const page = (repo, next) => JSON.stringify({ data: { viewer: { login: "sample-user" }, search: { issueCount: 4, pageInfo: { hasNextPage: Boolean(next), endCursor: next }, nodes: nodes.filter((n) => n.repository.nameWithOwner.endsWith(repo)) } } });
+  await host.answer("gh", ok(page("tender", "c1")), isIssuesCall);
+  assert.deepEqual([st().data.partial, st().soloRepo, memory.get(board.soloKey(OPEN_ISSUES))], [true, "sample-user/atlas", JSON.stringify("sample-user/atlas")], "kept while pages come");
+  await host.answer("gh", ok(page("atlas", null)), isIssuesCall);
+  assert.deepEqual([issueLineIds(b), st().soloRepo], [["row-I_issue7", "row-I_issue5"], "sample-user/atlas"], "its issues alone, no group row");
+});
+
+test("UI: the Issues tab's repo menu shows no count for a repo turned off or one that waits for the next read", async () => {
+  const { b, cx, host } = await openIssues({ config: issuesConfig({ id: "issues", hideRepos: ["sample-user/quiet"] }) });
+  await toggleInRepoMenu(b, cx, "quiet");
+  await toggleInRepoMenu(b, cx, "atlas");
+  assert.equal(host.open("gh").filter((c) => isIssuesCall(c.args)).length, 1, "quiet waits for this read");
+  await press(b, cx, "r", { char: "R", modifiers: { shift: true } });
+  const row = (i) => texts(byId(b.render(), `repo-${i}`));
+  assert.deepEqual([0, 1, 2].map(row), [["1", "✓", "tender", "2", "gezeigt"], ["2", "✓", "quiet", "", "gezeigt"], ["3", "", "atlas", "", "ausgeblendet"]]);
+});
+
+test("UI: an Issues tab's row shows its issue's session, and Enter twice goes to it; on an issue without one, Enter twice opens the start dialog with the tab's own start message", async () => {
+  const start = { message: "/fix {number}" };
+  const { b, cx, host, st } = await openIssues({ config: issuesConfig({ id: "issues", start }) });
+  assert.deepEqual(board.viewOf(b.tab(), "open").start, start, "the view starts as its tab says");
+  host.spaceList = [...host.spaceList, { ...sessionSpace, id: "s6", tabs: [{ id: "t6", name: "tender#9 Mark a shelf read", status: "working" }] }];
+  assert.ok(texts(byId(b.render(), "row-I_issue9")).includes(board.AGENT_STATUS.working));
+  await openStart(b, cx);
+  assert.equal(b.modal.input.value(), "/fix 12");
+  await press(b, cx, "escape");
+  await press(b, cx, "escape");
+  await press(b, cx, "j");
+  assert.equal(st().sel.key, "I_issue9");
+  await press(b, cx, "enter");
+  await press(b, cx, "enter");
+  assert.deepEqual(host.runs.slice(-2), [["space.select", { id: "s6" }], ["tab.select", { id: "t6" }]]);
+});
+
+test("UI: a on an Issues tab's row assigns at once, gh's answer settles it, and where it leaves that open the read after it says who the issue has", async () => {
+  const { b, cx, host, st } = await openIssues();
+  await press(b, cx, "a");
+  await host.answer("gh", ok(fixture("github-assignable.json")), isAssignableCall);
+  b.modal.input.type("robin");
+  await submitPicker(b, cx);
+  const row = () => board.findRow(st().data, "I_issue12");
+  assert.deepEqual([row().assignees, st().pending.I_issue12], [["Robin Example"], true], "at once");
+  await host.answer("gh", assignedAnswer("updateIssue", "issue", "I_issue12", [["robin-example", "Robin Example"]]), isAssignCall);
+  assert.deepEqual([row().assigneeLogins, b.notice.text], [["robin-example"], "tender#12 ist jetzt Robin Example zugewiesen"]);
+  await press(b, cx, "a");
+  await press(b, cx, "down");
+  await submitPicker(b, cx);
+  await host.answer("gh", ok('{"data": {"updateIssue": null}}'), isAssignCall);
+  assert.equal(b.notice.text, "tender#12 → niemand: Ergebnis unklar: GitHub hat die Zuweisung nicht bestätigt; lädt neu");
+  await host.answer("gh", ok(fixture("github-issues.json")), isIssuesCall);
+  assert.equal(b.notice.text, "tender#12 ist nach dem Neuladen Sample User zugewiesen, nicht niemandem");
 });

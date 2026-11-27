@@ -1,0 +1,24 @@
+{
+  "data": {
+    "repositoryOwner": {
+      "__typename": "User",
+      "repositories": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": "Y3Vyc29yOjM="
+        },
+        "nodes": [
+          {
+            "nameWithOwner": "sample-user/atlas"
+          },
+          {
+            "nameWithOwner": "sample-user/quiet"
+          },
+          {
+            "nameWithOwner": "sample-user/tender"
+          }
+        ]
+      }
+    }
+  }
+}

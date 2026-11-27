@@ -8,12 +8,16 @@ import { AGENT_STATUS, placed } from "../sessions.js";
 import { layers } from "./layer.js";
 import { NOTE_TONES, chipBg, headBg, hueTone, namedTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
 import { stateColor } from "../kinds/states.js";
+import { repoHidePath } from "../config.js";
+import { toggledRepos } from "../kinds/list.js";
 
 // What lasts across reloads beside this machine's settings (settings.js):
 // the shown context ("context"), each context's tab ("tab:<context>"),
 // each team's view ("teamView:<tab>"), each GitHub project's view
 // ("projectView:<tab>") and what the board knows of the project
-// ("project:<tab>", Board.learnProject), "nur meine" ("mine"), a Sprint's
+// ("project:<tab>", Board.learnProject), each Issues tab's view
+// ("issuesView:<tab>") and each of its views' solo repo
+// ("soloRepo:<view>", kinds/issues.js), "nur meine" ("mine"), a Sprint's
 // folded stories ("folded:<view>", readStoredFolds), the repo a
 // view's work item last started in ("repo:<view>", ui/modals/start.js) and
 // each view's last good data ("board:data:<view>", loading.js). A full or
@@ -558,6 +562,32 @@ export const toggleSwitch = (b, t, id, on, toggle) =>
     .on_click((_e, cx) => {
       if (!b.modal) toggle(cx);
     });
+
+// The „Repos:“ line of a PR tab: its shape's repoSwitches for
+// the data, a repo's count where it has one (held); null for none.
+export function repoLine(b, t, view, data) {
+  const switches = b.shape(view).repoSwitches(b, data);
+  if (!switches.length) return null;
+  return h_flex().id("repo-line").flex_none().flex_wrap().gap(6).px(16).pt(10).pb(2).items_center().text_size(12)
+    .child(div().text_color(t.muted).child("Repos:"))
+    .children(switches.map((e) =>
+      toggleSwitch(b, t, `repo-switch-${e.repo}`, !e.hidden, (cx) => b.toggleRepo(view, e.repo, cx))
+        .child(`${e.hidden ? "" : "✓ "}${e.name}`)
+        .when(e.held !== null, (el) => el.child(div().text_color(t.muted).child(shownOf(e.shown, e.held))))
+        .when(e.foreign, (el) => el.child(foreignChip(t)))));
+}
+
+// The note below a list its limit cut, `text`, once the read is whole;
+// null for none.
+export const limitNote = (t, data, text) =>
+  (data.limited && !data.partial ? div().px(16).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(text) : null);
+
+// A repo turned off or on in the settings of the view as views.json has it
+// now (a shape's toggleRepo).
+export function toggleRepoSetting(b, view, repo, cx) {
+  const now = b.viewById(view.id) ?? view;
+  b.changeSetting(repoHidePath(now), toggledRepos(now.hideRepos, repo), cx);
+}
 
 // A card's chip for its label `name`, in the label's color brought onto the
 // theme (hueTone).

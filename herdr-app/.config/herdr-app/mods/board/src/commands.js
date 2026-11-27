@@ -160,6 +160,11 @@ const contextAt = (c) => shownIndex(contextsNow(c), c.b.context());
 
 const nextView = (c) => tabViewAfter(c.b.tab(), c.b.tabViewOf(c.b.tab()));
 
+function soloName(c) {
+  const { choices, after } = c.shape.soloSwitch(c.b, c.st);
+  return after === null ? "Alle Repos zeigen" : `Nur ${choices.find((x) => x.id === after).label} zeigen`;
+}
+
 // Whether the shown view has items to move over (none: the placeholder).
 const walks = (c) => Boolean(c.shape?.dirs.length);
 // Whether an item is selected and no line of the details panel, which
@@ -279,6 +284,12 @@ export const ACTIONS = [
     when: (c) => Boolean(c.view) && hasViewSwitch(c.b.tab()), takes: () => true,
     run: (b, c, cx) => b.nextTabView(cx),
     hint: (c) => (hasViewSwitch(c.b.tab()) ? viewSwitchHint(c.b.tab()) : null),
+  },
+  {
+    id: "solo-repo", group: "view", name: (c) => soloName(c), key: "V", menu: 25, bar: true,
+    when: (c) => has(c, "soloSwitch"),
+    run: (b, c, cx) => b.nextSoloRepo(cx),
+    hint: (c) => (has(c, "soloSwitch") && hasViewSwitch(c.b.tab()) ? "Alle/Repo" : null),
   },
   moveAction("move-left", "H", -1, "Nach links verschieben"),
   moveAction("move-right", "L", 1, "Nach rechts verschieben"),

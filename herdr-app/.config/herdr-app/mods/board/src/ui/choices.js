@@ -1,13 +1,15 @@
 // A dialog's choice fields (the start dialog's Agent, Rechner and Öffnen
-// in, the create dialog's Typ), from a table of the dialog's, by field: {
-// entries(m), each { id, name } (and a space's `folder`); current(m), the
-// id of the entry the field is on; value(m), the text the field shows;
-// take(b, row, cx), which puts the field on that entry; fieldAfter(row),
-// the field the dialog goes on to once the list took `row` (by default it
-// stays); the list's placeholder, none (said where the filter leaves no
-// row), empty(m) (said instead where no filter is typed), notes(m) (said
-// under the rows), width and anchor }. The open list is the dialog's
-// m.list.
+// in, the create dialog's Typ; the Issues tab's field „Repo:“ opens its list
+// as a dialog of its own, ui/modals/solo.js), from a table of the dialog's,
+// by field: { entries(m), each { id, name, aside (the texts at its right:
+// a space's folder, a repo's count) }; current(m), the id of the entry the
+// field is on; value(m), the text the field shows; take(b, row, cx), which
+// puts the field on that entry; fieldAfter(row), the field the dialog goes
+// on to once the list took `row` (by default it stays); closes (the dialog
+// ends once the list took a row or a press beside it closed it); the
+// list's placeholder, none (said where the filter leaves no row), empty(m)
+// (said instead where no filter is typed), notes(m) (said under the rows),
+// width and anchor }. The open list is the dialog's m.list.
 
 import { div } from "gpui-kit";
 import { h_flex, Popup } from "gpui-base";
@@ -32,10 +34,13 @@ export function choiceBox(b, t, choices, field) {
     })
     .child(div().flex_1().min_w(0).truncate().child(choices[field].value(m)))
     .child(div().text_color(t.dim).child("▾"));
-  return Popup.new(`choice-${field}-list`, fieldFrame(t, m, field, trigger))
-    .anchor(choices[field].anchor)
-    .when(m.list?.choice === field, (el) => el.content(listPanel(b, t)));
+  return listPopup(b, t, field, choices[field].anchor, fieldFrame(t, m, field, trigger));
 }
+
+// The frame of the choice `field`, its list under it while that list is
+// open and `here` (the open dialog is the field's own).
+export const listPopup = (b, t, field, anchor, frame, here = true) =>
+  Popup.new(`choice-${field}-list`, frame).anchor(anchor).when(here && b.modal?.list?.choice === field, (el) => el.content(listPanel(b, t)));
 
 export function choiceKey(b, choices, k, cx) {
   const field = b.modal.field;
@@ -59,18 +64,18 @@ function step(b, spec, by, cx) {
   cx.notify();
 }
 
-function openList(b, choices, field, cx) {
+export function openList(b, choices, field, cx) {
   const m = b.modal;
   const spec = choices[field];
   if (m.busy || !spec) return;
-  const list = { choice: field, spec, field: "filter", mark: null };
+  const list = { choice: field, spec, field: "filter", mark: NOT_MOVED };
   m.field = field;
   m.list = list;
   wireFilter(m, list, {
     placeholder: spec.placeholder,
     count: () => listRows(m).length,
     startAt: () => {
-      list.mark = null;
+      list.mark = NOT_MOVED;
       return markedAt(m, listRows(m));
     },
     pick: (_at, cx) => {
@@ -97,9 +102,13 @@ export const listKeyboard = (m) => m.list?.input ?? null;
 
 const listRows = (m) => rankByName(m.list.spec.entries(m), m.list.filter);
 
+// The list's mark (the id of the entry ↑ ↓ moved to) before they move it:
+// an entry's id may be null („Alle“ of the field „Repo:“).
+const NOT_MOVED = undefined;
+
 function markedAt(m, rows) {
   const { list } = m;
-  const moved = list.mark === null ? -1 : rows.findIndex((r) => r.id === list.mark);
+  const moved = list.mark === NOT_MOVED ? -1 : rows.findIndex((r) => r.id === list.mark);
   if (moved >= 0) return moved;
   if (!rows.length) return -1;
   if (list.filter) return 0;
@@ -127,7 +136,9 @@ export function listKey(b, e, cx) {
     cx.stop_propagation();
     return takeRow(b, rows[list.at], cx);
   }
-  if (filterMenuKey(e, cx, list, rows.length)) list.mark = rows[list.at]?.id ?? null;
+  if (!filterMenuKey(e, cx, list, rows.length)) return;
+  const row = rows[list.at];
+  list.mark = row ? row.id : NOT_MOVED;
 }
 
 function takeRow(b, row, cx) {
@@ -136,6 +147,7 @@ function takeRow(b, row, cx) {
   const { spec, choice } = m.list;
   m.list = null;
   spec.take(b, row, cx);
+  if (spec.closes) return b.closeModal(cx);
   m.field = spec.fieldAfter?.(row) ?? choice;
   b.takeKeyboard();
   cx.notify();
@@ -160,7 +172,7 @@ function listPanel(b, t) {
       digits: false,
       rows: shown.map((r) => [
         markedName(t, r.name, r.at),
-        ...(r.folder ? [div().flex_none().max_w(160).truncate().text_size(11).text_color(t.dim).child(r.folder)] : []),
+        ...(r.aside ?? []).filter(Boolean).map((text) => div().flex_none().max_w(160).truncate().text_size(11).text_color(t.dim).child(text)),
       ]),
       ...win,
       pick: (i, cx) => takeRow(b, rows[i], cx),
@@ -171,10 +183,14 @@ function listPanel(b, t) {
     }));
 }
 
+// A press beside the open list closes it.
 export const listShield = (b) =>
   b.modal.list
     ? div().id("choice-list-shield").absolute().inset_0().on_mouse_down("left", (_e, cx) => {
       cx.stop_propagation();
-      closeList(b, cx);
+      const spec = b.modal?.list?.spec;
+      if (!spec) return;
+      if (spec.closes) b.closeModal(cx);
+      else closeList(b, cx);
     })
     : null;

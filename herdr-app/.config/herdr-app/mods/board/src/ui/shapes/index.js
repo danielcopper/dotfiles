@@ -27,18 +27,24 @@
 // unclear writes of its items ended up), withView (data, view: the data as
 // the view's settings show it now, the same data where they change nothing
 // for it), toggleRepo (b, view, repo, cx: turns a repo off or on, beside the
-// repo menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu with
-// statusField (b, view: the name of what the status menu sets, where it is
-// not the status; null for none), navigate (its own keyboard movement in
-// place of navigate's, select.js), sideways (b, view, by: h/l and the left
-// and right arrows where its dirs leave them out, its view scrolled sideways
-// one step; by = 1 for l/→, -1 for h/←), pickStatus (what a pick in the
-// status menu does in place of a move to that column), and assign (how its
-// items' assignees are found and changed: { find(data, key), withItem(data,
-// key, patch) (the data with the item's fields set), where (where an item no
-// longer is: "im Sprint") }; a shape that has it takes a, the assignee
-// picker, ui/modals/assign.js, and its settle says the outcomes of unclear
-// assignments, unclearAssignLines).
+// repo menu, ui/modals/repos.js, and a PR tab's „Repos:“ line, ui/helpers.js
+// repoLine, which list its repoSwitches (b, data)), readsAgain (st, view:
+// whether the view's settings now leave other repos out of its query than
+// its data or the read under way did, which reads it again), soloSwitch
+// (b, st: { choices ({ id, label }), chosen, after: the choice V picks },
+// the field „Repo:“ beside the view switch and its list, ui/modals/solo.js,
+// Board.setSoloRepo), moveTo, toggleColumn,
+// openStatusMenu with statusField (b, view: the name of what the status menu
+// sets, where it is not the status; null for none), navigate (its own
+// keyboard movement in place of navigate's, select.js), sideways (b, view,
+// by: h/l and the left and right arrows where its dirs leave them out, its
+// view scrolled sideways one step; by = 1 for l/→, -1 for h/←), pickStatus
+// (what a pick in the status menu does in place of a move to that column),
+// and assign (how its items' assignees are found and changed: { find(data,
+// key), withItem(data, key, patch) (the data with the item's fields set),
+// where (where an item no longer is: "im Sprint") }; a shape that has it
+// takes a, the assignee picker, ui/modals/assign.js, and its settle says the
+// outcomes of unclear assignments, unclearAssignLines).
 // A shape keeps its own state per Board in b.shapeState[name], which its
 // state() makes once, when the Board starts: herdr refuses a ScrollHandle
 // made while a view draws ("cannot run during render"). A new way to draw
@@ -46,9 +52,10 @@
 
 import { backlogShape } from "./backlog.js";
 import { boardShape } from "./board.js";
+import { issuesShape } from "./issues.js";
 import { placeholderShape } from "./placeholder.js";
 import { prsShape } from "./prs.js";
 import { sprintShape } from "./sprint.js";
 import { tableShape } from "./table.js";
 
-export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, table: tableShape, placeholder: placeholderShape };
+export const SHAPES = { board: boardShape, issues: issuesShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, table: tableShape, placeholder: placeholderShape };

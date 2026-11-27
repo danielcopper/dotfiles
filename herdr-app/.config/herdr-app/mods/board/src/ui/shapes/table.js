@@ -2,16 +2,15 @@
 // id and name.
 
 import { div } from "gpui-kit";
-import { h_flex, v_flex, ScrollHandle } from "gpui-base";
+import { h_flex, v_flex } from "gpui-base";
 import { NOTHING_SHOWS, cardLabel, dayText, findRow, noItemsText } from "../../shared.js";
 import { savedTable, tableFromSaved, tableLines, tableNav, tableValue, tableWarnings, withTableRow } from "../../kinds/table.js";
 import { itemSessions } from "../../sessions.js";
 import { tellOutcomes } from "../../actions/write.js";
 import { unclearAssignLines } from "../../actions/assign.js";
 import { clampOffset, spanStarts, thumbOf } from "../../scroll.js";
-import { bandState, inBand, leftBand, placeBand, readsScroll, revealCard, scrollOf } from "../band.js";
-import { ROW_BORDER, ROW_GAP, ROW_PAD, groupHead, labelChip, listRow, sessionChip, shownOf, sideMove, thumbLook, toneChip, typeChip, typeLine, unzoomed } from "../helpers.js";
-import { NOTE_TONES, toneColor } from "../tones.js";
+import { linesLeftBand, scrollToLine, windowedLines, windowedState } from "../band.js";
+import { ROW_BORDER, ROW_GAP, ROW_PAD, groupHead, labelChip, limitNote, listRow, sessionChip, shownOf, sideMove, thumbLook, toneChip, typeChip, typeLine, unzoomed } from "../helpers.js";
 
 const tableState = (b) => b.shapeState.table;
 
@@ -81,28 +80,15 @@ const linesOf = (b, data) => tableLines(data, visibleIn(b, data));
 const lineHeight = (line) => (line.row ? TABLE_ROW_H : TABLE_GROUP_H);
 
 export const tableShape = {
-  state() {
-    const scroll = ScrollHandle.new();
-    return { scroll, band: bandState(), windowed: readsScroll(scroll), width: 0, stripAt: new Map() };
-  },
+  state: () => ({ ...windowedState(), width: 0, stripAt: new Map() }),
   nav: (b, st) => tableNav(st.data, visibleIn(b, st.data)),
   selected: (b, st) => tableNav(st.data, visibleIn(b, st.data))[0].shown.find((r) => r.key === st.sel?.key) ?? null,
   scrollTo(b, view, sel) {
-    const st = b.state(view.id);
-    const s = tableState(b);
-    const lines = linesOf(b, st.data);
+    const lines = linesOf(b, b.state(view.id).data);
     const at = lines.findIndex((l) => l.row?.key === sel.key);
-    if (at < 0) return;
-    if (s.windowed) {
-      const { starts, content } = spanStarts(lines.map(lineHeight), 0);
-      revealCard(s.band, scrollOf(s.scroll), content, starts[at], lineHeight(lines[at]));
-    }
-    s.scroll.scroll_to_item(at);
+    if (at >= 0) scrollToLine(tableState(b), lines.map(lineHeight), at);
   },
-  bandsLeft(b) {
-    const s = tableState(b);
-    return s.windowed && leftBand(s.band, scrollOf(s.scroll));
-  },
+  bandsLeft: (b) => linesLeftBand(tableState(b)),
   items: (data) => data.rows,
   count: (b, data) => ({ shown: data.rows.filter(visibleIn(b, data)).length, total: data.rows.length }),
   render: (b, t, mono, view, st) => drawTable(b, t, mono, view, st),
@@ -152,10 +138,6 @@ function drawTable(b, t, mono, view, st) {
   const s = tableState(b);
   const sessions = b.sessionsNow();
   const lines = linesOf(b, data);
-  const heights = lines.map(lineHeight);
-  const at = s.windowed ? scrollOf(s.scroll) : null;
-  const layout = at && spanStarts(heights, 0);
-  if (at) placeBand(s.band, layout.content, at);
   const rest = data.fields.slice(1);
   const strip = stripOf(s, data);
   const offset = strip ? stripOffset(s, view, strip) : 0;
@@ -187,10 +169,7 @@ function drawTable(b, t, mono, view, st) {
       .when(Boolean(line), (el) => el.child(line));
   };
   const groupRow = (g) => groupHead(t, g.group, shownOf(g.shown, g.held)).id(`group-${g.group.id}`).h(TABLE_GROUP_H).px(TABLE_PAD.left).map(takesSideWheel);
-  const lineEl = (l, i) => {
-    if (layout && !inBand(s.band, layout.starts[i], heights[i])) return div().flex_none().h(heights[i]);
-    return l.row ? row(l.row) : groupRow(l);
-  };
+  const list = windowedLines(s, "table-rows", lines, lines.map(lineHeight), (l) => (l.row ? row(l.row) : groupRow(l)), wheel);
   const box = v_flex().id("table-box").flex_1().min_h(0)
     .on_size_change((size, cx) => {
       const width = unzoomed(size.width);
@@ -199,20 +178,13 @@ function drawTable(b, t, mono, view, st) {
       cx.notify();
     })
     .child(head);
-  if (!lines.length) {
+  if (!list) {
     const what = data.rows.length ? NOTHING_SHOWS : data.partial ? null : noItemsText(data.meta.filter);
     return box.when(Boolean(what), (el) => el.child(div().p(20).text_color(t.muted).child(what)));
   }
+  const note = limitNote(t, data, `Nur die ersten ${data.count} von ${data.total} Einträgen; den Filter enger fassen`);
   return box
-    .child(v_flex().id("table-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(s.scroll)
-      .when(s.windowed || Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => {
-        if (wheel) wheel(e, cx);
-        // GPUI moved the list before the event reached it.
-        if (s.windowed && leftBand(s.band, scrollOf(s.scroll))) cx.notify();
-      }))
-      .children(lines.map(lineEl)))
+    .child(list)
     .when(Boolean(strip), (el) => el.child(stripBar(t, strip, offset, wheel)))
-    .when(Boolean(data.limited) && !data.partial, (el) =>
-      el.child(div().px(16).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
-        .child(`Nur die ersten ${data.count} von ${data.total} Einträgen; den Filter enger fassen`)));
+    .when(Boolean(note), (el) => el.child(note));
 }

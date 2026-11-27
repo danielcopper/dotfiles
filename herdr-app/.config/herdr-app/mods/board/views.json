@@ -15,6 +15,7 @@
         {
           "owner": "danielcopper",
           "projects": [{ "number": 2 }],
+          "issues": { "id": "issues" },
           "prs": { "id": "prs", "name": "PRs" }
         }
       ],

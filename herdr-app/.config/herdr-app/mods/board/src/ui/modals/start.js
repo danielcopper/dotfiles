@@ -59,7 +59,7 @@ const openedIn = (where) => where.space ?? where.gone ?? where.unread;
 
 const START_CHOICES = {
   repo: {
-    entries: (m) => m.repos.list.map((r) => ({ id: r.key, name: r.name, folder: m.repos.folders.length > 1 ? r.parent : null })),
+    entries: (m) => m.repos.list.map((r) => ({ id: r.key, name: r.name, aside: m.repos.folders.length > 1 ? [r.parent] : [] })),
     current: (m) => m.repo,
     value: (m) => chosenRepo(m)?.name ?? reposPending(m),
     take: (b, row) => {
@@ -454,7 +454,7 @@ const goneNote = ({ on, gone }) => `Den Space „${gone.name}“ ${onMachine(on)
 const unreadNote = ({ on, unread }) => `Den Space „${unread.name}“ ${onMachine(on)} kann das Board erst prüfen, wenn es die Spaces dort gelesen hat; warten oder neu wählen`;
 const uncheckedNote = (on, space) => `Den Space „${space.name}“ ${onMachine(on)} konnte das Board nicht prüfen; die Spaces dort waren nicht gelesen`;
 
-const spaceRows = (m) => [{ id: NEW_SPACE, name: NEW_SPACE_LABEL, folder: null }, ...whereToOpen(m).here.map((s) => ({ id: s.id, name: s.name, folder: s.folder }))];
+const spaceRows = (m) => [{ id: NEW_SPACE, name: NEW_SPACE_LABEL, aside: [] }, ...whereToOpen(m).here.map((s) => ({ id: s.id, name: s.name, aside: [s.folder] }))];
 
 function chooseSpace(m, row) {
   m.target = row.id === NEW_SPACE ? NEW_SPACE : { id: row.id, name: row.name };

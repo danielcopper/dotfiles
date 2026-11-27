@@ -3,9 +3,11 @@
 // or for a view whose source reads nothing for it yet the `text` it shows
 // (text(view)). A new view kind is: an entry here; its loading in its
 // source's module (make<Source>().views[layout]); for an Azure team view,
-// its entry in TEAM_VIEWS (config.js); and for a new way to draw, a shape.
-// A GitHub project's views take their layout from GitHub; what views.json
-// says of a GitHub tab follows its entry kind in ENTRY_KINDS (config.js).
+// its entry in TEAM_VIEWS (config.js); for a new kind of tab, its entry in
+// TAB_KINDS (contexts.js), and on GitHub its builder in GITHUB_TABS
+// (contexts.js) and its entry kind in ENTRY_KINDS (config.js), which what
+// views.json says of a GitHub tab follows; and for a new way to draw, a
+// shape. A GitHub project's views take their layout from GitHub.
 
 // A view's kind: the key of KINDS.
 export const viewKind = (v) => `${v.source} ${v.layout}`;
@@ -19,6 +21,7 @@ export const KINDS = {
   "github table": { shape: "table" },
   // GitHub's API names no dates or zoom a roadmap shows: it draws as a table.
   "github roadmap": { shape: "table" },
+  "github issues": { shape: "issues" },
   "github list": { shape: "prs" },
   "azure sprint": { shape: "sprint" },
   "azure backlog": { shape: "backlog" },

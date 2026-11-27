@@ -22,6 +22,11 @@
 //     card's priority from the project's single-select field "Priority"
 //     (none without one). An entry with id, name, field, filter,
 //     priorityField or hide has the form before and is left out. A
+//     context's issues is its Issues tab, after its projects: { id (its own
+//     among all contexts' Issues tabs), name? ("Issues"), limit? (the most
+//     issues a view reads, 1000, GitHub's search's most), hideRepos?:
+//     ["<owner>/<repo>"] (repos turned off, left out of its search), start?
+//     }, with a view of the owner's open issues and one of the closed. A
 //     context's prs is its PR tab: { id, name? ("PRs"), hideRepos?:
 //     ["<owner>/<repo>"] (repos turned off),
 //     start? }. The PR tabs of all contexts share github's prs: sections:
@@ -57,7 +62,8 @@
 // machine's settings'; hiding or showing one writes it into the settings.
 // They are left out of the query and of the board. A PR
 // tab's repos turned off (hideRepos) are written the same way; their pull
-// requests are read and not shown.
+// requests are read and not shown. An Issues tab's are written so too, and
+// left out of its search as hidden columns are.
 // GitHub's queries also ask for the login gh runs as, which "nur meine"
 // compares with.
 //
@@ -78,6 +84,13 @@
 // request per page of up to 50, counted against GitHub's REST limit of 5000
 // requests an hour, not against GraphQL's points), and, until the board
 // knows it, one more for the login gh runs as (githubViewerArgs, one point).
+// An Issues tab's view costs one gh call per page of up to 100 issues of its
+// search (githubIssuesArgs: per issue its labels, assignees and the rest a
+// card reads, as on a project; about two points a page), at most as many as
+// full pages of its limit take, ten for the 1000 by default; and, once while
+// the board runs and again after `r`, one per 100 of the owner's repos
+// (githubIssueReposArgs, one point each), before the first page: whether the
+// owner is a user or an organisation names its search.
 // GitHub prices a request by its connections, each counted as full: the
 // list's per section one search, then per pull request of its limit (50
 // by default) its assignees, review requests, review threads, last commit
@@ -162,11 +175,14 @@
 // and why): shared.js, config.js (views.json), settings.js (this machine's
 // settings over it), contexts.js (the top bar's contexts, tabs and their
 // views), kinds/index.js (view kinds),
-// kinds/board.js (a board's columns and cards), kinds/list.js (a PR tab's
-// repos: whose they are, those turned off, its rows grouped by repo),
+// kinds/board.js (a board's columns and cards), kinds/list.js (a PR or
+// Issues tab's repos: whose they are, those turned off, its rows grouped by
+// repo, its repo switches),
 // kinds/sprint.js (a sprint's
 // taskboard), kinds/backlog.js (a team's backlog), kinds/table.js (a
-// GitHub project's table), kinds/fields.js (a GitHub project's fields: an
+// GitHub project's table), kinds/issues.js (an Issues tab's lines, repos
+// and solo repo), kinds/rows.js (a GitHub row in a saved state),
+// kinds/fields.js (a GitHub project's fields: an
 // item's value of each kind, the groups and order of a view's items),
 // kinds/states.js (a
 // state's color), select.js (filter, "nur meine", selection, the filter of
@@ -186,11 +202,12 @@
 // ui/helpers.js, ui/choices.js (a dialog's choice fields and their lists),
 // ui/tones.js (the tones of labels and types, the selected background, the
 // tints), ui/layer.js (the board layer), ui/related.js (the related items as
-// drawn), ui/band.js (which cards of a board column, or rows of a table,
-// draw whole), ui/shapes/ (how a view's data is drawn and worked: board,
-// prs, sprint, backlog, table, placeholder), ui/modals/ (the dialogs:
+// drawn), ui/band.js (which cards of a board column, or rows of a table or
+// an Issues tab, draw whole), ui/shapes/ (how a view's data is drawn and
+// worked: board, prs, sprint, backlog, table, issues, placeholder),
+// ui/modals/ (the dialogs:
 // start, status, columns, create, assign, commands, sprints, sessions,
-// repos) and this one, the Board, which looks the shape up.
+// repos, solo) and this one, the Board, which looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -438,9 +455,11 @@ export function ageLabel(iso, now) {
 // or for a view whose source reads nothing for it yet the `text` it shows
 // (text(view)). A new view kind is: an entry here; its loading in its
 // source's module (make<Source>().views[layout]); for an Azure team view,
-// its entry in TEAM_VIEWS (config.js); and for a new way to draw, a shape.
-// A GitHub project's views take their layout from GitHub; what views.json
-// says of a GitHub tab follows its entry kind in ENTRY_KINDS (config.js).
+// its entry in TEAM_VIEWS (config.js); for a new kind of tab, its entry in
+// TAB_KINDS (contexts.js), and on GitHub its builder in GITHUB_TABS
+// (contexts.js) and its entry kind in ENTRY_KINDS (config.js), which what
+// views.json says of a GitHub tab follows; and for a new way to draw, a
+// shape. A GitHub project's views take their layout from GitHub.
 
 // A view's kind: the key of KINDS.
 export const viewKind = (v) => `${v.source} ${v.layout}`;
@@ -454,6 +473,7 @@ export const KINDS = {
   "github table": { shape: "table" },
   // GitHub's API names no dates or zoom a roadmap shows: it draws as a table.
   "github roadmap": { shape: "table" },
+  "github issues": { shape: "issues" },
   "github list": { shape: "prs" },
   "azure sprint": { shape: "sprint" },
   "azure backlog": { shape: "backlog" },
@@ -680,6 +700,9 @@ const FULL_REPO = /^[^/\s]+\/[^/\s]+$/;
 const SECTION_KEYS = ["name", "query", "tone"];
 const TONE_NAMES = Object.keys(SECTION_TONES).map((n) => `"${n}"`).join(", ").replace(/, ([^,]+)$/, " oder $1");
 
+const hideReposProblems = (list) =>
+  (list === undefined || (textList(list) && list.every((r) => FULL_REPO.test(r))) ? [] : ["„hideRepos“ ist eine Liste von Repos mit Besitzer, etwa [\"owner/repo\"]"]);
+
 const limitProblems = (limit, most, at = "„limit“") =>
   (limit === undefined || (Number.isInteger(limit) && limit >= 1 && limit <= most) ? [] : [`${at} ist eine ganze Zahl von 1 bis ${most}`]);
 
@@ -726,14 +749,17 @@ function projectViewsProblems(views) {
 }
 
 // Per kind of a GitHub context's entry (its `entryKind`: a project, whose
-// views come from GitHub, or the context's PR list, a view of kind "github
+// views come from GitHub, the context's Issues tab, with a view of kind
+// "github issues" per state, or its PR list, a view of kind "github
 // list"): its own keys, the keys of an older form that leave it out
 // (`before`), what is wrong with its keys, the key that names it (`name`;
 // `named`: whether a value of it names one; `nameIn`: whose entries it is
-// its own among, its context's or all contexts'), its place as an error
-// names it (`at`), its id and its settings' path, whether it needs the PR
-// sections of sources.github.prs (`needsShared`), and its fields with their
-// defaults filled in (`owner`: the context's; `shared`: those sections).
+// its own among, its context's or all contexts' of its kind), its place as
+// an error names it (`at`), its id (and its tab's, `tabId`, where that is
+// another; a tab's is its own among all contexts' tabs) and its settings'
+// path, whether it needs the PR sections of sources.github.prs
+// (`needsShared`), and its fields with their defaults filled in (`owner`:
+// the context's; `shared`: those sections).
 const ENTRY_KINDS = {
   project: {
     keys: ["number", "limit", "views"],
@@ -751,6 +777,26 @@ const ENTRY_KINDS = {
     settingsPath: (v, context) => [...context, "projects", String(v.number)],
     defaults: (v, owner) => ({ owner, number: v.number, limit: v.limit ?? BOARD_LIMIT, start: v.start ?? {}, views: v.views ?? {} }),
   },
+  issues: {
+    keys: ["id", "name", "limit", "hideRepos"],
+    before: [],
+    problems: (v) => [
+      ...(isText(v.id) ? [] : ["„id“ fehlt"]),
+      ...(v.name === undefined || isText(v.name) ? [] : ["„name“ muss Text sein"]),
+      ...limitProblems(v.limit, ISSUES_LIMIT),
+      ...hideReposProblems(v.hideRepos),
+    ],
+    name: "id",
+    named: isText,
+    nameIn: "kind",
+    at: () => "Issues-Tab",
+    id: (v) => issuesTabId(v.id),
+    settingsPath: (v, context) => [...context, "issues"],
+    defaults: (v, owner) => ({
+      ...viewDefaults(), ...(v.start && { start: v.start }),
+      owner, name: v.name ?? ISSUES_NAME, limit: v.limit ?? ISSUES_LIMIT, hideRepos: v.hideRepos ?? [],
+    }),
+  },
   prs: {
     keys: ["id", "name", "hide", "hideRepos", ...SHARED_PRS_KEYS],
     before: [],
@@ -759,15 +805,14 @@ const ENTRY_KINDS = {
       ...(v.name === undefined || isText(v.name) ? [] : ["„name“ muss Text sein"]),
       ...(v.hide === undefined || textList(v.hide) ? [] : ["„hide“ muss eine Liste von Texten sein"]),
       ...SHARED_PRS_KEYS.filter((k) => v[k] !== undefined).map((k) => `„${k}“ ${SHARED_PRS}`),
-      ...(v.hideRepos === undefined || (textList(v.hideRepos) && v.hideRepos.every((r) => FULL_REPO.test(r)))
-        ? []
-        : ["„hideRepos“ ist eine Liste von Repos mit Besitzer, etwa [\"owner/repo\"]"]),
+      ...hideReposProblems(v.hideRepos),
     ],
     name: "id",
     named: isText,
-    nameIn: "all",
+    nameIn: "kind",
     at: () => "PR-Tab",
     id: (v) => v.id,
+    tabId: (v) => githubTabId(v.id),
     settingsPath: (v, context) => [...context, "prs"],
     needsShared: true,
     defaults: (v, _owner, shared) => ({
@@ -778,6 +823,15 @@ const ENTRY_KINDS = {
 };
 
 const PRS_NAME = "PRs";
+const ISSUES_NAME = "Issues";
+
+// GitHub's search finds a thousand results at most.
+const ISSUES_LIMIT = 10 * PAGE;
+
+export const issuesTabId = (id) => `github:issues:${id}`;
+
+// The id of a GitHub PR tab.
+export const githubTabId = (viewId) => `github:${viewId}`;
 
 function tabProblems(v, entryKind) {
   if (!isObject(v)) return ["muss ein Objekt sein"];
@@ -801,7 +855,7 @@ function normalizeTab(v, entryKind, owner, shared) {
   return { ...common, ...kind.defaults(v, owner, shared) };
 }
 
-const GITHUB_CONTEXT_KEYS = ["owner", "projects", "prs"];
+const GITHUB_CONTEXT_KEYS = ["owner", "projects", "issues", "prs"];
 const GITHUB_CONTEXTS = ["sources", "github", "contexts"];
 const AZURE_CONTEXTS = ["sources", "azure", "contexts"];
 
@@ -810,10 +864,11 @@ export const nameKeyAt = (path) => LIST_NAMES.find(([at]) => at.length === path.
 
 // sources.github → { github: { contexts: [{ owner, tabs }] } or null,
 // errors }: tabs are the context's projects (entryKind "project", whose
-// views GitHub names: contexts.js) and its PR list (entryKind "prs", layout
-// "list"). A context or a tab with problems is left out and each problem is
-// listed; a project's number is the first of its context's that has it, a
-// PR tab's id the first of all contexts' PR tabs. Each tab carries `owners`
+// views GitHub names: contexts.js), its Issues tab (entryKind "issues") and
+// its PR list (entryKind "prs", layout "list"). A context or a tab with
+// problems is left out and each problem is listed; a project's number is the
+// first of its context's that has it, an Issues or PR tab's id the first of
+// all contexts' tabs of its kind. Each tab carries `owners`
 // (repoOwnership, kinds/list.js), folded. The PR tabs all take the sections
 // of sources.github.prs (readSharedPrs); without valid ones there are none.
 function readGithub(raw) {
@@ -826,7 +881,8 @@ function readGithub(raw) {
   const wanted = raw.prs !== undefined || list.some((a) => isObject(a) && a.prs !== undefined);
   const { shared, errors: sharedErrors } = wanted ? readSharedPrs(raw.prs) : { shared: null, errors: [] };
   errors.push(...sharedErrors);
-  const names = { all: new Set() };
+  const names = {};
+  const tabIds = new Set();
   const contexts = [];
   list.forEach((a, i) => {
     const where = `GitHub-Kontext ${i + 1}${isText(a?.owner) ? ` („${a.owner}“)` : ""}`;
@@ -840,6 +896,7 @@ function readGithub(raw) {
     if (a.prs === undefined) errors.push(`${where}: „prs“ fehlt: der PR-Tab, der letzte Tab des Kontexts, mit „id“`);
     const entries = [
       ...(Array.isArray(a.projects) ? a.projects : []).map((v) => ({ v, entryKind: "project" })),
+      ...(a.issues === undefined ? [] : [{ v: a.issues, entryKind: "issues" }]),
       ...(a.prs === undefined ? [] : [{ v: a.prs, entryKind: "prs" }]),
     ];
     const tabs = [];
@@ -847,10 +904,13 @@ function readGithub(raw) {
     entries.forEach(({ v, entryKind }, j) => {
       const kind = ENTRY_KINDS[entryKind];
       const problems = tabProblems(v, entryKind);
-      const seen = names[kind.nameIn];
+      const seen = kind.nameIn === "kind" ? (names[entryKind] ??= new Set()) : names.context;
       const name = v?.[kind.name];
       if (!problems.length && seen.has(name)) problems.push(`„${kind.name}“ ${name} gibt es schon`);
       if (kind.named(name)) seen.add(name);
+      const id = problems.length ? null : (kind.tabId ?? kind.id)(v, a.owner);
+      if (id !== null && tabIds.has(id)) problems.push(`„${kind.name}“ ${name} ergibt die Kennung „${id}“, die schon ein anderer Tab hat`);
+      if (id !== null) tabIds.add(id);
       if (problems.length) errors.push(...problems.map((p) => `${where}, ${kind.at(v, j)}: ${p}`));
       else if (!kind.needsShared || shared) tabs.push(normalizeTab(v, entryKind, a.owner, shared));
     });
@@ -1763,12 +1823,11 @@ export function startRow(rows, now) {
 // A team view's name, as the switch shows it.
 export const teamViewName = (id) => TEAM_VIEWS.find((v) => v.id === id)?.name ?? id;
 
-// The name of a tab's view `id` as its switch shows it: a team's, or a
-// project's as GitHub names it.
-export const tabViewName = (tab, id) => (tab.kind === "project" ? tab.meta?.views.find((v) => v.number === id)?.name ?? String(id) : teamViewName(id));
-
-// The id of a GitHub PR tab.
-export const githubTabId = (viewId) => `github:${viewId}`;
+export const ISSUE_VIEWS = [
+  { id: "open", name: "Offen" },
+  { id: "closed", name: "Geschlossen" },
+];
+const issueViewName = (id) => ISSUE_VIEWS.find((v) => v.id === id)?.name ?? id;
 
 // What the board knows of a project from its last read, by its tab's id
 // (`known.get(id)`: { title, url, views: [{ number, name, layout, filter }]
@@ -1794,7 +1853,10 @@ function projectTab(entry, known) {
 // A PR tab: its entry is its view, as GitHub's "list".
 const githubPrsTab = (entry) => ({ id: githubTabId(entry.id), source: "github", kind: "view", name: entry.name, view: entry });
 
-const githubTab = (entry, known) => (entry.entryKind === "project" ? projectTab(entry, known) : githubPrsTab(entry));
+const issuesTab = (entry) => ({ id: entry.id, source: "github", kind: "issues", name: entry.name, entry, views: ISSUE_VIEWS.map((v) => v.id) });
+
+const GITHUB_TABS = { project: projectTab, issues: issuesTab, prs: githubPrsTab };
+const githubTab = (entry, known) => GITHUB_TABS[entry.entryKind](entry, known);
 
 // The sources in the switch's order, each with its contexts in views.json's.
 export const SOURCES = [
@@ -1811,16 +1873,20 @@ export const SOURCES = [
 ];
 
 // The contexts of a config, in the switch's order: { id, source, name,
-// tabs }, a tab { id, source, kind: "team" | "prs" | "project" | "view",
-// name, … } (a team's fields, an Azure project's, a GitHub project's
-// views.json entry as `entry` with what the board knows of it, `known`, as
-// `meta`, or the GitHub PR view as `view`).
+// tabs }, a tab { id, source, kind (one of TAB_KINDS), name, … } (a team's
+// fields, an Azure project's, a GitHub project's views.json entry as
+// `entry` with what the board knows of it, `known`, as `meta`, an Issues
+// tab's entry as `entry`, or the GitHub PR view as `view`).
 export const contextsOf = (config, known = NO_PROJECTS) => SOURCES.flatMap((s) => s.contexts(config, known).map((c) => ({ ...c, source: s.id })));
 
-// Whether a tab shows one of its own views (`views`): a team or a
-// project; and whether it has a switch between them, more than one.
-export const hasViews = (tab) => tab?.kind === "team" || tab?.kind === "project";
+// Whether a tab shows one of its own views (`views`), a kind with a
+// storeKey; and whether it has a switch between them, more than one.
+export const hasViews = (tab) => Boolean(TAB_KINDS[tab?.kind]?.storeKey);
 export const hasViewSwitch = (tab) => hasViews(tab) && tab.views.length > 1;
+
+export const tabViewName = (tab, id) => TAB_KINDS[tab.kind].viewName(tab, id);
+
+export const tabViewKey = (tab) => `${TAB_KINDS[tab.kind].storeKey}:${tab.id}`;
 
 // The hint line's name for a tab's switch: its views' names, "Sprint/Backlog".
 export const viewSwitchHint = (tab) => tab.views.map((v) => tabViewName(tab, v)).join("/");
@@ -1867,21 +1933,43 @@ export function projectView(tab, shown, wanted = null) {
   return { ...common, id: `${tab.id}:${shown.number}`, layout: shown.layout, name: shown.name, address: address(shown.number), hide: p.views[shown.number]?.hide ?? [], settingsPath };
 }
 
-// The view a tab shows (a team or a project: its view `viewId`): a GitHub
-// PR view as views.json has it, a project's (projectView), an Azure one {
-// id, source: "azure", layout: "sprint" | "backlog" | "prs", name, tab,
-// hide, start }. Its kind is viewKind(view).
-export function viewOf(tab, viewId) {
-  if (tab.kind === "view") return tab.view;
-  if (tab.kind === "project") {
-    const shown = tab.meta?.views.find((v) => v.number === viewId);
-    return shown ? projectView(tab, shown) : projectView(tab, null, viewId ?? null);
-  }
-  if (tab.kind === "team") {
-    return { id: `${tab.id}:${viewId}`, source: "azure", layout: viewId, name: teamViewName(viewId), tab, ...viewDefaults() };
-  }
-  return { id: tab.id, source: "azure", layout: "prs", name: tab.name, tab, ...viewDefaults() };
-}
+// Per kind of tab (a tab's `kind`): for one with views of its own, where
+// the store keeps the one it shows (storeKey, tabViewKey) and a view's name
+// (viewName: an Azure team's, an Issues tab's, a project's as GitHub names
+// it); and the view it shows (viewOf, of its view `viewId` where it has
+// views): a GitHub PR view as views.json has it ("view"), a project's
+// (projectView), an Issues tab's { id, source: "github", layout: "issues",
+// issueState ("open" or "closed"), name, tab, owner, limit, hideRepos,
+// start, hide, settingsPath (its tab's), owners }, an Azure one { id,
+// source: "azure", layout: "sprint" | "backlog" | "prs", name, tab, hide,
+// start }. A view's kind is viewKind(view).
+const TAB_KINDS = {
+  team: {
+    storeKey: "teamView",
+    viewName: (_tab, id) => teamViewName(id),
+    viewOf: (tab, viewId) => ({ id: `${tab.id}:${viewId}`, source: "azure", layout: viewId, name: teamViewName(viewId), tab, ...viewDefaults() }),
+  },
+  project: {
+    storeKey: "projectView",
+    viewName: (tab, id) => tab.meta?.views.find((v) => v.number === id)?.name ?? String(id),
+    viewOf(tab, viewId) {
+      const shown = tab.meta?.views.find((v) => v.number === viewId);
+      return shown ? projectView(tab, shown) : projectView(tab, null, viewId ?? null);
+    },
+  },
+  issues: {
+    storeKey: "issuesView",
+    viewName: (_tab, id) => issueViewName(id),
+    viewOf(tab, viewId) {
+      const { owner, limit, hideRepos, start, hide, settingsPath, owners } = tab.entry;
+      return { id: `${tab.id}:${viewId}`, source: "github", layout: "issues", issueState: viewId, name: issueViewName(viewId), tab, owner, limit, hideRepos, start, hide, settingsPath, owners };
+    },
+  },
+  view: { viewOf: (tab) => tab.view },
+  prs: { viewOf: (tab) => ({ id: tab.id, source: "azure", layout: "prs", name: tab.name, tab, ...viewDefaults() }) },
+};
+
+export const viewOf = (tab, viewId) => TAB_KINDS[tab.kind].viewOf(tab, viewId);
 
 // Every view of a context or a config: one per tab, one per view of a team
 // or of a project (a project the board knows no views of: the view that
@@ -2141,8 +2229,10 @@ export const UNSAVED = { big: "Stand nicht gespeichert: zu groß", refused: "Sta
 
 // Data read for other hidden columns, another form of the view or another
 // organisation, project or team of its Azure tab is not its data; where its
-// settings lie, the rest of its tab and the repos a PR tab hides (it reads
-// them all) are not its form. A GitHub view signs without its tab.
+// settings lie, the rest of its tab and the repos a PR or Issues tab hides
+// are not its form (a PR tab reads them all; an Issues tab's data names
+// those turned off as its read began, readHidden, and its shape reads again
+// where they differ: readsAgain). A GitHub view signs without its tab.
 const savedSig = (view, hidden) => {
   const { settingsPath, tab, hideRepos, ...form } = view;
   const reads = view.source === "azure" && tab ? [{ org: tab.org, project: tab.project, team: tab.team }] : [];
@@ -4195,10 +4285,10 @@ export function makeAzure(paths) {
 
 // ==== src/kinds/list.js ====
 
-// A GitHub PR tab's repos: whose they are (repoOwnership), the ones this
-// machine turns off (hideRepos, whose pull requests do not show), the rows
-// of a section grouped by repo, and the switches of the „Repos:“ line and
-// the repo menu.
+// A GitHub PR or Issues tab's repos: whose they are (repoOwnership), the
+// ones this machine turns off (hideRepos, whose rows do not show), rows
+// grouped by repo, and the switches of the repo menu and a PR tab's
+// „Repos:“ line.
 
 // Whose the repo `repo` ("owner/repo") is, for a tab of the context whose
 // owner is owners.tabOwner: "own"; "other" where its owner is another
@@ -4215,10 +4305,14 @@ export const hidesRepo = (data, repo) => (data.hideRepos ?? []).some((r) => fold
 
 export const keptRows = (data, section) => section.rows.filter((r) => !hidesRepo(data, r.repo));
 
+// The data as the view's repos turned off show it now; the same data where
+// they are those it has.
+export const withRepoView = (data, view) => (sameNames(data.hideRepos ?? [], view.hideRepos) ? data : { ...data, hideRepos: [...view.hideRepos] });
+
 export const toggledRepos = (list, repo) =>
   (list.some((r) => foldedName(r) === foldedName(repo)) ? list.filter((r) => foldedName(r) !== foldedName(repo)) : [...list, repo]);
 
-function repoLook(data, repo) {
+export function repoLook(data, repo) {
   const ownership = repoOwnership(repo, data.owners);
   return { repo, name: ownership === "own" ? repo.split("/").pop() : repo, foreign: ownership === "foreign" };
 }
@@ -4242,23 +4336,32 @@ export function repoGroups(data, rows, visible) {
   return all.map(([key, g]) => ({ ...g, held: held.get(key), headed: all.length > 1 || g.foreign }));
 }
 
+// The switches of the repos of `rows` by folded name, each where its first
+// row stands, with how many of them it holds (held) and `visible` lets
+// through (shown); `add` adds a repo's switch after them where it has none,
+// `fields` over its counts.
+export function countedSwitches(data, rows, visible) {
+  const switches = new Map();
+  const add = (repo, fields = {}) => {
+    const key = foldedName(repo);
+    if (!switches.has(key)) switches.set(key, { ...repoLook(data, repo), hidden: hidesRepo(data, repo), held: 0, shown: 0, ...fields });
+    return switches.get(key);
+  };
+  for (const r of rows) {
+    const entry = add(r.repo);
+    entry.held++;
+    if (visible(r)) entry.shown++;
+  }
+  return { switches, add };
+}
+
 // The repos of the tab's switches: those with pull requests in it, the tab
 // owner's before foreign ones, each in the order their first row stands,
 // then those turned off that hold none, in their order: { repo, name,
 // foreign, hidden, held (its pull requests), shown (those `visible` lets
 // through) }.
 export function repoSwitches(data, visible) {
-  const switches = new Map();
-  const add = (repo) => {
-    const key = foldedName(repo);
-    if (!switches.has(key)) switches.set(key, { ...repoLook(data, repo), hidden: hidesRepo(data, repo), held: 0, shown: 0 });
-    return switches.get(key);
-  };
-  for (const r of data.sections.flatMap((s) => s.rows)) {
-    const entry = add(r.repo);
-    entry.held++;
-    if (visible(r)) entry.shown++;
-  }
+  const { switches, add } = countedSwitches(data, data.sections.flatMap((s) => s.rows), visible);
   const found = [...switches.values()];
   for (const repo of data.hideRepos ?? []) add(repo);
   return [...found.filter((e) => !e.foreign), ...found.filter((e) => e.foreign), ...[...switches.values()].slice(found.length)];
@@ -4627,12 +4730,16 @@ export function tablePlan(project, shown) {
   return plan;
 }
 
+// What a card reads of an issue (githubCard), on a project and in an
+// Issues tab alike.
+const ISSUE_FIELDS = `id number title url issueType { name color } repository { nameWithOwner } author { login }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } } milestone { title }
+      parent { number title repository { nameWithOwner } } subIssuesSummary { total completed }`;
+
 const CONTENT_FIELDS = `
   content {
     __typename
-    ... on Issue { id number title url issueType { name color } repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } } milestone { title }
-      parent { number title repository { nameWithOwner } } subIssuesSummary { total completed } }
+    ... on Issue { ${ISSUE_FIELDS} }
     ... on PullRequest { id number title url headRefName repository { nameWithOwner } author { login }
       labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } } milestone { title }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } } }
@@ -4722,48 +4829,57 @@ function pageError(errors) {
   return onTheWay.sort((a, b) => b.path.length - a.path.length)[0] ?? errors[0] ?? null;
 }
 
-// The items' answer `json` (githubItemsArgs) with the items of the next
-// page's answer `page` (githubItemsPageArgs, and its GraphQL errors)
-// added, each item once (one that moved between two reads may come
-// twice), and that page's pageInfo, which says whether more follow. A page
-// without its items is explained by GitHub's error (pageError). One that
-// says more follow but adds no item or names the same cursor again is taken
-// for GitHub's paging stuck, and fails.
-export function addItemsPage(json, page, errors = []) {
-  const project = json.data.repositoryOwner.projectV2;
-  const items = project.items;
-  const next = page?.data?.repositoryOwner?.projectV2?.items;
-  if (!Array.isArray(next?.nodes)) {
+// A connection GitHub sends in pages (addPage, nextPage, pageCount): where
+// it stands in an answer (`of`), the key of its total, its name in an
+// error (`label`, of the first page's answer; `noun`, its entries), and
+// why a page lacks it (`missing`: that page's GraphQL errors and how many
+// came before).
+export const PROJECT_ITEMS = {
+  of: (json) => json?.data?.repositoryOwner?.projectV2?.items,
+  totalKey: "totalCount",
+  label: (json) => `Projekt „${json.data.repositoryOwner.projectV2.title}“`,
+  noun: "Einträgen",
+  missing(label, errors, count) {
     const e = pageError(errors);
-    throw new BoardError(e ? `Projekt „${project.title}“: ${firstLine(e.message)}` : `Projekt „${project.title}“ lieferte die Einträge nach den ersten ${items.nodes.length} nicht`);
-  }
-  const seen = new Set(items.nodes.map((n) => n?.id));
+    return e ? `${label}: ${firstLine(e.message)}` : `${label} lieferte die Einträge nach den ersten ${count} nicht`;
+  },
+};
+
+// The answer `json` with the entries of the next page's answer `page` (and
+// its GraphQL errors) added, each once (one that moved between two reads
+// may come twice), and that page's pageInfo, which says whether more
+// follow. A page without them is explained by `missing`. One that says
+// more follow but adds none or names the same cursor again is taken for
+// GitHub's paging stuck, and fails.
+export function addPage(paged, json, page, errors = []) {
+  const conn = paged.of(json);
+  const next = paged.of(page);
+  if (!Array.isArray(next?.nodes)) throw new BoardError(paged.missing(paged.label(json), errors, conn.nodes.length));
+  const seen = new Set(conn.nodes.map((n) => n?.id));
   const added = next.nodes.filter((n) => !seen.has(n?.id));
-  if (next.pageInfo?.hasNextPage && (!added.length || next.pageInfo.endCursor === items.pageInfo.endCursor)) {
-    throw new BoardError(`Projekt „${project.title}“: GitHub kam nach ${items.nodes.length} Einträgen nicht weiter`);
+  if (next.pageInfo?.hasNextPage && (!added.length || next.pageInfo.endCursor === conn.pageInfo?.endCursor)) {
+    throw new BoardError(`${paged.label(json)}: GitHub kam nach ${conn.nodes.length} ${paged.noun} nicht weiter`);
   }
-  items.nodes.push(...added);
-  items.pageInfo = next.pageInfo;
+  conn.nodes.push(...added);
+  conn.pageInfo = next.pageInfo;
   return json;
 }
 
-// The page after the items' answer `json`, { after, count } (its cursor and
-// how many items came before it), where GitHub says one follows and the
+// The page after the answer `json`, { after, count } (its cursor and how
+// many entries came before it), where GitHub says one follows and the
 // view's limit leaves room for it; else null. One that follows without a
 // cursor to start from fails.
-export function nextItemsPage(json, view) {
-  const project = json?.data?.repositoryOwner?.projectV2;
-  const items = project?.items;
-  if (!Array.isArray(items?.nodes) || !items.pageInfo?.hasNextPage || items.nodes.length >= view.limit) return null;
-  const after = items.pageInfo.endCursor;
-  if (typeof after !== "string") throw new BoardError(`Projekt „${project.title}“: GitHub nannte nach ${items.nodes.length} Einträgen nicht, wo die nächsten beginnen`);
-  return { after, count: items.nodes.length };
+export function nextPage(paged, json, view) {
+  const conn = paged.of(json);
+  if (!Array.isArray(conn?.nodes) || !conn.pageInfo?.hasNextPage || conn.nodes.length >= view.limit) return null;
+  const after = conn.pageInfo.endCursor;
+  if (typeof after !== "string") throw new BoardError(`${paged.label(json)}: GitHub nannte nach ${conn.nodes.length} ${paged.noun} nicht, wo die nächsten beginnen`);
+  return { after, count: conn.nodes.length };
 }
 
-export function itemPages(json, view, calls) {
-  const total = json?.data?.repositoryOwner?.projectV2?.items?.totalCount ?? 0;
-  return Math.min(calls, Math.max(1, Math.ceil(Math.min(total, view.limit) / PAGE)));
-}
+// How many pages the read of `json` takes by its total, one at least and
+// `calls` at most.
+export const pageCount = (paged, json, calls) => Math.min(calls, Math.max(1, Math.ceil((paged.of(json)?.[paged.totalKey] ?? 0) / PAGE)));
 
 // The logins of the people a pull request asks to review; a team's request,
 // or one whose reviewer is gone, names no one.
@@ -4799,7 +4915,8 @@ function githubCard(node, owners, plan) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
   return {
-    key: node.id,
+    key: node.id ?? c.id,
+    // The project item's id, which a move names; null outside a project.
     itemId: node.id,
     source: "github",
     kind: c.__typename === "PullRequest" ? "pr" : c.__typename === "DraftIssue" ? "draft" : "issue",
@@ -4872,7 +4989,7 @@ function itemEntry(plan, node, view, order) {
 }
 
 // gh's answers for a board (githubItemsArgs and its pages, joined by
-// addItemsPage; and the GraphQL errors that came with them), read as
+// addPage; and the GraphQL errors that came with them), read as
 // boardPlan says (`plan`) → the board shape's data (ui/shapes/board.js):
 // columns from the column field, each card in its column (one without a
 // value in a column "Ohne <field>" before them, which takes no card), in
@@ -4971,6 +5088,118 @@ export function parseGithubTable(json, view, errors, plan) {
     limited: items.pageInfo?.hasNextPage ?? false,
     viewer: project.viewer,
     count: items.nodes.length,
+  };
+}
+
+// An Issues tab's repos, as its repo menu offers them: the owner's own
+// with issues on, archived ones left out, by name, REPOS_PAGES pages of
+// PAGE at most; and whether the owner is a user or an organisation, which
+// its search names (issuesQuery).
+export const REPOS_PAGES = 10;
+export const ISSUE_REPOS_QUERY = `query($login: String!, $after: String) {
+  repositoryOwner(login: $login) {
+    __typename
+    repositories(first: ${PAGE}, after: $after, ownerAffiliations: [OWNER], hasIssuesEnabled: true, isArchived: false, orderBy: { field: NAME, direction: ASC }) {
+      pageInfo { hasNextPage endCursor } nodes { nameWithOwner }
+    }
+  }
+}`;
+
+export const githubIssueReposArgs = (owner, after = null) =>
+  ["api", "graphql", "-f", `query=${ISSUE_REPOS_QUERY}`, "-f", `login=${owner}`, ...(after ? ["-f", `after=${after}`] : [])];
+
+// gh's answer for githubIssueReposArgs (and its GraphQL errors) → { org
+// (the owner is an organisation), repos (their names with the owner), after
+// (the cursor of the next page, null for none) }.
+export function parseIssueRepos(json, owner, errors = []) {
+  const node = json?.data?.repositoryOwner;
+  const repos = node?.repositories;
+  if (!Array.isArray(repos?.nodes)) {
+    const e = errorAt(errors, ["repositoryOwner"]);
+    throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt „${owner}“ nicht`);
+  }
+  return {
+    org: node.__typename === "Organization",
+    repos: repos.nodes.map((n) => n?.nameWithOwner).filter(isText),
+    after: repos.pageInfo?.hasNextPage ? repos.pageInfo.endCursor ?? null : null,
+  };
+}
+
+// The search of an Issues tab's view: the owner's issues in the state it
+// shows, archived repos and those `hidden` left out where the owner's
+// `repos` have them, newest updated first. GitHub's search scopes by user:
+// or org: (docs.github.com, "Searching issues and pull requests").
+export function issuesQuery(view, org, hidden, repos) {
+  const known = new Set(repos.map(foldedName));
+  const left = [...hidden].filter((r) => known.has(foldedName(r))).map((r) => `-repo:${r}`);
+  return [`is:issue ${org ? "org" : "user"}:${view.owner} archived:false is:${view.issueState} sort:updated-desc`, ...left].join(" ");
+}
+
+export const ISSUES_QUERY = `query($q: String!, $first: Int!, $after: String) {
+  viewer { login }
+  search(type: ISSUE, first: $first, after: $after, query: $q) {
+    issueCount pageInfo { hasNextPage endCursor }
+    nodes { ... on Issue { ${ISSUE_FIELDS} stateReason updatedAt } }
+  }
+}`;
+
+export const githubIssuesArgs = (view, query, count = 0, after = null) => [
+  "api", "graphql", "-f", `query=${ISSUES_QUERY}`, "-f", `q=${query}`, "-F", `first=${Math.min(PAGE, view.limit - count)}`, ...(after ? ["-f", `after=${after}`] : []),
+];
+
+const SEARCH_LABEL = "Die Suche nach Issues";
+
+// Why an answer lacks its search: the error on the way to it, else the
+// answer's first; `why` where it has none.
+function searchMissing(errors, why) {
+  const e = errorAt(errors, ["search"]) ?? errors[0];
+  return e ? `${SEARCH_LABEL}: ${firstLine(e.message)}` : `${SEARCH_LABEL} ${why}`;
+}
+
+export const ISSUE_SEARCH = {
+  of: (json) => json?.data?.search,
+  totalKey: "issueCount",
+  label: () => SEARCH_LABEL,
+  noun: "Issues",
+  missing: (label, errors, count) => searchMissing(errors, `lieferte die Issues nach den ersten ${count} nicht`),
+};
+
+function searchOf(json, errors) {
+  const search = ISSUE_SEARCH.of(json);
+  if (Array.isArray(search?.nodes)) return search;
+  throw new BoardError(searchMissing(errors, "fehlt in GitHubs Antwort"));
+}
+
+const NO_PLAN = { priority: null };
+
+// gh's answers for an Issues tab's view (githubIssuesArgs and its pages,
+// joined by addPage) → the issues shape's data (ui/shapes/issues.js): {
+// shape: "issues", meta: { owner, state, query }, repos (the owner's,
+// parseIssueRepos), rows (githubCard's cards in GitHub's order, each with
+// its stateReason and updatedAt), readHidden (the repos turned off as the
+// read began), hideRepos, owners, total, limited, count, viewer }. A search
+// that stops at its cap says no more follow: a total above what came is cut
+// too.
+export function parseGithubIssues(json, view, { repos, hidden, query }, errors = []) {
+  const search = searchOf(json, errors);
+  const rows = search.nodes.filter((n) => n?.id).map((issue) => ({
+    ...githubCard({ id: null, content: { ...issue, __typename: "Issue" } }, view.owners, NO_PLAN),
+    stateReason: issue.stateReason ?? null,
+    updatedAt: issue.updatedAt ?? null,
+  }));
+  const total = search.issueCount ?? rows.length;
+  return {
+    shape: "issues",
+    meta: { owner: view.owner, state: view.issueState, query },
+    repos,
+    rows,
+    readHidden: [...hidden],
+    hideRepos: [...view.hideRepos],
+    owners: view.owners,
+    total,
+    limited: Boolean(search.pageInfo?.hasNextPage) || total > search.nodes.length,
+    count: search.nodes.length,
+    viewer: json.data.viewer?.login ?? null,
   };
 }
 
@@ -5705,14 +5934,34 @@ export function makeGithub(paths) {
     return read;
   }
 
+  // The pages of `paged` for `view`, joined (addPage) into the first's
+  // answer: { json, warnings (`before`'s first), errors (the first page's
+  // GraphQL errors) }. One gh call each, named "<name>-page-<n>", its args
+  // pageArgs of { after, count } (nextPage's; the first's { after: null,
+  // count: 0 }), until GitHub has no more, the view's limit is read, or as
+  // many calls ran as full pages would take to read it; before each page
+  // after the first, the data so far (parse of json and errors) is drawn.
+  async function readPages(paged, view, { live, parse, name, pageArgs, before = [] }) {
+    const { json, warnings, errors } = await gh(paths, pageArgs({ after: null, count: 0 }), what(view, `${name}-page-1`));
+    warnings.unshift(...before);
+    const calls = Math.ceil(view.limit / PAGE);
+    const pages = pageCount(paged, json, calls);
+    for (let call = 1, next = nextPage(paged, json, view); next && call < calls; call++, next = nextPage(paged, json, view)) {
+      live.partial(() => ({ data: { ...parse(json, errors), partial: true }, warnings: [...warnings] }));
+      live.page(call + 1, Math.max(call + 1, pages));
+      const page = await gh(paths, pageArgs(next), what(view, `${name}-page-${call + 1}`));
+      addPage(paged, json, page.json, page.errors);
+      warnings.push(...page.warnings);
+    }
+    return { json, warnings, errors };
+  }
+
   // A project's view, of whichever layout: the project with its views and
   // fields (githubProjectArgs), which the board learns (live.project); then,
   // of the view it shows (the view's own, or for the view that learns them
-  // the one it wants, else the first), the first page of items and each
-  // next one, one call each, until GitHub has no more, the view's limit is
-  // read, or as many calls ran as full pages would take to read it; read as
-  // its layout's plan says (planFor), a view of a layout the board does not
-  // draw reading none. Both reads are one load, so that the view's state,
+  // the one it wants, else the first), its items' pages (readPages), read
+  // as its layout's plan says (planFor), a view of a layout the board does
+  // not draw reading none. Both reads are one load, so that the view's state,
   // progress, error and saved data stay those of one read; the board, which
   // knows what shows, names the view it goes on with. A board's move writes
   // the card's column (one layout's data may stand in another's view until
@@ -5738,17 +5987,8 @@ export function makeGithub(paths) {
       const plan = toPlan(project, shown);
       if (now !== view) hidden = hiddenFor(now);
       const parse = (json, errors) => plan.parse(json, now, hidden, errors);
-      const { json, warnings, errors } = await gh(paths, githubItemsArgs(now, plan, hidden), what(now, "items-page-1"));
-      warnings.unshift(...head.warnings);
-      const calls = Math.ceil(now.limit / PAGE);
-      const pages = itemPages(json, now, calls);
-      for (let call = 1, next = nextItemsPage(json, now); next && call < calls; call++, next = nextItemsPage(json, now)) {
-        live.partial(() => ({ data: { ...parse(json, errors), partial: true }, warnings: [...warnings] }));
-        live.page(call + 1, Math.max(call + 1, pages));
-        const page = await gh(paths, githubItemsPageArgs(now, plan, hidden, next.after, next.count), what(now, `items-page-${call + 1}`));
-        addItemsPage(json, page.json, page.errors);
-        warnings.push(...page.warnings);
-      }
+      const pageArgs = (next) => (next.after === null ? githubItemsArgs(now, plan, hidden) : githubItemsPageArgs(now, plan, hidden, next.after, next.count));
+      const { json, warnings, errors } = await readPages(PROJECT_ITEMS, now, { live, parse, name: "items", pageArgs, before: head.warnings });
       return { data: parse(json, errors), warnings };
     },
     async move(view, data, card, column) {
@@ -5756,8 +5996,75 @@ export function makeGithub(paths) {
     },
   };
 
+  // An Issues tab's view: its owner's repos once while the board runs (`r`
+  // drops them: forget), then its search's pages (readPages).
+  const issueRepos = readMemo();
+  async function readIssueRepos(view) {
+    const read = { org: false, repos: [] };
+    let after = null;
+    for (let call = 1; call <= REPOS_PAGES; call++) {
+      const { json, errors } = await gh(paths, githubIssueReposArgs(view.owner, after), what(view, `repos-page-${call}`));
+      const page = parseIssueRepos(json, view.owner, errors);
+      Object.assign(read, { org: page.org, repos: [...read.repos, ...page.repos] });
+      after = page.after;
+      if (!after) break;
+    }
+    return read;
+  }
+  const issueViews = {
+    async load(view, { live = NO_LIVE }) {
+      const hidden = [...view.hideRepos];
+      const { org, repos } = await issueRepos.get(foldedName(view.owner), () => readIssueRepos(view));
+      const query = issuesQuery(view, org, hidden, repos);
+      const parse = (json, errors) => parseGithubIssues(json, view, { repos, hidden, query }, errors);
+      const pageArgs = (next) => githubIssuesArgs(view, query, next.count, next.after);
+      const { json, warnings, errors } = await readPages(ISSUE_SEARCH, view, { live, parse, name: "issues", pageArgs });
+      return { data: parse(json, errors), warnings };
+    },
+    forget: (view) => issueRepos.drop(foldedName(view.owner)),
+  };
+
+  const views = {
+    board: projectViews,
+    table: projectViews,
+    roadmap: projectViews,
+    issues: issueViews,
+    list: {
+      together: (all) => all.filter((v) => v.source === "github" && v.layout === "list"),
+      async load(view, { live = NO_LIVE }) {
+        if (prsRead?.key !== prsReadKey(view)) prsRead = readPrs(view);
+        const read = prsRead;
+        const notes = () => {
+          if (read.notified?.keys === null) return [notifiedUnknown(read.notified.why)];
+          return read.notified?.unnamed ? [notifiedUnnamed(read.notified.unnamed)] : [];
+        };
+        const result = () => {
+          const data = parseGithubList(read.json, view, read.errors, { pending: read.pending, login: read.asked, notified: read.notified?.keys ?? null });
+          return { data: read.notified ? data : { ...data, notifiedPending: true }, warnings: [...data.warnings, ...notes()] };
+        };
+        let failed = null;
+        const step = () => {
+          try {
+            live.partial(result);
+          } catch (e) {
+            failed ??= e;
+          }
+        };
+        read.steps.add(step);
+        try {
+          await read.done;
+        } finally {
+          read.steps.delete(step);
+        }
+        if (failed) throw failed;
+        return result();
+      },
+    },
+  };
+
   return {
     site: "GitHub",
+    forget: (view) => views[view.layout]?.forget?.(view),
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
     related: {
       reads: (item) => item.kind === "issue" && Number.isInteger(item.number) && item.repo.includes("/"),
@@ -5786,42 +6093,7 @@ export function makeGithub(paths) {
         return checkAssigned((await gh(paths, githubAssignArgs(item, person), { write: true, path: assignPath(item), ...what(view, "assign") })).json, item, person);
       },
     },
-    views: {
-      board: projectViews,
-      table: projectViews,
-      roadmap: projectViews,
-      list: {
-        together: (views) => views.filter((v) => v.source === "github" && v.layout === "list"),
-        async load(view, { live = NO_LIVE }) {
-          if (prsRead?.key !== prsReadKey(view)) prsRead = readPrs(view);
-          const read = prsRead;
-          const notes = () => {
-            if (read.notified?.keys === null) return [notifiedUnknown(read.notified.why)];
-            return read.notified?.unnamed ? [notifiedUnnamed(read.notified.unnamed)] : [];
-          };
-          const result = () => {
-            const data = parseGithubList(read.json, view, read.errors, { pending: read.pending, login: read.asked, notified: read.notified?.keys ?? null });
-            return { data: read.notified ? data : { ...data, notifiedPending: true }, warnings: [...data.warnings, ...notes()] };
-          };
-          let failed = null;
-          const step = () => {
-            try {
-              live.partial(result);
-            } catch (e) {
-              failed ??= e;
-            }
-          };
-          read.steps.add(step);
-          try {
-            await read.done;
-          } finally {
-            read.steps.delete(step);
-          }
-          if (failed) throw failed;
-          return result();
-        },
-      },
-    },
+    views,
   };
 }
 
@@ -6402,7 +6674,9 @@ export function typeTone(t, item) {
 // the shown context ("context"), each context's tab ("tab:<context>"),
 // each team's view ("teamView:<tab>"), each GitHub project's view
 // ("projectView:<tab>") and what the board knows of the project
-// ("project:<tab>", Board.learnProject), "nur meine" ("mine"), a Sprint's
+// ("project:<tab>", Board.learnProject), each Issues tab's view
+// ("issuesView:<tab>") and each of its views' solo repo
+// ("soloRepo:<view>", kinds/issues.js), "nur meine" ("mine"), a Sprint's
 // folded stories ("folded:<view>", readStoredFolds), the repo a
 // view's work item last started in ("repo:<view>", ui/modals/start.js) and
 // each view's last good data ("board:data:<view>", loading.js). A full or
@@ -6947,6 +7221,32 @@ export const toggleSwitch = (b, t, id, on, toggle) =>
     .on_click((_e, cx) => {
       if (!b.modal) toggle(cx);
     });
+
+// The „Repos:“ line of a PR tab: its shape's repoSwitches for
+// the data, a repo's count where it has one (held); null for none.
+export function repoLine(b, t, view, data) {
+  const switches = b.shape(view).repoSwitches(b, data);
+  if (!switches.length) return null;
+  return h_flex().id("repo-line").flex_none().flex_wrap().gap(6).px(16).pt(10).pb(2).items_center().text_size(12)
+    .child(div().text_color(t.muted).child("Repos:"))
+    .children(switches.map((e) =>
+      toggleSwitch(b, t, `repo-switch-${e.repo}`, !e.hidden, (cx) => b.toggleRepo(view, e.repo, cx))
+        .child(`${e.hidden ? "" : "✓ "}${e.name}`)
+        .when(e.held !== null, (el) => el.child(div().text_color(t.muted).child(shownOf(e.shown, e.held))))
+        .when(e.foreign, (el) => el.child(foreignChip(t)))));
+}
+
+// The note below a list its limit cut, `text`, once the read is whole;
+// null for none.
+export const limitNote = (t, data, text) =>
+  (data.limited && !data.partial ? div().px(16).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(text) : null);
+
+// A repo turned off or on in the settings of the view as views.json has it
+// now (a shape's toggleRepo).
+export function toggleRepoSetting(b, view, repo, cx) {
+  const now = b.viewById(view.id) ?? view;
+  b.changeSetting(repoHidePath(now), toggledRepos(now.hideRepos, repo), cx);
+}
 
 // A card's chip for its label `name`, in the label's color brought onto the
 // theme (hueTone).
@@ -7559,6 +7859,8 @@ function toggleAt(b, m, at, cx) {
 }
 
 export const columnsModal = {
+  needsData: true,
+
   open(b, view, cx) {
     b.modal = { kind: "columns", view, at: 0 };
     cx.notify();
@@ -8099,6 +8401,11 @@ const contextAt = (c) => shownIndex(contextsNow(c), c.b.context());
 
 const nextView = (c) => tabViewAfter(c.b.tab(), c.b.tabViewOf(c.b.tab()));
 
+function soloName(c) {
+  const { choices, after } = c.shape.soloSwitch(c.b, c.st);
+  return after === null ? "Alle Repos zeigen" : `Nur ${choices.find((x) => x.id === after).label} zeigen`;
+}
+
 // Whether the shown view has items to move over (none: the placeholder).
 const walks = (c) => Boolean(c.shape?.dirs.length);
 // Whether an item is selected and no line of the details panel, which
@@ -8218,6 +8525,12 @@ export const ACTIONS = [
     when: (c) => Boolean(c.view) && hasViewSwitch(c.b.tab()), takes: () => true,
     run: (b, c, cx) => b.nextTabView(cx),
     hint: (c) => (hasViewSwitch(c.b.tab()) ? viewSwitchHint(c.b.tab()) : null),
+  },
+  {
+    id: "solo-repo", group: "view", name: (c) => soloName(c), key: "V", menu: 25, bar: true,
+    when: (c) => has(c, "soloSwitch"),
+    run: (b, c, cx) => b.nextSoloRepo(cx),
+    hint: (c) => (has(c, "soloSwitch") && hasViewSwitch(c.b.tab()) ? "Alle/Repo" : null),
   },
   moveAction("move-left", "H", -1, "Nach links verschieben"),
   moveAction("move-right", "L", 1, "Nach rechts verschieben"),
@@ -8450,15 +8763,17 @@ export const commandsModal = {
 // ==== src/ui/choices.js ====
 
 // A dialog's choice fields (the start dialog's Agent, Rechner and Öffnen
-// in, the create dialog's Typ), from a table of the dialog's, by field: {
-// entries(m), each { id, name } (and a space's `folder`); current(m), the
-// id of the entry the field is on; value(m), the text the field shows;
-// take(b, row, cx), which puts the field on that entry; fieldAfter(row),
-// the field the dialog goes on to once the list took `row` (by default it
-// stays); the list's placeholder, none (said where the filter leaves no
-// row), empty(m) (said instead where no filter is typed), notes(m) (said
-// under the rows), width and anchor }. The open list is the dialog's
-// m.list.
+// in, the create dialog's Typ; the Issues tab's field „Repo:“ opens its list
+// as a dialog of its own, ui/modals/solo.js), from a table of the dialog's,
+// by field: { entries(m), each { id, name, aside (the texts at its right:
+// a space's folder, a repo's count) }; current(m), the id of the entry the
+// field is on; value(m), the text the field shows; take(b, row, cx), which
+// puts the field on that entry; fieldAfter(row), the field the dialog goes
+// on to once the list took `row` (by default it stays); closes (the dialog
+// ends once the list took a row or a press beside it closed it); the
+// list's placeholder, none (said where the filter leaves no row), empty(m)
+// (said instead where no filter is typed), notes(m) (said under the rows),
+// width and anchor }. The open list is the dialog's m.list.
 
 export const LIST_HINT = "Tippen filtert · ↑ ↓ wählt · ↵ übernimmt · Esc schließt die Liste";
 export const choiceHint = (enter) => `← → wählt · Leertaste öffnet die Liste · ↵ ${enter} · Tab wechselt das Feld`;
@@ -8478,10 +8793,13 @@ export function choiceBox(b, t, choices, field) {
     })
     .child(div().flex_1().min_w(0).truncate().child(choices[field].value(m)))
     .child(div().text_color(t.dim).child("▾"));
-  return Popup.new(`choice-${field}-list`, fieldFrame(t, m, field, trigger))
-    .anchor(choices[field].anchor)
-    .when(m.list?.choice === field, (el) => el.content(listPanel(b, t)));
+  return listPopup(b, t, field, choices[field].anchor, fieldFrame(t, m, field, trigger));
 }
+
+// The frame of the choice `field`, its list under it while that list is
+// open and `here` (the open dialog is the field's own).
+export const listPopup = (b, t, field, anchor, frame, here = true) =>
+  Popup.new(`choice-${field}-list`, frame).anchor(anchor).when(here && b.modal?.list?.choice === field, (el) => el.content(listPanel(b, t)));
 
 export function choiceKey(b, choices, k, cx) {
   const field = b.modal.field;
@@ -8505,18 +8823,18 @@ function step(b, spec, by, cx) {
   cx.notify();
 }
 
-function openList(b, choices, field, cx) {
+export function openList(b, choices, field, cx) {
   const m = b.modal;
   const spec = choices[field];
   if (m.busy || !spec) return;
-  const list = { choice: field, spec, field: "filter", mark: null };
+  const list = { choice: field, spec, field: "filter", mark: NOT_MOVED };
   m.field = field;
   m.list = list;
   wireFilter(m, list, {
     placeholder: spec.placeholder,
     count: () => listRows(m).length,
     startAt: () => {
-      list.mark = null;
+      list.mark = NOT_MOVED;
       return markedAt(m, listRows(m));
     },
     pick: (_at, cx) => {
@@ -8543,9 +8861,13 @@ export const listKeyboard = (m) => m.list?.input ?? null;
 
 const listRows = (m) => rankByName(m.list.spec.entries(m), m.list.filter);
 
+// The list's mark (the id of the entry ↑ ↓ moved to) before they move it:
+// an entry's id may be null („Alle“ of the field „Repo:“).
+const NOT_MOVED = undefined;
+
 function markedAt(m, rows) {
   const { list } = m;
-  const moved = list.mark === null ? -1 : rows.findIndex((r) => r.id === list.mark);
+  const moved = list.mark === NOT_MOVED ? -1 : rows.findIndex((r) => r.id === list.mark);
   if (moved >= 0) return moved;
   if (!rows.length) return -1;
   if (list.filter) return 0;
@@ -8573,7 +8895,9 @@ export function listKey(b, e, cx) {
     cx.stop_propagation();
     return takeRow(b, rows[list.at], cx);
   }
-  if (filterMenuKey(e, cx, list, rows.length)) list.mark = rows[list.at]?.id ?? null;
+  if (!filterMenuKey(e, cx, list, rows.length)) return;
+  const row = rows[list.at];
+  list.mark = row ? row.id : NOT_MOVED;
 }
 
 function takeRow(b, row, cx) {
@@ -8582,6 +8906,7 @@ function takeRow(b, row, cx) {
   const { spec, choice } = m.list;
   m.list = null;
   spec.take(b, row, cx);
+  if (spec.closes) return b.closeModal(cx);
   m.field = spec.fieldAfter?.(row) ?? choice;
   b.takeKeyboard();
   cx.notify();
@@ -8606,7 +8931,7 @@ function listPanel(b, t) {
       digits: false,
       rows: shown.map((r) => [
         markedName(t, r.name, r.at),
-        ...(r.folder ? [div().flex_none().max_w(160).truncate().text_size(11).text_color(t.dim).child(r.folder)] : []),
+        ...(r.aside ?? []).filter(Boolean).map((text) => div().flex_none().max_w(160).truncate().text_size(11).text_color(t.dim).child(text)),
       ]),
       ...win,
       pick: (i, cx) => takeRow(b, rows[i], cx),
@@ -8617,11 +8942,15 @@ function listPanel(b, t) {
     }));
 }
 
+// A press beside the open list closes it.
 export const listShield = (b) =>
   b.modal.list
     ? div().id("choice-list-shield").absolute().inset_0().on_mouse_down("left", (_e, cx) => {
       cx.stop_propagation();
-      closeList(b, cx);
+      const spec = b.modal?.list?.spec;
+      if (!spec) return;
+      if (spec.closes) b.closeModal(cx);
+      else closeList(b, cx);
     })
     : null;
 
@@ -8765,12 +9094,12 @@ export const createModal = {
 
 // ==== src/ui/modals/repos.js ====
 
-// The repo menu reads the repos from the view's data as they are now, so a
-// toggle shows at once.
+// The repo menu reads the repos from the view's data as they are now
+// (its shape's repoSwitches), so a toggle shows at once.
 
 function menuRepos(b, m) {
   const data = b.state(m.view.id).data;
-  return data?.sections ? repoSwitches(data, (r) => b.visible(r, data)) : [];
+  return data ? b.shape(m.view).repoSwitches?.(b, data) ?? [] : [];
 }
 
 function toggleRepoAt(b, m, at, cx) {
@@ -8782,6 +9111,8 @@ function toggleRepoAt(b, m, at, cx) {
 }
 
 export const reposModal = {
+  needsData: true,
+
   open(b, view, cx) {
     b.modal = { kind: "repos", view, at: 0 };
     cx.notify();
@@ -8800,7 +9131,7 @@ export const reposModal = {
         div().w(14).text_color(t.foreground).child(r.hidden ? "" : "✓"),
         div().flex_1().min_w(0).truncate().text_color(r.hidden ? t.muted : t.foreground).child(r.name),
         ...(r.foreign ? [foreignChip(t)] : []),
-        div().flex_none().text_size(11).text_color(t.dim).child(shownOf(r.shown, r.held)),
+        div().flex_none().text_size(11).text_color(t.dim).child(r.held === null ? "" : shownOf(r.shown, r.held)),
         div().w(80).flex_none().text_size(11).text_color(t.dim).child(r.hidden ? "ausgeblendet" : "gezeigt"),
       ]),
     });
@@ -8945,7 +9276,7 @@ const openedIn = (where) => where.space ?? where.gone ?? where.unread;
 
 const START_CHOICES = {
   repo: {
-    entries: (m) => m.repos.list.map((r) => ({ id: r.key, name: r.name, folder: m.repos.folders.length > 1 ? r.parent : null })),
+    entries: (m) => m.repos.list.map((r) => ({ id: r.key, name: r.name, aside: m.repos.folders.length > 1 ? [r.parent] : [] })),
     current: (m) => m.repo,
     value: (m) => chosenRepo(m)?.name ?? reposPending(m),
     take: (b, row) => {
@@ -9340,7 +9671,7 @@ const goneNote = ({ on, gone }) => `Den Space „${gone.name}“ ${onMachine(on)
 const unreadNote = ({ on, unread }) => `Den Space „${unread.name}“ ${onMachine(on)} kann das Board erst prüfen, wenn es die Spaces dort gelesen hat; warten oder neu wählen`;
 const uncheckedNote = (on, space) => `Den Space „${space.name}“ ${onMachine(on)} konnte das Board nicht prüfen; die Spaces dort waren nicht gelesen`;
 
-const spaceRows = (m) => [{ id: NEW_SPACE, name: NEW_SPACE_LABEL, folder: null }, ...whereToOpen(m).here.map((s) => ({ id: s.id, name: s.name, folder: s.folder }))];
+const spaceRows = (m) => [{ id: NEW_SPACE, name: NEW_SPACE_LABEL, aside: [] }, ...whereToOpen(m).here.map((s) => ({ id: s.id, name: s.name, aside: [s.folder] }))];
 
 function chooseSpace(m, row) {
   m.target = row.id === NEW_SPACE ? NEW_SPACE : { id: row.id, name: row.name };
@@ -9463,6 +9794,219 @@ export const sessionsModal = {
   key: (b, e, cx) => menuKey(e, cx, b.modal, choicesOf(b.modal).length, (i, cx) => pickChoice(b, b.modal, i, cx)),
 };
 
+// ==== src/kinds/rows.js ====
+
+// A GitHub row as a saved state keeps it (a table's, an Issues tab's).
+
+// GitHub's address of an issue or pull request.
+export const itemUrl = (row) => `https://github.com/${row.repo}/${row.kind === "pr" ? "pull" : "issues"}/${row.number}`;
+
+// A row without its itemId and without its url where that is GitHub's
+// address of it; and such a row with its url back, its itemId null, as
+// outside a project.
+export const keptGithubRow = ({ itemId, url, ...row }) => ({ ...row, ...(url === itemUrl(row) ? {} : { url }) });
+export const githubRowBack = (row) => ({ ...row, itemId: null, url: Object.hasOwn(row, "url") ? row.url : itemUrl(row) });
+
+// ==== src/kinds/issues.js ====
+
+// An Issues tab's view: its rows of the repos turned on, grouped by repo,
+// the repo it shows alone (its solo repo) and the choices of its switch,
+// the switches of its repo menu, whether its query left out other repos
+// than it hides now, how a closed issue's row is marked, and the form its
+// saved state takes.
+// parseGithubIssues (sources/github.js) builds the data.
+
+const foldedRepos = (repos) => repos.map(foldedName);
+
+export const keptIssues = (data) => data.rows.filter((r) => !hidesRepo(data, r.repo));
+
+// The repos turned off as the read began that are turned on now: their
+// issues come with the next read.
+export const waitingRepos = (data) => data.readHidden.filter((r) => !hidesRepo(data, r));
+
+// Whether the read that `read` names the hidden repos of (a view's, or its
+// data's readHidden) leaves out other repos than `hideRepos`.
+export const readsOtherRepos = (read, hideRepos) => !sameNames(foldedRepos(read), foldedRepos(hideRepos));
+
+// The repos the solo switch offers: those turned on with issues in the
+// read, in the order their first row stands, each named as that row names
+// it.
+export function soloRepos(data) {
+  const repos = new Map();
+  for (const { repo } of keptIssues(data)) if (!repos.has(foldedName(repo))) repos.set(foldedName(repo), repo);
+  return [...repos.values()];
+}
+
+const soloAmong = (repos, chosen) => (chosen ? repos.find((r) => foldedName(r) === foldedName(chosen)) ?? null : null);
+
+// The solo switch with `chosen` the solo repo: its choices, „Alle“ (id
+// null), then the repos soloRepos offers, each { id, label }; the one shown
+// (chosen; null: all), and the one after it, past the last all again.
+export function issueSoloSwitch(data, chosen) {
+  const repos = soloRepos(data);
+  const ids = [null, ...repos];
+  const shown = soloAmong(repos, chosen);
+  return {
+    choices: ids.map((id) => ({ id, label: id === null ? "Alle" : id.split("/").pop() })),
+    chosen: shown,
+    after: ids[(ids.indexOf(shown) + 1) % ids.length],
+  };
+}
+
+// How many issues a choice of the solo switch holds and `visible` lets
+// through, by its id: { held, shown }.
+export function soloCounts(data, visible) {
+  const rows = keptIssues(data);
+  const { switches } = countedSwitches(data, rows, visible);
+  const all = { held: rows.length, shown: [...switches.values()].reduce((n, s) => n + s.shown, 0) };
+  return (id) => {
+    const { held, shown } = id === null ? all : switches.get(foldedName(id));
+    return { held, shown };
+  };
+}
+
+// Where the store keeps a view's solo repo, as long as the view switch's
+// choice.
+export const soloKey = (id) => `soloRepo:${id}`;
+
+// A solo repo as the store kept it: a repo's name, else none.
+export const storedSolo = (kept) => (isText(kept) ? kept : null);
+
+export const soloRepoOf = (data, chosen) => soloAmong(soloRepos(data), chosen);
+
+const groupOf = ({ repo, name }) => ({ id: `repo:${foldedName(repo)}`, name, color: "muted" });
+
+// The lines of the list, in its order: with a solo repo its rows that
+// `visible` lets through ({ row }); else per repo with such a row, where its
+// first row stands, its group line ({ group, shown, held: how many of its
+// rows show and how many it holds }) and those rows, then a group line per
+// waiting repo ({ group, waiting: true }).
+export function issueLines(data, visible, solo) {
+  const rows = keptIssues(data);
+  const alone = soloRepoOf(data, solo);
+  if (alone) return rows.filter((r) => foldedName(r.repo) === foldedName(alone) && visible(r)).map((row) => ({ row }));
+  const lines = [];
+  for (const g of repoGroups(data, rows, visible)) {
+    lines.push({ group: groupOf(g), shown: g.rows.length, held: g.held });
+    lines.push(...g.rows.map((row) => ({ row })));
+  }
+  for (const repo of waitingRepos(data)) lines.push({ group: groupOf(repoLook(data, repo)), waiting: true });
+  return lines;
+}
+
+// The switches of the repo menu, whose counts the list of the field
+// „Repo:“ shows too: the repos with issues in the read, where their first
+// row stands, then the owner's other repos turned on, by name, those
+// waiting among them, then those turned off: {
+// repo, name, foreign, hidden, held (its issues read; null for a repo
+// turned off or waiting), shown (those `visible` lets through) }.
+export function issueSwitches(data, visible) {
+  const { switches, add } = countedSwitches(data, keptIssues(data), visible);
+  const waiting = new Set(foldedRepos(waitingRepos(data)));
+  for (const repo of [...data.repos, ...waitingRepos(data)]) if (!hidesRepo(data, repo)) add(repo, { held: waiting.has(foldedName(repo)) ? null : 0 });
+  for (const repo of data.hideRepos) add(repo, { held: null });
+  return [...switches.values()];
+}
+
+// The tone of a row's stripe: a closed issue's by the reason GitHub gives
+// (stateReason), violet for completed, grey for any other, as GitHub draws
+// them; none for an open one.
+export const closedTone = (data, row) => (data.meta.state !== "closed" ? null : row.stateReason === "COMPLETED" ? COPPER_HUES.violet : "muted");
+
+// The data as its saved state keeps it: its rows packed (packRows), each
+// as keptGithubRow keeps it, without its contentId, its key; and that form
+// read back.
+export function savedIssues(data) {
+  const { rows, ...rest } = data;
+  return { ...rest, packed: packRows(rows.map(({ contentId, ...row }) => keptGithubRow(row))) };
+}
+
+export function issuesFromSaved(data) {
+  const { packed, ...rest } = data;
+  return { ...rest, rows: unpackRows(packed).map((row) => ({ ...githubRowBack(row), contentId: row.key })) };
+}
+
+// ==== src/ui/modals/solo.js ====
+
+// The field „Repo:“ in the top bar of an Issues tab (Board.toolbar), its
+// solo repo, and the list a click opens under it: „Alle“ and the repos of
+// its solo switch (its shape's soloSwitch), each with how many of its
+// issues show (soloCounts), the chosen one marked, as a dialog's choice list
+// (ui/choices.js). Opened, the list is the dialog b.modal = { kind: "solo",
+// view, field, list }; a pick shows that repo alone, or all for „Alle“
+// (Board.setSoloRepo), and the list closes on a pick, Esc or a press beside
+// it.
+
+// The field's name among choice fields: no dialog has one so named.
+const SOLO_FIELD = "solo";
+const SOLO_ANCHOR = "top_left";
+
+// „Repo:“ and a name of about 20 letters (claude-matrix-bridge) at the
+// board's 13 px; a longer one is cut, so the filter beside it stays where it
+// is while V steps.
+export const SOLO_W = 220;
+
+function soloNow(b, view) {
+  const st = b.state(view.id);
+  return st.data ? b.shape(view).soloSwitch(b, st) : null;
+}
+
+function soloEntries(b, view) {
+  const solo = soloNow(b, view);
+  if (!solo) return [];
+  const data = b.state(view.id).data;
+  const count = soloCounts(data, (r) => b.visible(r, data));
+  return solo.choices.map(({ id, label }) => {
+    const { shown, held } = count(id);
+    return { id, name: label, aside: [shownOf(shown, held)] };
+  });
+}
+
+const soloChoices = (b) => ({
+  [SOLO_FIELD]: {
+    entries: (m) => soloEntries(b, m.view),
+    current: (m) => soloNow(b, m.view)?.chosen ?? null,
+    take: (b, row, cx) => b.setSoloRepo(b.modal.view, row.id, cx),
+    closes: true,
+    placeholder: "Filter: Name des Repos",
+    none: "Kein Repo passt zum Filter",
+    width: 360,
+    anchor: SOLO_ANCHOR,
+  },
+});
+
+export function soloField(b, t, view, solo) {
+  const name = solo.choices.find((c) => c.id === solo.chosen).label;
+  const field = fieldBox(t, b.modal ?? {}, SOLO_FIELD)
+    .id("solo-repo")
+    .flex_none()
+    .w(SOLO_W)
+    .h(32)
+    .gap(6)
+    .items_center()
+    .cursor_pointer()
+    .on_click((_e, cx) => {
+      if (!b.modal) soloModal.open(b, view, cx);
+    })
+    .child(div().flex_none().text_color(t.dim).child("Repo:"))
+    .child(div().flex_1().min_w(0).truncate().child(name))
+    .child(div().flex_none().text_color(t.dim).child("▾"));
+  return listPopup(b, t, SOLO_FIELD, SOLO_ANCHOR, field, b.modal?.view?.id === view.id);
+}
+
+export const soloModal = {
+  open(b, view, cx) {
+    b.modal = { kind: "solo", view, field: SOLO_FIELD, list: null };
+    openList(b, soloChoices(b), SOLO_FIELD, cx);
+  },
+
+  needsData: true,
+  hint: LIST_HINT,
+  keyboard: listKeyboard,
+  key: (b, e, cx) => listKey(b, e, cx),
+  render: (b) => listShield(b),
+};
+
 // ==== src/ui/modals/status.js ====
 
 // The status menu: the columns a card may go to, or the states an item may
@@ -9504,18 +10048,23 @@ export const statusModal = {
 
 // The dialogs drawn over the board, by b.modal.kind: each has render(b, t)
 // and key(b, e, cx), which gets every key but Esc (the Board closes a dialog
-// on Esc unless it is busy, or unless its escape(b, cx) took Esc: Esc in a
-// choice's open list closes only the list). A dialog keeps its state, and
-// makes the inputs it needs, in b.modal; one that belongs to a view keeps
-// it as b.modal.view, and a reload that finishes while it is open closes it
-// when the config no longer has that view of that kind. A dialog with
-// fields also has tab(b, back, cx), which Tab and shift-Tab (`back`) call
-// to move between them (Board.tabKey). Optional: keys, the key bindings
-// Board.bindKeys binds for it, and keyboard(m), the input that takes the
-// keyboard before its fields (Board.takeKeyboard). A new dialog is a module
-// here and its entry in MODALS.
+// on Esc unless it is busy, or unless its escape(b, cx) took Esc: Esc in the
+// start or create dialog's open list closes only the list). A dialog keeps
+// its state, and makes the inputs it needs, in b.modal; one that belongs to
+// a view keeps it as b.modal.view, and a reload that finishes while it is
+// open closes it when the config no longer has that view of that kind. One
+// with needsData draws from the view's data as it is now (the solo, repo
+// and column menus; the others draw from what they took as they opened), so
+// a failed read that leaves the view no data closes it unless it is busy
+// (Board.dataGone). A dialog with fields also has tab(b, back, cx), which
+// Tab and shift-Tab (`back`) call to move between them (Board.tabKey).
+// Optional: keys, the key bindings Board.bindKeys binds for it,
+// keyboard(m), the input that takes the keyboard before its fields
+// (Board.takeKeyboard), and hint, what the board's hint line says while it
+// is open in place of the board's keys. A new dialog is a module here and
+// its entry in MODALS.
 
-export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal, sessions: sessionsModal, repos: reposModal };
+export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal, sessions: sessionsModal, repos: reposModal, solo: soloModal };
 
 // ==== src/ui/shapes/backlog.js ====
 
@@ -9774,6 +10323,43 @@ export function revealTop(s, at) {
 export function revealCard(s, at, content, top, height) {
   const to = revealOffset({ offset: at.offset, viewport: at.viewport, content }, top, height);
   s.revealed = to === at.offset ? null : { from: at.offset, to };
+}
+
+// A list of lines drawn in its band (a table's, an Issues tab's): its state
+// on the Board (windowedState), the scroll that shows a line (scrollToLine),
+// whether the list left its band (linesLeftBand), and the list itself
+// (windowedLines).
+export function windowedState() {
+  const scroll = ScrollHandle.new();
+  return { scroll, band: bandState(), windowed: readsScroll(scroll) };
+}
+
+export function scrollToLine(s, heights, at) {
+  if (s.windowed) {
+    const { starts, content } = spanStarts(heights, 0);
+    revealCard(s.band, scrollOf(s.scroll), content, starts[at], heights[at]);
+  }
+  s.scroll.scroll_to_item(at);
+}
+
+export const linesLeftBand = (s) => s.windowed && leftBand(s.band, scrollOf(s.scroll));
+
+// The list `id` of `lines`, `heights` high: each line in its band drawn
+// (draw), every other an empty frame of its height; `wheel` takes a wheel
+// event over it first. Null for no lines, the band placed all the same.
+export function windowedLines(s, id, lines, heights, draw, wheel = null) {
+  const at = s.windowed ? scrollOf(s.scroll) : null;
+  const layout = at && spanStarts(heights, 0);
+  if (at) placeBand(s.band, layout.content, at);
+  if (!lines.length) return null;
+  const lineEl = (l, i) => (layout && !inBand(s.band, layout.starts[i], heights[i]) ? div().flex_none().h(heights[i]) : draw(l));
+  return v_flex().id(id).flex_1().min_h(0).overflow_y_scrollbar().track_scroll(s.scroll)
+    .when(s.windowed || Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => {
+      if (wheel) wheel(e, cx);
+      // GPUI moved the list before the event reached it.
+      if (s.windowed && leftBand(s.band, scrollOf(s.scroll))) cx.notify();
+    }))
+    .children(lines.map(lineEl));
 }
 
 // ==== src/ui/shapes/board.js ====
@@ -10259,6 +10845,116 @@ function openBoardStatusMenu(b, view) {
   b.modal = { kind: "status", view, key: card.key, targets, at };
 }
 
+// ==== src/ui/shapes/issues.js ====
+
+// The issues shape: an Issues tab's view, the owner's open or closed issues
+// as one list walked as one column, grouped by repo under a group row with
+// its name and count (kinds/issues.js, issueLines), or one repo's alone
+// without one (its solo repo, the field „Repo:“ beside the view switch,
+// ui/modals/solo.js). A row has its key, title, type and labels, session,
+// milestone, assignees and age, a line across its top in its issue type's
+// color, and on a closed issue a stripe at its left by why it was closed
+// (closedTone). The repo menu (R) turns a repo off and on: the read leaves
+// the repos turned off out, so one turned on waits for the next read, its
+// group row with the spinner at the list's end. The list draws whole only
+// the lines about where it stands (ui/band.js), as a table does. The data:
+// parseGithubIssues's (sources/github.js). View fields it reads: id,
+// settingsPath, hideRepos.
+
+const issuesState = (b) => b.shapeState.issues;
+
+const ISSUES_ASSIGN = { find: findRow, withItem: withRow, where: "in der Liste" };
+
+// A row's and a group row's height: each is drawn this high, so the band
+// needs no measure.
+export const ISSUE_ROW_H = 34;
+export const ISSUE_GROUP_H = 28;
+
+const ISSUE_W = { key: 170, milestone: 140, assignees: 150, age: 70 };
+
+const issueVisible = (b, data) => (r) => b.visible(r, data);
+const issueLinesOf = (b, st) => issueLines(st.data, issueVisible(b, st.data), st.soloRepo);
+const issueLineHeight = (line) => (line.row ? ISSUE_ROW_H : ISSUE_GROUP_H);
+const issueNav = (b, st) => [{ id: "issues", shown: issueLinesOf(b, st).flatMap((l) => (l.row ? [l.row] : [])) }];
+
+export const issuesShape = {
+  state: windowedState,
+  nav: issueNav,
+  selected: (b, st) => issueNav(b, st)[0].shown.find((r) => r.key === st.sel?.key) ?? null,
+  scrollTo(b, view, sel) {
+    const lines = issueLinesOf(b, b.state(view.id));
+    const at = lines.findIndex((l) => l.row?.key === sel.key);
+    if (at >= 0) scrollToLine(issuesState(b), lines.map(issueLineHeight), at);
+  },
+  bandsLeft: (b) => linesLeftBand(issuesState(b)),
+  items: keptIssues,
+  count(b, data) {
+    const rows = keptIssues(data);
+    return { shown: rows.filter(issueVisible(b, data)).length, total: rows.length };
+  },
+  render: (b, t, mono, view, st) => drawIssues(b, t, mono, view, st),
+  dirs: ["up", "down"],
+  loads: true,
+  received(data, st, view) {
+    const shown = withRepoView(data, view);
+    if (!shown.partial && st.soloRepo && !soloRepoOf(shown, st.soloRepo)) {
+      st.soloRepo = null;
+      store.remove(soloKey(view.id));
+    }
+    return shown;
+  },
+  withView: withRepoView,
+  readsAgain: (st, view) => readsOtherRepos(st.loading && st.readFor ? st.readFor.hideRepos : st.data.readHidden, view.hideRepos),
+  toggleRepo: toggleRepoSetting,
+  repoSwitches: (b, data) => issueSwitches(data, issueVisible(b, data)),
+  soloSwitch: (b, st) => issueSoloSwitch(st.data, st.soloRepo),
+  toSaved: savedIssues,
+  fromSaved: issuesFromSaved,
+  warnings: () => [],
+  settle: (b, view, due, data, cx) => tellOutcomes(b, unclearAssignLines(due.filter((u) => u.kind === "assign"), data, ISSUES_ASSIGN), cx),
+  assign: ISSUES_ASSIGN,
+};
+
+const issueCell = (t, w, text) => div().w(w).flex_none().truncate().text_size(12).text_color(t.muted).child(text);
+
+function drawIssues(b, t, mono, view, st) {
+  const data = st.data;
+  const sessions = b.sessionsNow();
+  const now = Date.now();
+  const lines = issueLinesOf(b, st);
+  const row = (r) => {
+    const session = itemSessions(sessions, r)[0] ?? null;
+    const line = typeLine(t, r, null);
+    const tone = closedTone(data, r);
+    const chips = [typeChip(t, r), ...r.labels.map((l) => labelChip(t, r, l))].filter(Boolean).map((c) => c.flex_none());
+    return listRow(b, t, view, st, r, tone ? toneColor(t, tone) : t.background)
+      .h(ISSUE_ROW_H)
+      .child(div().w(ISSUE_W.key).flex_none().truncate().font_family(mono).text_size(11.5).text_color(t.muted).child(cardLabel(r)))
+      .child(h_flex().flex_1().min_w(0).gap(8).items_center().overflow_hidden()
+        .child(div().min_w(0).truncate().child(r.title))
+        .children(chips)
+        .when(Boolean(session), (el) => el.child(sessionChip(t, session).flex_none())))
+      .child(h_flex().w(ISSUE_W.milestone).flex_none().min_w(0).when(Boolean(r.milestone), (el) => el.child(toneChip(t, r.milestone, "muted").min_w(0).truncate())))
+      .child(issueCell(t, ISSUE_W.assignees, r.assignees.join(", ")))
+      .child(issueCell(t, ISSUE_W.age, ageLabel(r.updatedAt, now)))
+      .when(Boolean(line), (el) => el.child(line));
+  };
+  const groupRow = (l) => {
+    const head = groupHead(t, l.group, l.waiting ? "" : shownOf(l.shown, l.held)).id(`group-${l.group.id}`).h(ISSUE_GROUP_H).px(20);
+    if (!l.waiting) return head;
+    const said = div().text_size(12).text_color(t.muted);
+    return st.loading ? head.child(spinner()).child(said.child("Lädt …")) : head.child(said.child(`nicht gelesen – ${b.keyShown("reload")} liest neu`));
+  };
+  const list = windowedLines(issuesState(b), "issue-rows", lines, lines.map(issueLineHeight), (l) => (l.row ? row(l.row) : groupRow(l)));
+  const box = v_flex().id("issues-box").flex_1().min_h(0);
+  if (!list) {
+    const what = keptIssues(data).length ? NOTHING_SHOWS : data.partial ? null : data.meta.state === "closed" ? "Keine geschlossenen Issues" : "Keine offenen Issues";
+    return box.when(Boolean(what), (el) => el.child(div().p(20).text_color(t.muted).child(what)));
+  }
+  const note = limitNote(t, data, `Nur die ersten ${data.count} von ${data.total} Issues`);
+  return box.child(list).when(Boolean(note), (el) => el.child(note));
+}
+
 // ==== src/ui/shapes/placeholder.js ====
 
 // The placeholder shape: what a view whose source reads nothing for it yet
@@ -10303,10 +10999,6 @@ const prsRows = (b, st) => [{ shown: (st.data?.sections ?? []).flatMap((s) => se
 
 const keptAll = (data) => data.sections.flatMap((s) => keptRows(data, s));
 
-function withView(data, view) {
-  return sameNames(data.hideRepos ?? [], view.hideRepos) ? data : { ...data, hideRepos: [...view.hideRepos] };
-}
-
 export const prsShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
   nav: prsRows,
@@ -10321,12 +11013,10 @@ export const prsShape = {
   dirs: ["up", "down"],
   loads: true,
   enterHint: "Detail · Review",
-  received: (data, _st, view) => withView(data, view),
-  withView,
-  toggleRepo(b, view, repo, cx) {
-    const now = b.viewById(view.id) ?? view;
-    b.changeSetting(repoHidePath(now), toggledRepos(now.hideRepos, repo), cx);
-  },
+  received: (data, _st, view) => withRepoView(data, view),
+  withView: withRepoView,
+  toggleRepo: toggleRepoSetting,
+  repoSwitches: (b, data) => repoSwitches(data, (r) => b.visible(r, data)),
   warnings: (_view, data) =>
     data.sections.flatMap((s) => [
       ...(s.skipped ? [`${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`] : []),
@@ -10395,7 +11085,7 @@ function drawPrs(b, t, mono, view, st) {
     }
   }
   const list = v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(prsState(b).scroll).children(children);
-  const above = [repoLine(b, t, view, st), st.data.notifiedPending ? div().id("notified-pending").px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.info)).child(NOTIFIED_PENDING) : null].filter(Boolean);
+  const above = [repoLine(b, t, view, st.data), st.data.notifiedPending ? div().id("notified-pending").px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.info)).child(NOTIFIED_PENDING) : null].filter(Boolean);
   return above.length ? v_flex().flex_1().min_h(0).children(above).child(list) : list;
 }
 
@@ -10404,18 +11094,6 @@ function repoRow(t, mono, id, group) {
     .child(div().font_family(mono).text_size(11).text_color(t.muted).child(group.name))
     .child(div().text_size(11).text_color(t.dim).child(shownOf(group.rows.length, group.held)))
     .when(group.foreign, (el) => el.child(foreignChip(t)));
-}
-
-function repoLine(b, t, view, st) {
-  const switches = repoSwitches(st.data, (r) => b.visible(r, st.data));
-  if (!switches.length) return null;
-  return h_flex().id("repo-line").flex_none().flex_wrap().gap(6).px(16).pt(10).pb(2).items_center().text_size(12)
-    .child(div().text_color(t.muted).child("Repos:"))
-    .children(switches.map((e) =>
-      toggleSwitch(b, t, `repo-switch-${e.repo}`, !e.hidden, (cx) => b.toggleRepo(view, e.repo, cx))
-        .child(`${e.hidden ? "" : "✓ "}${e.name}`)
-        .child(div().text_color(t.muted).child(shownOf(e.shown, e.held)))
-        .when(e.foreign, (el) => el.child(foreignChip(t)))));
 }
 
 function scrollToRow(b, view, key) {
@@ -10842,18 +11520,16 @@ export function tableWarnings(view, data) {
   return [...shown, ...unreadableOrder(view, data.meta.unreadable ?? [])];
 }
 
-// GitHub's address of an issue or pull request, which a saved row leaves
-// out where the item's url is that, as it leaves out its itemId, its key.
-const itemUrl = (row) => `https://github.com/${row.repo}/${row.kind === "pr" ? "pull" : "issues"}/${row.number}`;
 const spread = (prefix, list) => Object.fromEntries(list.map((v, i) => [`${prefix}${i}`, v]));
 const gather = (row, prefix, count) => Array.from({ length: count }, (_, i) => row[`${prefix}${i}`] ?? null);
 
 // A table's data as its saved state keeps it: its rows packed (packRows),
-// each cell and sort key's rank a trait of its own, so that a value many
-// rows hold is kept once; and that form read back.
+// each as keptGithubRow keeps it, each cell and sort key's rank a trait of
+// its own, so that a value many rows hold is kept once; and that form read
+// back, each row's itemId its key.
 export function savedTable(data) {
   const { rows, ...rest } = data;
-  const kept = rows.map(({ itemId, url, cells, ranks, ...row }) => ({ ...row, ...(url === itemUrl(row) ? {} : { url }), ...spread("cell:", cells), ...spread("rank:", ranks) }));
+  const kept = rows.map(({ cells, ranks, ...row }) => ({ ...keptGithubRow(row), ...spread("cell:", cells), ...spread("rank:", ranks) }));
   return { ...rest, packed: packRows(kept) };
 }
 
@@ -10861,7 +11537,7 @@ export function tableFromSaved(data) {
   const { packed, ...rest } = data;
   const rows = unpackRows(packed).map((kept) => {
     const row = Object.fromEntries(Object.entries(kept).filter(([name]) => !name.includes(":")));
-    return { ...row, itemId: row.key, url: Object.hasOwn(row, "url") ? row.url : itemUrl(row), cells: gather(kept, "cell:", data.fields.length), ranks: gather(kept, "rank:", data.sortBy.length) };
+    return { ...githubRowBack(row), itemId: row.key, cells: gather(kept, "cell:", data.fields.length), ranks: gather(kept, "rank:", data.sortBy.length) };
   });
   return { ...rest, rows };
 }
@@ -10939,28 +11615,15 @@ const linesOf = (b, data) => tableLines(data, visibleIn(b, data));
 const lineHeight = (line) => (line.row ? TABLE_ROW_H : TABLE_GROUP_H);
 
 export const tableShape = {
-  state() {
-    const scroll = ScrollHandle.new();
-    return { scroll, band: bandState(), windowed: readsScroll(scroll), width: 0, stripAt: new Map() };
-  },
+  state: () => ({ ...windowedState(), width: 0, stripAt: new Map() }),
   nav: (b, st) => tableNav(st.data, visibleIn(b, st.data)),
   selected: (b, st) => tableNav(st.data, visibleIn(b, st.data))[0].shown.find((r) => r.key === st.sel?.key) ?? null,
   scrollTo(b, view, sel) {
-    const st = b.state(view.id);
-    const s = tableState(b);
-    const lines = linesOf(b, st.data);
+    const lines = linesOf(b, b.state(view.id).data);
     const at = lines.findIndex((l) => l.row?.key === sel.key);
-    if (at < 0) return;
-    if (s.windowed) {
-      const { starts, content } = spanStarts(lines.map(lineHeight), 0);
-      revealCard(s.band, scrollOf(s.scroll), content, starts[at], lineHeight(lines[at]));
-    }
-    s.scroll.scroll_to_item(at);
+    if (at >= 0) scrollToLine(tableState(b), lines.map(lineHeight), at);
   },
-  bandsLeft(b) {
-    const s = tableState(b);
-    return s.windowed && leftBand(s.band, scrollOf(s.scroll));
-  },
+  bandsLeft: (b) => linesLeftBand(tableState(b)),
   items: (data) => data.rows,
   count: (b, data) => ({ shown: data.rows.filter(visibleIn(b, data)).length, total: data.rows.length }),
   render: (b, t, mono, view, st) => drawTable(b, t, mono, view, st),
@@ -11010,10 +11673,6 @@ function drawTable(b, t, mono, view, st) {
   const s = tableState(b);
   const sessions = b.sessionsNow();
   const lines = linesOf(b, data);
-  const heights = lines.map(lineHeight);
-  const at = s.windowed ? scrollOf(s.scroll) : null;
-  const layout = at && spanStarts(heights, 0);
-  if (at) placeBand(s.band, layout.content, at);
   const rest = data.fields.slice(1);
   const strip = stripOf(s, data);
   const offset = strip ? stripOffset(s, view, strip) : 0;
@@ -11045,10 +11704,7 @@ function drawTable(b, t, mono, view, st) {
       .when(Boolean(line), (el) => el.child(line));
   };
   const groupRow = (g) => groupHead(t, g.group, shownOf(g.shown, g.held)).id(`group-${g.group.id}`).h(TABLE_GROUP_H).px(TABLE_PAD.left).map(takesSideWheel);
-  const lineEl = (l, i) => {
-    if (layout && !inBand(s.band, layout.starts[i], heights[i])) return div().flex_none().h(heights[i]);
-    return l.row ? row(l.row) : groupRow(l);
-  };
+  const list = windowedLines(s, "table-rows", lines, lines.map(lineHeight), (l) => (l.row ? row(l.row) : groupRow(l)), wheel);
   const box = v_flex().id("table-box").flex_1().min_h(0)
     .on_size_change((size, cx) => {
       const width = unzoomed(size.width);
@@ -11057,22 +11713,15 @@ function drawTable(b, t, mono, view, st) {
       cx.notify();
     })
     .child(head);
-  if (!lines.length) {
+  if (!list) {
     const what = data.rows.length ? NOTHING_SHOWS : data.partial ? null : noItemsText(data.meta.filter);
     return box.when(Boolean(what), (el) => el.child(div().p(20).text_color(t.muted).child(what)));
   }
+  const note = limitNote(t, data, `Nur die ersten ${data.count} von ${data.total} Einträgen; den Filter enger fassen`);
   return box
-    .child(v_flex().id("table-rows").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(s.scroll)
-      .when(s.windowed || Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => {
-        if (wheel) wheel(e, cx);
-        // GPUI moved the list before the event reached it.
-        if (s.windowed && leftBand(s.band, scrollOf(s.scroll))) cx.notify();
-      }))
-      .children(lines.map(lineEl)))
+    .child(list)
     .when(Boolean(strip), (el) => el.child(stripBar(t, strip, offset, wheel)))
-    .when(Boolean(data.limited) && !data.partial, (el) =>
-      el.child(div().px(16).py(8).text_size(12).text_color(toneColor(t, NOTE_TONES.warning))
-        .child(`Nur die ersten ${data.count} von ${data.total} Einträgen; den Filter enger fassen`)));
+    .when(Boolean(note), (el) => el.child(note));
 }
 
 // ==== src/ui/shapes/index.js ====
@@ -11106,24 +11755,30 @@ function drawTable(b, t, mono, view, st) {
 // unclear writes of its items ended up), withView (data, view: the data as
 // the view's settings show it now, the same data where they change nothing
 // for it), toggleRepo (b, view, repo, cx: turns a repo off or on, beside the
-// repo menu, ui/modals/repos.js), moveTo, toggleColumn, openStatusMenu with
-// statusField (b, view: the name of what the status menu sets, where it is
-// not the status; null for none), navigate (its own keyboard movement in
-// place of navigate's, select.js), sideways (b, view, by: h/l and the left
-// and right arrows where its dirs leave them out, its view scrolled sideways
-// one step; by = 1 for l/→, -1 for h/←), pickStatus (what a pick in the
-// status menu does in place of a move to that column), and assign (how its
-// items' assignees are found and changed: { find(data, key), withItem(data,
-// key, patch) (the data with the item's fields set), where (where an item no
-// longer is: "im Sprint") }; a shape that has it takes a, the assignee
-// picker, ui/modals/assign.js, and its settle says the outcomes of unclear
-// assignments, unclearAssignLines).
+// repo menu, ui/modals/repos.js, and a PR tab's „Repos:“ line, ui/helpers.js
+// repoLine, which list its repoSwitches (b, data)), readsAgain (st, view:
+// whether the view's settings now leave other repos out of its query than
+// its data or the read under way did, which reads it again), soloSwitch
+// (b, st: { choices ({ id, label }), chosen, after: the choice V picks },
+// the field „Repo:“ beside the view switch and its list, ui/modals/solo.js,
+// Board.setSoloRepo), moveTo, toggleColumn,
+// openStatusMenu with statusField (b, view: the name of what the status menu
+// sets, where it is not the status; null for none), navigate (its own
+// keyboard movement in place of navigate's, select.js), sideways (b, view,
+// by: h/l and the left and right arrows where its dirs leave them out, its
+// view scrolled sideways one step; by = 1 for l/→, -1 for h/←), pickStatus
+// (what a pick in the status menu does in place of a move to that column),
+// and assign (how its items' assignees are found and changed: { find(data,
+// key), withItem(data, key, patch) (the data with the item's fields set),
+// where (where an item no longer is: "im Sprint") }; a shape that has it
+// takes a, the assignee picker, ui/modals/assign.js, and its settle says the
+// outcomes of unclear assignments, unclearAssignLines).
 // A shape keeps its own state per Board in b.shapeState[name], which its
 // state() makes once, when the Board starts: herdr refuses a ScrollHandle
 // made while a view draws ("cannot run during render"). A new way to draw
 // is a module here and its entry in SHAPES.
 
-export const SHAPES = { board: boardShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, table: tableShape, placeholder: placeholderShape };
+export const SHAPES = { board: boardShape, issues: issuesShape, prs: prsShape, sprint: sprintShape, backlog: backlogShape, table: tableShape, placeholder: placeholderShape };
 
 // ==== src/description.js ====
 
@@ -11618,8 +12273,6 @@ export const BAND_MS = 100;
 // Why "nur meine" cannot tell one's own items, where the source has no words
 // of its own for it (noViewer): it did not name the login it read as.
 const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
-// Where the store keeps the view a team's or a project's tab shows.
-const tabViewKey = (tab) => `${tab.kind === "team" ? "teamView" : "projectView"}:${tab.id}`;
 // Keys the board binds in its own key context. herdr binds Tab and
 // shift-Tab app-wide (gpui-kit's ShellRoot), to moving the keyboard to the
 // next or previous tab stop, and runs a matching binding's action before
@@ -11831,14 +12484,16 @@ export default class Board extends View {
   // one; never stored), saved (the data drawn is the saved state, or what a
   // read drew over it so far), restored (the saved state was looked for),
   // unsaved (why the store did not take its last read: UNSAVED; null where
-  // it did), progress ({ page, pages }) and unavailable (the last read since
-  // views.json was read found its source unavailable).
+  // it did), progress ({ page, pages }), unavailable (the last read since
+  // views.json was read found its source unavailable), readFor (the view as
+  // the read under way, or the last, reads it) and soloRepo (the repo an
+  // Issues tab's view shows alone, null for all; soloKey).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
       related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)), chosenFolds: new Map(), sprint: null,
-      saved: false, restored: false, unsaved: null, progress: null, unavailable: false,
+      saved: false, restored: false, unsaved: null, progress: null, unavailable: false, readFor: null, soloRepo: storedSolo(store.get(soloKey(id))),
     };
     return this.views[id];
   }
@@ -11930,8 +12585,8 @@ export default class Board extends View {
     return pick(context.tabs, this.tabIds[context.id]);
   }
 
-  // The view a team's or a project's tab shows, by its id (one of
-  // TEAM_VIEWS; a project's view by its number): the one chosen last on
+  // The view a tab with views shows, by its id (one of TEAM_VIEWS or
+  // ISSUE_VIEWS; a project's view by its number): the one chosen last on
   // this machine where the tab has it, else its first; for a project the
   // board knows none of the views of, the one chosen last.
   tabViewOf(tab) {
@@ -11939,7 +12594,7 @@ export default class Board extends View {
     return tab.views.length ? tabView(tab, this.tabViews[tab.id]) : this.tabViews[tab.id];
   }
 
-  // The view a tab shows (a team, a project: the view it shows).
+  // The view a tab shows (one with views, hasViews: the view it shows).
   viewFor(tab) {
     return viewOf(tab, hasViews(tab) ? this.tabViewOf(tab) : null);
   }
@@ -12007,6 +12662,16 @@ export default class Board extends View {
     const m = this.modal;
     if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
     return before;
+  }
+
+  // A view whose data is gone (`st` its state): no selection, and its
+  // dialog that draws from that data closes, unless it is busy.
+  dataGone(view, st) {
+    Object.assign(st, { sel: null, picked: null, detail: false });
+    const m = this.modal;
+    if (m?.view?.id !== view.id || !MODALS[m.kind].needsData || m.busy) return;
+    this.modal = null;
+    this.takeKeyboard();
   }
 
   moveShownSource() {
@@ -12137,8 +12802,8 @@ export default class Board extends View {
 
   // After a settings change by the board: what of a view's settings its
   // shape draws from without a read (withView) shows at once; a view whose
-  // hide changed shows it so and is read again; `before` as in
-  // changeSettings.
+  // hide changed shows it so and is read again, as is one whose query now
+  // leaves other repos out (readsAgain); `before` as in changeSettings.
   followSettings(cx, before = null) {
     for (const view of this.viewsNow()) {
       const st = this.views[view.id];
@@ -12147,6 +12812,7 @@ export default class Board extends View {
         st.data = settled;
         this.keepSelection(view);
       }
+      if (st?.data && SHAPES[st.data.shape].readsAgain?.(st, view)) this.refresh(view, cx);
       if (!st?.hidden || !st.data) continue;
       const hidden = hiddenColumns(view);
       if (sameNames(hidden, st.hidden)) continue;
@@ -12236,6 +12902,7 @@ export default class Board extends View {
     // A refresh asked for while one runs (a column shown or hidden) follows it.
     if (st.loading) return void (st.again = true);
     st.loading = true;
+    st.readFor = view;
     st.again = false;
     st.tried = Date.now();
     st.progress = null;
@@ -12304,7 +12971,7 @@ export default class Board extends View {
           st.data = before.data && SHAPES[before.data.shape].received(before.data, st, this.viewById(view.id) ?? view, before.data);
           st.warnings = before.warnings;
           if (st.data) this.keepSelection(view);
-          else Object.assign(st, { sel: null, picked: null, detail: false });
+          else this.dataGone(view, st);
         }
         const open = st.unclear.filter(isDue(st, started));
         if (open.length) {
@@ -12886,11 +13553,27 @@ export default class Board extends View {
     this.showTab(cx);
   }
 
-  // v: the shown team's or project's tab's next view.
+  // v: the shown tab's next view.
   nextTabView(cx) {
     const tab = this.tab();
     if (!hasViewSwitch(tab)) return;
     this.setTabView(tabViewAfter(tab, this.tabViewOf(tab)), cx);
+  }
+
+  setSoloRepo(view, repo, cx) {
+    const st = this.state(view.id);
+    st.soloRepo = repo;
+    if (repo === null) store.remove(soloKey(view.id));
+    else store.set(soloKey(view.id), repo);
+    this.keepSelection(view);
+    cx.notify();
+  }
+
+  nextSoloRepo(cx) {
+    const view = this.view();
+    const st = view && this.state(view.id);
+    const solo = st?.data && this.shape(view).soloSwitch?.(this, st);
+    if (solo) this.setSoloRepo(view, solo.after, cx);
   }
 
   // m: "nur meine" on or off, over whatever shows; nothing is read again.
@@ -13370,14 +14053,15 @@ export default class Board extends View {
 
   // The top bar, two rows so that neither the tabs nor the filter have to
   // give way on a small screen: the context switch and the shown context's
-  // tabs; then a team's view switch (where it has two), "nur
-  // meine", the filter, the read under way, the age of the data drawn and
-  // refresh. Without a valid views.json the first row holds only the
-  // board's name.
+  // tabs; then a tab's view switch (where it has more than one), an Issues
+  // tab's field „Repo:“, "nur meine", the filter, the read under way, the age
+  // of the data drawn and refresh. Without a valid views.json the first row
+  // holds only the board's name.
   toolbar(t, view, st) {
     const { reading, age, unsaved } = readLabels(st, Date.now());
     const context = this.context();
     const tab = this.tab();
+    const solo = view && st?.data ? this.shape(view).soloSwitch?.(this, st) : null;
     const row = () => h_flex().gap(12).px(16).items_center();
     let nav = row().pt(8).pb(4);
     if (!context) nav = nav.child(div().flex_none().text_size(15).font_semibold().child("Board"));
@@ -13389,6 +14073,7 @@ export default class Board extends View {
         const views = tab.views.map((v) => ({ id: v, label: tabViewName(tab, v) }));
         return el.child(this.segments(t, "tab-view", views, this.tabViewOf(tab), (id, cx) => this.setTabView(id, cx)));
       })
+      .when(Boolean(solo), (el) => el.child(soloField(this, t, view, solo)))
       .when(Boolean(context), (el) => el.child(this.mineToggle(t)))
       .child(
         h_flex()
@@ -13672,9 +14357,10 @@ export default class Board extends View {
   }
 
   // The hint line: the keys of what shows now, as the action table says
-  // them (hintsOf).
+  // them (hintsOf), or the open dialog's hint where it has one.
   hints(t) {
-    const keys = hintsOf(this.situation());
+    const said = this.modal ? MODALS[this.modal.kind].hint : null;
+    const keys = said ? [] : hintsOf(this.situation());
     // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()
@@ -13688,7 +14374,8 @@ export default class Board extends View {
       .bg(t.chrome)
       .text_size(12)
       .text_color(t.muted)
-      .children(keys.map(([k, what]) => h_flex().gap(5).child(div().font_semibold().text_color(t.foreground).child(k)).child(div().child(what))));
+      .children(keys.map(([k, what]) => h_flex().gap(5).child(div().font_semibold().text_color(t.foreground).child(k)).child(div().child(what))))
+      .when(Boolean(said), (el) => el.child(div().child(said)));
   }
 
 }

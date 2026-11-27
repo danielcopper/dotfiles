@@ -243,12 +243,16 @@ export function tablePlan(project, shown) {
   return plan;
 }
 
+// What a card reads of an issue (githubCard), on a project and in an
+// Issues tab alike.
+const ISSUE_FIELDS = `id number title url issueType { name color } repository { nameWithOwner } author { login }
+      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } } milestone { title }
+      parent { number title repository { nameWithOwner } } subIssuesSummary { total completed }`;
+
 const CONTENT_FIELDS = `
   content {
     __typename
-    ... on Issue { id number title url issueType { name color } repository { nameWithOwner } author { login }
-      labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } } milestone { title }
-      parent { number title repository { nameWithOwner } } subIssuesSummary { total completed } }
+    ... on Issue { ${ISSUE_FIELDS} }
     ... on PullRequest { id number title url headRefName repository { nameWithOwner } author { login }
       labels(first: 10) { nodes { name color } } assignees(first: 5) { nodes { login name } } milestone { title }
       reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } } }
@@ -338,48 +342,57 @@ function pageError(errors) {
   return onTheWay.sort((a, b) => b.path.length - a.path.length)[0] ?? errors[0] ?? null;
 }
 
-// The items' answer `json` (githubItemsArgs) with the items of the next
-// page's answer `page` (githubItemsPageArgs, and its GraphQL errors)
-// added, each item once (one that moved between two reads may come
-// twice), and that page's pageInfo, which says whether more follow. A page
-// without its items is explained by GitHub's error (pageError). One that
-// says more follow but adds no item or names the same cursor again is taken
-// for GitHub's paging stuck, and fails.
-export function addItemsPage(json, page, errors = []) {
-  const project = json.data.repositoryOwner.projectV2;
-  const items = project.items;
-  const next = page?.data?.repositoryOwner?.projectV2?.items;
-  if (!Array.isArray(next?.nodes)) {
+// A connection GitHub sends in pages (addPage, nextPage, pageCount): where
+// it stands in an answer (`of`), the key of its total, its name in an
+// error (`label`, of the first page's answer; `noun`, its entries), and
+// why a page lacks it (`missing`: that page's GraphQL errors and how many
+// came before).
+export const PROJECT_ITEMS = {
+  of: (json) => json?.data?.repositoryOwner?.projectV2?.items,
+  totalKey: "totalCount",
+  label: (json) => `Projekt „${json.data.repositoryOwner.projectV2.title}“`,
+  noun: "Einträgen",
+  missing(label, errors, count) {
     const e = pageError(errors);
-    throw new BoardError(e ? `Projekt „${project.title}“: ${firstLine(e.message)}` : `Projekt „${project.title}“ lieferte die Einträge nach den ersten ${items.nodes.length} nicht`);
-  }
-  const seen = new Set(items.nodes.map((n) => n?.id));
+    return e ? `${label}: ${firstLine(e.message)}` : `${label} lieferte die Einträge nach den ersten ${count} nicht`;
+  },
+};
+
+// The answer `json` with the entries of the next page's answer `page` (and
+// its GraphQL errors) added, each once (one that moved between two reads
+// may come twice), and that page's pageInfo, which says whether more
+// follow. A page without them is explained by `missing`. One that says
+// more follow but adds none or names the same cursor again is taken for
+// GitHub's paging stuck, and fails.
+export function addPage(paged, json, page, errors = []) {
+  const conn = paged.of(json);
+  const next = paged.of(page);
+  if (!Array.isArray(next?.nodes)) throw new BoardError(paged.missing(paged.label(json), errors, conn.nodes.length));
+  const seen = new Set(conn.nodes.map((n) => n?.id));
   const added = next.nodes.filter((n) => !seen.has(n?.id));
-  if (next.pageInfo?.hasNextPage && (!added.length || next.pageInfo.endCursor === items.pageInfo.endCursor)) {
-    throw new BoardError(`Projekt „${project.title}“: GitHub kam nach ${items.nodes.length} Einträgen nicht weiter`);
+  if (next.pageInfo?.hasNextPage && (!added.length || next.pageInfo.endCursor === conn.pageInfo?.endCursor)) {
+    throw new BoardError(`${paged.label(json)}: GitHub kam nach ${conn.nodes.length} ${paged.noun} nicht weiter`);
   }
-  items.nodes.push(...added);
-  items.pageInfo = next.pageInfo;
+  conn.nodes.push(...added);
+  conn.pageInfo = next.pageInfo;
   return json;
 }
 
-// The page after the items' answer `json`, { after, count } (its cursor and
-// how many items came before it), where GitHub says one follows and the
+// The page after the answer `json`, { after, count } (its cursor and how
+// many entries came before it), where GitHub says one follows and the
 // view's limit leaves room for it; else null. One that follows without a
 // cursor to start from fails.
-export function nextItemsPage(json, view) {
-  const project = json?.data?.repositoryOwner?.projectV2;
-  const items = project?.items;
-  if (!Array.isArray(items?.nodes) || !items.pageInfo?.hasNextPage || items.nodes.length >= view.limit) return null;
-  const after = items.pageInfo.endCursor;
-  if (typeof after !== "string") throw new BoardError(`Projekt „${project.title}“: GitHub nannte nach ${items.nodes.length} Einträgen nicht, wo die nächsten beginnen`);
-  return { after, count: items.nodes.length };
+export function nextPage(paged, json, view) {
+  const conn = paged.of(json);
+  if (!Array.isArray(conn?.nodes) || !conn.pageInfo?.hasNextPage || conn.nodes.length >= view.limit) return null;
+  const after = conn.pageInfo.endCursor;
+  if (typeof after !== "string") throw new BoardError(`${paged.label(json)}: GitHub nannte nach ${conn.nodes.length} ${paged.noun} nicht, wo die nächsten beginnen`);
+  return { after, count: conn.nodes.length };
 }
 
-export function itemPages(json, view, calls) {
-  const total = json?.data?.repositoryOwner?.projectV2?.items?.totalCount ?? 0;
-  return Math.min(calls, Math.max(1, Math.ceil(Math.min(total, view.limit) / PAGE)));
-}
+// How many pages the read of `json` takes by its total, one at least and
+// `calls` at most.
+export const pageCount = (paged, json, calls) => Math.min(calls, Math.max(1, Math.ceil((paged.of(json)?.[paged.totalKey] ?? 0) / PAGE)));
 
 // The logins of the people a pull request asks to review; a team's request,
 // or one whose reviewer is gone, names no one.
@@ -415,7 +428,8 @@ function githubCard(node, owners, plan) {
   const c = node.content ?? {};
   const repo = c.repository?.nameWithOwner ?? "";
   return {
-    key: node.id,
+    key: node.id ?? c.id,
+    // The project item's id, which a move names; null outside a project.
     itemId: node.id,
     source: "github",
     kind: c.__typename === "PullRequest" ? "pr" : c.__typename === "DraftIssue" ? "draft" : "issue",
@@ -488,7 +502,7 @@ function itemEntry(plan, node, view, order) {
 }
 
 // gh's answers for a board (githubItemsArgs and its pages, joined by
-// addItemsPage; and the GraphQL errors that came with them), read as
+// addPage; and the GraphQL errors that came with them), read as
 // boardPlan says (`plan`) → the board shape's data (ui/shapes/board.js):
 // columns from the column field, each card in its column (one without a
 // value in a column "Ohne <field>" before them, which takes no card), in
@@ -587,6 +601,118 @@ export function parseGithubTable(json, view, errors, plan) {
     limited: items.pageInfo?.hasNextPage ?? false,
     viewer: project.viewer,
     count: items.nodes.length,
+  };
+}
+
+// An Issues tab's repos, as its repo menu offers them: the owner's own
+// with issues on, archived ones left out, by name, REPOS_PAGES pages of
+// PAGE at most; and whether the owner is a user or an organisation, which
+// its search names (issuesQuery).
+export const REPOS_PAGES = 10;
+export const ISSUE_REPOS_QUERY = `query($login: String!, $after: String) {
+  repositoryOwner(login: $login) {
+    __typename
+    repositories(first: ${PAGE}, after: $after, ownerAffiliations: [OWNER], hasIssuesEnabled: true, isArchived: false, orderBy: { field: NAME, direction: ASC }) {
+      pageInfo { hasNextPage endCursor } nodes { nameWithOwner }
+    }
+  }
+}`;
+
+export const githubIssueReposArgs = (owner, after = null) =>
+  ["api", "graphql", "-f", `query=${ISSUE_REPOS_QUERY}`, "-f", `login=${owner}`, ...(after ? ["-f", `after=${after}`] : [])];
+
+// gh's answer for githubIssueReposArgs (and its GraphQL errors) → { org
+// (the owner is an organisation), repos (their names with the owner), after
+// (the cursor of the next page, null for none) }.
+export function parseIssueRepos(json, owner, errors = []) {
+  const node = json?.data?.repositoryOwner;
+  const repos = node?.repositories;
+  if (!Array.isArray(repos?.nodes)) {
+    const e = errorAt(errors, ["repositoryOwner"]);
+    throw new BoardError(e ? `GitHub: ${firstLine(e.message)}` : `GitHub kennt „${owner}“ nicht`);
+  }
+  return {
+    org: node.__typename === "Organization",
+    repos: repos.nodes.map((n) => n?.nameWithOwner).filter(isText),
+    after: repos.pageInfo?.hasNextPage ? repos.pageInfo.endCursor ?? null : null,
+  };
+}
+
+// The search of an Issues tab's view: the owner's issues in the state it
+// shows, archived repos and those `hidden` left out where the owner's
+// `repos` have them, newest updated first. GitHub's search scopes by user:
+// or org: (docs.github.com, "Searching issues and pull requests").
+export function issuesQuery(view, org, hidden, repos) {
+  const known = new Set(repos.map(foldedName));
+  const left = [...hidden].filter((r) => known.has(foldedName(r))).map((r) => `-repo:${r}`);
+  return [`is:issue ${org ? "org" : "user"}:${view.owner} archived:false is:${view.issueState} sort:updated-desc`, ...left].join(" ");
+}
+
+export const ISSUES_QUERY = `query($q: String!, $first: Int!, $after: String) {
+  viewer { login }
+  search(type: ISSUE, first: $first, after: $after, query: $q) {
+    issueCount pageInfo { hasNextPage endCursor }
+    nodes { ... on Issue { ${ISSUE_FIELDS} stateReason updatedAt } }
+  }
+}`;
+
+export const githubIssuesArgs = (view, query, count = 0, after = null) => [
+  "api", "graphql", "-f", `query=${ISSUES_QUERY}`, "-f", `q=${query}`, "-F", `first=${Math.min(PAGE, view.limit - count)}`, ...(after ? ["-f", `after=${after}`] : []),
+];
+
+const SEARCH_LABEL = "Die Suche nach Issues";
+
+// Why an answer lacks its search: the error on the way to it, else the
+// answer's first; `why` where it has none.
+function searchMissing(errors, why) {
+  const e = errorAt(errors, ["search"]) ?? errors[0];
+  return e ? `${SEARCH_LABEL}: ${firstLine(e.message)}` : `${SEARCH_LABEL} ${why}`;
+}
+
+export const ISSUE_SEARCH = {
+  of: (json) => json?.data?.search,
+  totalKey: "issueCount",
+  label: () => SEARCH_LABEL,
+  noun: "Issues",
+  missing: (label, errors, count) => searchMissing(errors, `lieferte die Issues nach den ersten ${count} nicht`),
+};
+
+function searchOf(json, errors) {
+  const search = ISSUE_SEARCH.of(json);
+  if (Array.isArray(search?.nodes)) return search;
+  throw new BoardError(searchMissing(errors, "fehlt in GitHubs Antwort"));
+}
+
+const NO_PLAN = { priority: null };
+
+// gh's answers for an Issues tab's view (githubIssuesArgs and its pages,
+// joined by addPage) → the issues shape's data (ui/shapes/issues.js): {
+// shape: "issues", meta: { owner, state, query }, repos (the owner's,
+// parseIssueRepos), rows (githubCard's cards in GitHub's order, each with
+// its stateReason and updatedAt), readHidden (the repos turned off as the
+// read began), hideRepos, owners, total, limited, count, viewer }. A search
+// that stops at its cap says no more follow: a total above what came is cut
+// too.
+export function parseGithubIssues(json, view, { repos, hidden, query }, errors = []) {
+  const search = searchOf(json, errors);
+  const rows = search.nodes.filter((n) => n?.id).map((issue) => ({
+    ...githubCard({ id: null, content: { ...issue, __typename: "Issue" } }, view.owners, NO_PLAN),
+    stateReason: issue.stateReason ?? null,
+    updatedAt: issue.updatedAt ?? null,
+  }));
+  const total = search.issueCount ?? rows.length;
+  return {
+    shape: "issues",
+    meta: { owner: view.owner, state: view.issueState, query },
+    repos,
+    rows,
+    readHidden: [...hidden],
+    hideRepos: [...view.hideRepos],
+    owners: view.owners,
+    total,
+    limited: Boolean(search.pageInfo?.hasNextPage) || total > search.nodes.length,
+    count: search.nodes.length,
+    viewer: json.data.viewer?.login ?? null,
   };
 }
 
@@ -1321,14 +1447,34 @@ export function makeGithub(paths) {
     return read;
   }
 
+  // The pages of `paged` for `view`, joined (addPage) into the first's
+  // answer: { json, warnings (`before`'s first), errors (the first page's
+  // GraphQL errors) }. One gh call each, named "<name>-page-<n>", its args
+  // pageArgs of { after, count } (nextPage's; the first's { after: null,
+  // count: 0 }), until GitHub has no more, the view's limit is read, or as
+  // many calls ran as full pages would take to read it; before each page
+  // after the first, the data so far (parse of json and errors) is drawn.
+  async function readPages(paged, view, { live, parse, name, pageArgs, before = [] }) {
+    const { json, warnings, errors } = await gh(paths, pageArgs({ after: null, count: 0 }), what(view, `${name}-page-1`));
+    warnings.unshift(...before);
+    const calls = Math.ceil(view.limit / PAGE);
+    const pages = pageCount(paged, json, calls);
+    for (let call = 1, next = nextPage(paged, json, view); next && call < calls; call++, next = nextPage(paged, json, view)) {
+      live.partial(() => ({ data: { ...parse(json, errors), partial: true }, warnings: [...warnings] }));
+      live.page(call + 1, Math.max(call + 1, pages));
+      const page = await gh(paths, pageArgs(next), what(view, `${name}-page-${call + 1}`));
+      addPage(paged, json, page.json, page.errors);
+      warnings.push(...page.warnings);
+    }
+    return { json, warnings, errors };
+  }
+
   // A project's view, of whichever layout: the project with its views and
   // fields (githubProjectArgs), which the board learns (live.project); then,
   // of the view it shows (the view's own, or for the view that learns them
-  // the one it wants, else the first), the first page of items and each
-  // next one, one call each, until GitHub has no more, the view's limit is
-  // read, or as many calls ran as full pages would take to read it; read as
-  // its layout's plan says (planFor), a view of a layout the board does not
-  // draw reading none. Both reads are one load, so that the view's state,
+  // the one it wants, else the first), its items' pages (readPages), read
+  // as its layout's plan says (planFor), a view of a layout the board does
+  // not draw reading none. Both reads are one load, so that the view's state,
   // progress, error and saved data stay those of one read; the board, which
   // knows what shows, names the view it goes on with. A board's move writes
   // the card's column (one layout's data may stand in another's view until
@@ -1354,17 +1500,8 @@ export function makeGithub(paths) {
       const plan = toPlan(project, shown);
       if (now !== view) hidden = hiddenFor(now);
       const parse = (json, errors) => plan.parse(json, now, hidden, errors);
-      const { json, warnings, errors } = await gh(paths, githubItemsArgs(now, plan, hidden), what(now, "items-page-1"));
-      warnings.unshift(...head.warnings);
-      const calls = Math.ceil(now.limit / PAGE);
-      const pages = itemPages(json, now, calls);
-      for (let call = 1, next = nextItemsPage(json, now); next && call < calls; call++, next = nextItemsPage(json, now)) {
-        live.partial(() => ({ data: { ...parse(json, errors), partial: true }, warnings: [...warnings] }));
-        live.page(call + 1, Math.max(call + 1, pages));
-        const page = await gh(paths, githubItemsPageArgs(now, plan, hidden, next.after, next.count), what(now, `items-page-${call + 1}`));
-        addItemsPage(json, page.json, page.errors);
-        warnings.push(...page.warnings);
-      }
+      const pageArgs = (next) => (next.after === null ? githubItemsArgs(now, plan, hidden) : githubItemsPageArgs(now, plan, hidden, next.after, next.count));
+      const { json, warnings, errors } = await readPages(PROJECT_ITEMS, now, { live, parse, name: "items", pageArgs, before: head.warnings });
       return { data: parse(json, errors), warnings };
     },
     async move(view, data, card, column) {
@@ -1372,8 +1509,75 @@ export function makeGithub(paths) {
     },
   };
 
+  // An Issues tab's view: its owner's repos once while the board runs (`r`
+  // drops them: forget), then its search's pages (readPages).
+  const issueRepos = readMemo();
+  async function readIssueRepos(view) {
+    const read = { org: false, repos: [] };
+    let after = null;
+    for (let call = 1; call <= REPOS_PAGES; call++) {
+      const { json, errors } = await gh(paths, githubIssueReposArgs(view.owner, after), what(view, `repos-page-${call}`));
+      const page = parseIssueRepos(json, view.owner, errors);
+      Object.assign(read, { org: page.org, repos: [...read.repos, ...page.repos] });
+      after = page.after;
+      if (!after) break;
+    }
+    return read;
+  }
+  const issueViews = {
+    async load(view, { live = NO_LIVE }) {
+      const hidden = [...view.hideRepos];
+      const { org, repos } = await issueRepos.get(foldedName(view.owner), () => readIssueRepos(view));
+      const query = issuesQuery(view, org, hidden, repos);
+      const parse = (json, errors) => parseGithubIssues(json, view, { repos, hidden, query }, errors);
+      const pageArgs = (next) => githubIssuesArgs(view, query, next.count, next.after);
+      const { json, warnings, errors } = await readPages(ISSUE_SEARCH, view, { live, parse, name: "issues", pageArgs });
+      return { data: parse(json, errors), warnings };
+    },
+    forget: (view) => issueRepos.drop(foldedName(view.owner)),
+  };
+
+  const views = {
+    board: projectViews,
+    table: projectViews,
+    roadmap: projectViews,
+    issues: issueViews,
+    list: {
+      together: (all) => all.filter((v) => v.source === "github" && v.layout === "list"),
+      async load(view, { live = NO_LIVE }) {
+        if (prsRead?.key !== prsReadKey(view)) prsRead = readPrs(view);
+        const read = prsRead;
+        const notes = () => {
+          if (read.notified?.keys === null) return [notifiedUnknown(read.notified.why)];
+          return read.notified?.unnamed ? [notifiedUnnamed(read.notified.unnamed)] : [];
+        };
+        const result = () => {
+          const data = parseGithubList(read.json, view, read.errors, { pending: read.pending, login: read.asked, notified: read.notified?.keys ?? null });
+          return { data: read.notified ? data : { ...data, notifiedPending: true }, warnings: [...data.warnings, ...notes()] };
+        };
+        let failed = null;
+        const step = () => {
+          try {
+            live.partial(result);
+          } catch (e) {
+            failed ??= e;
+          }
+        };
+        read.steps.add(step);
+        try {
+          await read.done;
+        } finally {
+          read.steps.delete(step);
+        }
+        if (failed) throw failed;
+        return result();
+      },
+    },
+  };
+
   return {
     site: "GitHub",
+    forget: (view) => views[view.layout]?.forget?.(view),
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
     related: {
       reads: (item) => item.kind === "issue" && Number.isInteger(item.number) && item.repo.includes("/"),
@@ -1402,41 +1606,6 @@ export function makeGithub(paths) {
         return checkAssigned((await gh(paths, githubAssignArgs(item, person), { write: true, path: assignPath(item), ...what(view, "assign") })).json, item, person);
       },
     },
-    views: {
-      board: projectViews,
-      table: projectViews,
-      roadmap: projectViews,
-      list: {
-        together: (views) => views.filter((v) => v.source === "github" && v.layout === "list"),
-        async load(view, { live = NO_LIVE }) {
-          if (prsRead?.key !== prsReadKey(view)) prsRead = readPrs(view);
-          const read = prsRead;
-          const notes = () => {
-            if (read.notified?.keys === null) return [notifiedUnknown(read.notified.why)];
-            return read.notified?.unnamed ? [notifiedUnnamed(read.notified.unnamed)] : [];
-          };
-          const result = () => {
-            const data = parseGithubList(read.json, view, read.errors, { pending: read.pending, login: read.asked, notified: read.notified?.keys ?? null });
-            return { data: read.notified ? data : { ...data, notifiedPending: true }, warnings: [...data.warnings, ...notes()] };
-          };
-          let failed = null;
-          const step = () => {
-            try {
-              live.partial(result);
-            } catch (e) {
-              failed ??= e;
-            }
-          };
-          read.steps.add(step);
-          try {
-            await read.done;
-          } finally {
-            read.steps.delete(step);
-          }
-          if (failed) throw failed;
-          return result();
-        },
-      },
-    },
+    views,
   };
 }

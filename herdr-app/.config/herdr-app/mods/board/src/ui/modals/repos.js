@@ -1,13 +1,12 @@
-// The repo menu reads the repos from the view's data as they are now, so a
-// toggle shows at once.
+// The repo menu reads the repos from the view's data as they are now
+// (its shape's repoSwitches), so a toggle shows at once.
 
 import { div } from "gpui-kit";
-import { repoSwitches } from "../../kinds/list.js";
 import { foreignChip, menu, menuKey, shownOf } from "../helpers.js";
 
 function menuRepos(b, m) {
   const data = b.state(m.view.id).data;
-  return data?.sections ? repoSwitches(data, (r) => b.visible(r, data)) : [];
+  return data ? b.shape(m.view).repoSwitches?.(b, data) ?? [] : [];
 }
 
 function toggleRepoAt(b, m, at, cx) {
@@ -19,6 +18,8 @@ function toggleRepoAt(b, m, at, cx) {
 }
 
 export const reposModal = {
+  needsData: true,
+
   open(b, view, cx) {
     b.modal = { kind: "repos", view, at: 0 };
     cx.notify();
@@ -37,7 +38,7 @@ export const reposModal = {
         div().w(14).text_color(t.foreground).child(r.hidden ? "" : "✓"),
         div().flex_1().min_w(0).truncate().text_color(r.hidden ? t.muted : t.foreground).child(r.name),
         ...(r.foreign ? [foreignChip(t)] : []),
-        div().flex_none().text_size(11).text_color(t.dim).child(shownOf(r.shown, r.held)),
+        div().flex_none().text_size(11).text_color(t.dim).child(r.held === null ? "" : shownOf(r.shown, r.held)),
         div().w(80).flex_none().text_size(11).text_color(t.dim).child(r.hidden ? "ausgeblendet" : "gezeigt"),
       ]),
     });

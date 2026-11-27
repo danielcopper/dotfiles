@@ -1,0 +1,97 @@
+{
+  "data": {
+    "viewer": {
+      "login": "sample-user"
+    },
+    "search": {
+      "issueCount": 3,
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": "Y3Vyc29yOjM="
+      },
+      "nodes": [
+        {
+          "id": "I_issue4",
+          "number": 4,
+          "title": "Read the shelf once",
+          "url": "https://github.com/sample-user/tender/issues/4",
+          "issueType": null,
+          "repository": {
+            "nameWithOwner": "sample-user/tender"
+          },
+          "author": {
+            "login": "sample-user"
+          },
+          "labels": {
+            "nodes": []
+          },
+          "assignees": {
+            "nodes": []
+          },
+          "milestone": null,
+          "parent": null,
+          "subIssuesSummary": {
+            "total": 0,
+            "completed": 0
+          },
+          "stateReason": "COMPLETED",
+          "updatedAt": "2026-11-24T09:00:00Z"
+        },
+        {
+          "id": "I_issue2",
+          "number": 2,
+          "title": "A second cache",
+          "url": "https://github.com/sample-user/atlas/issues/2",
+          "issueType": null,
+          "repository": {
+            "nameWithOwner": "sample-user/atlas"
+          },
+          "author": {
+            "login": "sample-user"
+          },
+          "labels": {
+            "nodes": []
+          },
+          "assignees": {
+            "nodes": []
+          },
+          "milestone": null,
+          "parent": null,
+          "subIssuesSummary": {
+            "total": 0,
+            "completed": 0
+          },
+          "stateReason": "NOT_PLANNED",
+          "updatedAt": "2026-11-21T09:00:00Z"
+        },
+        {
+          "id": "I_issue1",
+          "number": 1,
+          "title": "Export as CSV",
+          "url": "https://github.com/sample-user/tender/issues/1",
+          "issueType": null,
+          "repository": {
+            "nameWithOwner": "sample-user/tender"
+          },
+          "author": {
+            "login": "sample-user"
+          },
+          "labels": {
+            "nodes": []
+          },
+          "assignees": {
+            "nodes": []
+          },
+          "milestone": null,
+          "parent": null,
+          "subIssuesSummary": {
+            "total": 0,
+            "completed": 0
+          },
+          "stateReason": "DUPLICATE",
+          "updatedAt": "2026-11-10T09:00:00Z"
+        }
+      ]
+    }
+  }
+}

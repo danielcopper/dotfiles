@@ -1,0 +1,160 @@
+{
+  "data": {
+    "viewer": {
+      "login": "sample-user"
+    },
+    "search": {
+      "issueCount": 4,
+      "pageInfo": {
+        "hasNextPage": false,
+        "endCursor": "Y3Vyc29yOjQ="
+      },
+      "nodes": [
+        {
+          "id": "I_issue12",
+          "number": 12,
+          "title": "Export the shelf as CSV",
+          "url": "https://github.com/sample-user/tender/issues/12",
+          "issueType": {
+            "name": "Bug",
+            "color": "RED"
+          },
+          "repository": {
+            "nameWithOwner": "sample-user/tender"
+          },
+          "author": {
+            "login": "sample-user"
+          },
+          "labels": {
+            "nodes": [
+              {
+                "name": "bug",
+                "color": "d73a4a"
+              }
+            ]
+          },
+          "assignees": {
+            "nodes": [
+              {
+                "login": "sample-user",
+                "name": "Sample User"
+              }
+            ]
+          },
+          "milestone": {
+            "title": "v1"
+          },
+          "parent": null,
+          "subIssuesSummary": {
+            "total": 0,
+            "completed": 0
+          },
+          "stateReason": null,
+          "updatedAt": "2026-11-26T09:00:00Z"
+        },
+        {
+          "id": "I_issue7",
+          "number": 7,
+          "title": "Answer the BIOS path of the scanner",
+          "url": "https://github.com/sample-user/atlas/issues/7",
+          "issueType": null,
+          "repository": {
+            "nameWithOwner": "sample-user/atlas"
+          },
+          "author": {
+            "login": "sample-other"
+          },
+          "labels": {
+            "nodes": []
+          },
+          "assignees": {
+            "nodes": []
+          },
+          "milestone": null,
+          "parent": {
+            "number": 3,
+            "title": "Scanner",
+            "repository": {
+              "nameWithOwner": "sample-user/atlas"
+            }
+          },
+          "subIssuesSummary": {
+            "total": 0,
+            "completed": 0
+          },
+          "stateReason": null,
+          "updatedAt": "2026-11-25T09:00:00Z"
+        },
+        {
+          "id": "I_issue9",
+          "number": 9,
+          "title": "A row per missing file",
+          "url": "https://github.com/sample-user/tender/issues/9",
+          "issueType": null,
+          "repository": {
+            "nameWithOwner": "sample-user/tender"
+          },
+          "author": {
+            "login": "sample-other"
+          },
+          "labels": {
+            "nodes": [
+              {
+                "name": "ui",
+                "color": "0075ca"
+              }
+            ]
+          },
+          "assignees": {
+            "nodes": [
+              {
+                "login": "sample-other",
+                "name": null
+              }
+            ]
+          },
+          "milestone": null,
+          "parent": null,
+          "subIssuesSummary": {
+            "total": 5,
+            "completed": 2
+          },
+          "stateReason": "REOPENED",
+          "updatedAt": "2026-11-20T09:00:00Z"
+        },
+        {
+          "id": "I_issue5",
+          "number": 5,
+          "title": "List what the atlas answers",
+          "url": "https://github.com/sample-user/atlas/issues/5",
+          "issueType": null,
+          "repository": {
+            "nameWithOwner": "sample-user/atlas"
+          },
+          "author": {
+            "login": "sample-other"
+          },
+          "labels": {
+            "nodes": [
+              {
+                "name": "docs",
+                "color": "cfd3d7"
+              }
+            ]
+          },
+          "assignees": {
+            "nodes": []
+          },
+          "milestone": null,
+          "parent": null,
+          "subIssuesSummary": {
+            "total": 0,
+            "completed": 0
+          },
+          "stateReason": null,
+          "updatedAt": "2026-11-02T09:00:00Z"
+        }
+      ]
+    }
+  }
+}

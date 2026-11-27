@@ -18,8 +18,10 @@ export const UNSAVED = { big: "Stand nicht gespeichert: zu groß", refused: "Sta
 
 // Data read for other hidden columns, another form of the view or another
 // organisation, project or team of its Azure tab is not its data; where its
-// settings lie, the rest of its tab and the repos a PR tab hides (it reads
-// them all) are not its form. A GitHub view signs without its tab.
+// settings lie, the rest of its tab and the repos a PR or Issues tab hides
+// are not its form (a PR tab reads them all; an Issues tab's data names
+// those turned off as its read began, readHidden, and its shape reads again
+// where they differ: readsAgain). A GitHub view signs without its tab.
 const savedSig = (view, hidden) => {
   const { settingsPath, tab, hideRepos, ...form } = view;
   const reads = view.source === "azure" && tab ? [{ org: tab.org, project: tab.project, team: tab.team }] : [];

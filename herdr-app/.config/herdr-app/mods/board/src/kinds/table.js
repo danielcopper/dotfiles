@@ -6,6 +6,7 @@
 import { packRows, unpackRows } from "../loading.js";
 import { unreadableOrder, withRow } from "../shared.js";
 import { cardValue, groupsOf, orderEntry, viewOrder } from "./fields.js";
+import { githubRowBack, keptGithubRow } from "./rows.js";
 
 // The rows that `visible` lets through, in the table's order, as one list
 // (navigate walks a list as one column).
@@ -69,18 +70,16 @@ export function tableWarnings(view, data) {
   return [...shown, ...unreadableOrder(view, data.meta.unreadable ?? [])];
 }
 
-// GitHub's address of an issue or pull request, which a saved row leaves
-// out where the item's url is that, as it leaves out its itemId, its key.
-const itemUrl = (row) => `https://github.com/${row.repo}/${row.kind === "pr" ? "pull" : "issues"}/${row.number}`;
 const spread = (prefix, list) => Object.fromEntries(list.map((v, i) => [`${prefix}${i}`, v]));
 const gather = (row, prefix, count) => Array.from({ length: count }, (_, i) => row[`${prefix}${i}`] ?? null);
 
 // A table's data as its saved state keeps it: its rows packed (packRows),
-// each cell and sort key's rank a trait of its own, so that a value many
-// rows hold is kept once; and that form read back.
+// each as keptGithubRow keeps it, each cell and sort key's rank a trait of
+// its own, so that a value many rows hold is kept once; and that form read
+// back, each row's itemId its key.
 export function savedTable(data) {
   const { rows, ...rest } = data;
-  const kept = rows.map(({ itemId, url, cells, ranks, ...row }) => ({ ...row, ...(url === itemUrl(row) ? {} : { url }), ...spread("cell:", cells), ...spread("rank:", ranks) }));
+  const kept = rows.map(({ cells, ranks, ...row }) => ({ ...keptGithubRow(row), ...spread("cell:", cells), ...spread("rank:", ranks) }));
   return { ...rest, packed: packRows(kept) };
 }
 
@@ -88,7 +87,7 @@ export function tableFromSaved(data) {
   const { packed, ...rest } = data;
   const rows = unpackRows(packed).map((kept) => {
     const row = Object.fromEntries(Object.entries(kept).filter(([name]) => !name.includes(":")));
-    return { ...row, itemId: row.key, url: Object.hasOwn(row, "url") ? row.url : itemUrl(row), cells: gather(kept, "cell:", data.fields.length), ranks: gather(kept, "rank:", data.sortBy.length) };
+    return { ...githubRowBack(row), itemId: row.key, cells: gather(kept, "cell:", data.fields.length), ranks: gather(kept, "rank:", data.sortBy.length) };
   });
   return { ...rest, rows };
 }

@@ -392,28 +392,29 @@ by that run. Which files of the package git tracks is set in the root
   tab last: on Azure each of my teams, with a switch between its Sprint and its
   Backlog in the row below, then the pull requests of its project; on GitHub one
   tab per project, named as GitHub names it, with a switch between its views in
-  the row below (more on them below), then "PRs" (pull requests I am asked to
-  review, I opened, or I reviewed, with checks, review state and whether I have
-  to act on them). The PR tabs of all GitHub contexts share their sections,
-  `sources.github.prs` in `views.json` (`sections`, and the `limit` of each
-  search), read once for all of them, so each tab sees what the others see and a
-  pull request cannot fall between them; a refresh of one PR tab refreshes them
-  all. A context's own `prs` holds its tab alone (`id`, `name`, `hideRepos`,
-  `start`); a `sections` or `limit` there is the older form: the board names
-  where they stand now and leaves that PR tab out. The searches run as
-  `views.json` writes them, and a context's PR tab shows what they find in the
-  owner's repos and in foreign ones, whose owner is no GitHub context the board
-  reads with a PR tab; a pull request in a repo of another such context shows in
-  that context's PR tab only (owners compare in any case, and two contexts whose
-  owners differ only in case are one owner: the second is left out). A team's
-  Sprint shows its current sprint the way Azure's taskboard does: one row per
-  story (its id, title, own state and assignee), its tasks as cards in the
-  team's taskboard columns, each with its own state, assignee and id; a task
-  whose story is not in the sprint (one left in the sprint before, say) shows
-  under that story's own row, marked with its sprint ("Sprint 11", or "ohne
-  Sprint" where it is in the team's backlog iteration or the project's root),
-  and the tasks without a story, or whose story could not be read or was not
-  found, stand in a row "Ohne Story" at the top; a warning says when a story
+  the row below (more on them below), then "Issues" where the context has an
+  `issues` entry (the owner's issues, below), then "PRs" (pull requests I am
+  asked to review, I opened, or I reviewed, with checks, review state and
+  whether I have to act on them). The PR tabs of all GitHub contexts share their
+  sections, `sources.github.prs` in `views.json` (`sections`, and the `limit` of
+  each search), read once for all of them, so each tab sees what the others see
+  and a pull request cannot fall between them; a refresh of one PR tab refreshes
+  them all. A context's own `prs` holds its tab alone (`id`, `name`,
+  `hideRepos`, `start`); a `sections` or `limit` there is the older form: the
+  board names where they stand now and leaves that PR tab out. The searches run
+  as `views.json` writes them, and a context's PR tab shows what they find in
+  the owner's repos and in foreign ones, whose owner is no GitHub context the
+  board reads with a PR tab; a pull request in a repo of another such context
+  shows in that context's PR tab only (owners compare in any case, and two
+  contexts whose owners differ only in case are one owner: the second is left
+  out). A team's Sprint shows its current sprint the way Azure's taskboard does:
+  one row per story (its id, title, own state and assignee), its tasks as cards
+  in the team's taskboard columns, each with its own state, assignee and id; a
+  task whose story is not in the sprint (one left in the sprint before, say)
+  shows under that story's own row, marked with its sprint ("Sprint 11", or
+  "ohne Sprint" where it is in the team's backlog iteration or the project's
+  root), and the tasks without a story, or whose story could not be read or was
+  not found, stand in a row "Ohne Story" at the top; a warning says when a story
   could not be read, and names one that was not found. The rows, and the tasks
   within a cell, follow the team's backlog order (the order field its backlog
   configuration names: Stack Rank, or Backlog Priority in Scrum), those without
@@ -525,13 +526,14 @@ by that run. Which files of the package git tracks is set in the root
   view by its number), which replaces that view's `hide` from `views.json` on
   this machine until it is reset. A GitHub PR tab's repos turned off are
   another: its `hideRepos` (repos with their owner, "owner/repo"), which a
-  switch writes there as a whole list the same way. The hidden columns an older
-  board kept in herdr's localStorage move into the file at a read of
-  `views.json` once the write succeeds, and leave the localStorage; where the
-  file sets that view's hidden columns already, the file's stay; those of views
-  `views.json` no longer has stay in the localStorage, and all of them do while
-  the file does not apply. What else the board remembers, as above, stays in
-  herdr's localStorage.
+  switch writes there as a whole list the same way; an Issues tab's are its
+  own, at `sources.github.contexts.<owner>.issues.hideRepos`. The hidden
+  columns an older board kept in herdr's localStorage move into the file at a
+  read of `views.json` once the write succeeds, and leave the localStorage;
+  where the file sets that view's hidden columns already, the file's stay; those
+  of views `views.json` no longer has stay in the localStorage, and all of them
+  do while the file does not apply. What else the board remembers, as above,
+  stays in herdr's localStorage.
   Each view keeps its last good read in herdr's localStorage (about 217 kB for a
   board of 300 cards; a table keeps its rows packed, each value that rows share
   once, so 1000 rows with a value of their own in every field take about 731 kB;
@@ -570,8 +572,10 @@ by that run. Which files of the package git tracks is set in the root
   `board: <gh|az|sh> <kind> <ms> ms <ok|exit n|failed> view=<view id>`.
   Keys: `1 2 3` or `[ ]` switch the tab, `{ }` the context (also as AltGr types
   them, on a German layout AltGr+7 and AltGr+0), `g` and a digit go to that
-  context, `v` a team's Sprint and Backlog or a project's views, `R` opens a PR
-  tab's repo menu (below), `m` turns "nur meine" on and off
+  context, `v` a team's Sprint and Backlog, a project's views or an Issues
+  tab's "Offen" and "Geschlossen", `V` an Issues tab's repo shown alone
+  (below), `R` opens a PR or Issues tab's repo menu (below), `m` turns "nur
+  meine" on and off
   (the contexts, the tabs, the switch and "nur meine" take clicks too), `/`
   filters, `r` refreshes (the shown view also refreshes every few minutes while
   the board shows), `Esc` closes, `gg` and `Home` go to the first card of the
@@ -734,8 +738,9 @@ by that run. Which files of the package git tracks is set in the root
   every other card is an empty frame of the card's height until the column
   scrolls near it: at once by the wheel or a key, within a tenth of a second by
   the scrollbar's thumb, wherever the pointer is released
-  (`mods/board/src/ui/band.js`); a table draws its rows so, the others as empty
-  frames of their height until the list scrolls near them. herdr before 0.1.18
+  (`mods/board/src/ui/band.js`); a table and an Issues tab draw their rows
+  so, the others as empty frames of their height until the list scrolls near
+  them. herdr before 0.1.18
   tells a mod no scroll position; there every card and row draws whole. A click
   on a card or a list's row selects it; a click on one I chose (clicked before,
   moved to with the keys or dragged onto another column; not one the board
@@ -763,6 +768,53 @@ by that run. Which files of the package git tracks is set in the root
   counts of its sections and of the tab leave them out. `R`, or "Repos…" in
   the command menu, opens a menu of the same switches, where `Enter`, a
   digit or a click turns one off or on.
+  A GitHub context's Issues tab, which its `issues` entry in `views.json` makes
+  (`"issues": { "id": "issues" }`, with, where wanted, `name`, by default
+  "Issues", `limit`, `hideRepos` and `start`; its `id` its own among all
+  contexts' Issues tabs, and no other tab of the board has its tab's id), stands
+  after its projects and before its PR tab and shows the owner's issues as
+  GitHub's issue list in a repo does, grouped by repo: a group row with the
+  repo's name and how many of its issues show ("1/2" while the filter or "nur
+  meine" hides some), the groups where their first issue stands, then per issue
+  its key, title, issue type and labels as chips, its session, milestone,
+  assignees and when it last changed, a line across its top in its issue type's
+  color. The row below the tabs switches between "Offen" and "Geschlossen" (`v`,
+  or a click; the board remembers the one shown), each a view of its own, read
+  by GitHub's search for issues (`is:issue user:<owner>`, or `org:` for an
+  organisation, `archived:false`, `is:open` or `is:closed`, newest updated
+  first: GitHub's order, which each group keeps), in pages of up to 100 up to
+  its `limit` (1000 by default, at most 1000, as many as GitHub's search finds),
+  the note "Nur die ersten …" after the last where that cuts them; the closed
+  issues are read when that view first shows, or by the prefetch. A closed
+  issue's row has a stripe at its left by why GitHub closed it, violet for
+  completed and grey for not planned, as a duplicate or for any other reason; an
+  open one keeps the list's look. An issue that also stands on a project shows
+  there too. Its repos are the owner's own with issues on and not archived, read
+  once while the board runs and again on `r`. `R` (or "Repos…" in the command
+  menu) chooses which of them the tab covers: its menu has a switch per repo, as
+  a PR tab's has, with how many of its issues show, those with issues first,
+  where their first issue stands, then the others by name, then those turned
+  off; `Enter`, a digit or a click turns one off or on on this machine (its
+  `hideRepos`, above). The tab draws no "Repos:" line. A repo turned off goes at
+  once, and its issues are left out of the search (`-repo:<owner>/<repo>`, for
+  one of its repos), so the view is read again; one turned on again gets a group
+  row at the list's end with the spinner and "Lädt …" until that read brings its
+  issues ("nicht gelesen – r liest neu" where it fails), with no count in the
+  menu. Beside "Offen | Geschlossen" the field "Repo: Alle ▾" shows "Alle", the
+  list grouped, or the repo whose issues show alone, without a group row; a long
+  name is cut with "…". A click opens its list under it, as a dialog's choice
+  field does: "Alle", then one entry per repo turned on with issues in the read,
+  where its first issue stands, each with how many of its issues show, the one
+  shown marked; a repo turned off is not in it. Typing filters it, the arrow
+  keys mark an entry, `Enter` or a click takes it, `Esc` or a click beside the
+  list closes it; the hint line names those keys while it is open. `V` (Shift
+  and `v`, the view switch's key) steps through the same entries without opening
+  the list, after the last to "Alle" again. The board remembers the choice per
+  view, as it does the view shown, and a repo turned off, or one the next read
+  finds no issues in, goes back to "Alle", the choice forgotten. "nur meine",
+  the filter and the tab's count work on top, as elsewhere (the count is the
+  whole view's); `j/k`, `Enter` (the details, as on a project), the start dialog
+  and the sessions, `a` and `o` work as on a project's table.
   The GitHub PR list says whether I have to act on a pull request: such a row
   carries a mark with the reasons ("● Review angefragt"), its details list
   them under "DU BIST DRAN", and in each section those rows come first, in

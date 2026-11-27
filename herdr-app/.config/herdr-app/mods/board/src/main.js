@@ -20,6 +20,11 @@
 //     card's priority from the project's single-select field "Priority"
 //     (none without one). An entry with id, name, field, filter,
 //     priorityField or hide has the form before and is left out. A
+//     context's issues is its Issues tab, after its projects: { id (its own
+//     among all contexts' Issues tabs), name? ("Issues"), limit? (the most
+//     issues a view reads, 1000, GitHub's search's most), hideRepos?:
+//     ["<owner>/<repo>"] (repos turned off, left out of its search), start?
+//     }, with a view of the owner's open issues and one of the closed. A
 //     context's prs is its PR tab: { id, name? ("PRs"), hideRepos?:
 //     ["<owner>/<repo>"] (repos turned off),
 //     start? }. The PR tabs of all contexts share github's prs: sections:
@@ -55,7 +60,8 @@
 // machine's settings'; hiding or showing one writes it into the settings.
 // They are left out of the query and of the board. A PR
 // tab's repos turned off (hideRepos) are written the same way; their pull
-// requests are read and not shown.
+// requests are read and not shown. An Issues tab's are written so too, and
+// left out of its search as hidden columns are.
 // GitHub's queries also ask for the login gh runs as, which "nur meine"
 // compares with.
 //
@@ -76,6 +82,13 @@
 // request per page of up to 50, counted against GitHub's REST limit of 5000
 // requests an hour, not against GraphQL's points), and, until the board
 // knows it, one more for the login gh runs as (githubViewerArgs, one point).
+// An Issues tab's view costs one gh call per page of up to 100 issues of its
+// search (githubIssuesArgs: per issue its labels, assignees and the rest a
+// card reads, as on a project; about two points a page), at most as many as
+// full pages of its limit take, ten for the 1000 by default; and, once while
+// the board runs and again after `r`, one per 100 of the owner's repos
+// (githubIssueReposArgs, one point each), before the first page: whether the
+// owner is a user or an organisation names its search.
 // GitHub prices a request by its connections, each counted as full: the
 // list's per section one search, then per pull request of its limit (50
 // by default) its assignees, review requests, review threads, last commit
@@ -160,11 +173,14 @@
 // and why): shared.js, config.js (views.json), settings.js (this machine's
 // settings over it), contexts.js (the top bar's contexts, tabs and their
 // views), kinds/index.js (view kinds),
-// kinds/board.js (a board's columns and cards), kinds/list.js (a PR tab's
-// repos: whose they are, those turned off, its rows grouped by repo),
+// kinds/board.js (a board's columns and cards), kinds/list.js (a PR or
+// Issues tab's repos: whose they are, those turned off, its rows grouped by
+// repo, its repo switches),
 // kinds/sprint.js (a sprint's
 // taskboard), kinds/backlog.js (a team's backlog), kinds/table.js (a
-// GitHub project's table), kinds/fields.js (a GitHub project's fields: an
+// GitHub project's table), kinds/issues.js (an Issues tab's lines, repos
+// and solo repo), kinds/rows.js (a GitHub row in a saved state),
+// kinds/fields.js (a GitHub project's fields: an
 // item's value of each kind, the groups and order of a view's items),
 // kinds/states.js (a
 // state's color), select.js (filter, "nur meine", selection, the filter of
@@ -184,11 +200,12 @@
 // ui/helpers.js, ui/choices.js (a dialog's choice fields and their lists),
 // ui/tones.js (the tones of labels and types, the selected background, the
 // tints), ui/layer.js (the board layer), ui/related.js (the related items as
-// drawn), ui/band.js (which cards of a board column, or rows of a table,
-// draw whole), ui/shapes/ (how a view's data is drawn and worked: board,
-// prs, sprint, backlog, table, placeholder), ui/modals/ (the dialogs:
+// drawn), ui/band.js (which cards of a board column, or rows of a table or
+// an Issues tab, draw whole), ui/shapes/ (how a view's data is drawn and
+// worked: board, prs, sprint, backlog, table, issues, placeholder),
+// ui/modals/ (the dialogs:
 // start, status, columns, create, assign, commands, sprints, sessions,
-// repos) and this one, the Board, which looks the shape up.
+// repos, solo) and this one, the Board, which looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -203,7 +220,7 @@ import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
 import {
-  SOURCES, contextViews, contextsOf, firstContextOf, firstViewId, goneProjects, hasViews, tabViewName, pick, projectKey, tabView, viewOf, viewsOf, hasViewSwitch, shownContextMoves, shownIndex, stepIndex, tabViewAfter,
+  SOURCES, contextViews, contextsOf, firstContextOf, firstViewId, goneProjects, hasViews, tabViewName, pick, projectKey, tabView, viewOf, viewsOf, hasViewSwitch, shownContextMoves, shownIndex, stepIndex, tabViewAfter, tabViewKey,
 } from "./contexts.js";
 import { call, toolPaths, what } from "./tools.js";
 import { SAVED_MAX, UNSAVED, goneSaved, prefetchOrder, readLabels, readSaved, refreshDue, savedKey, savedText } from "./loading.js";
@@ -217,6 +234,8 @@ import { layers } from "./ui/layer.js";
 import { NOTE_TONES, toneColor } from "./ui/tones.js";
 import { SHAPES } from "./ui/shapes/index.js";
 import { MODALS } from "./ui/modals/index.js";
+import { soloField } from "./ui/modals/solo.js";
+import { soloKey, storedSolo } from "./kinds/issues.js";
 import { reselectIn } from "./actions/move.js";
 import { descriptionFolds, levelParts, lineShows, relatedSections, relatedState, revealLine } from "./ui/related.js";
 import { actionFor, actionName, aimOf, groupAimOf, hintsOf, keyName, keyShown, startName } from "./commands.js";
@@ -232,6 +251,8 @@ export * from "./kinds/index.js";
 export * from "./kinds/sprint.js";
 export * from "./kinds/backlog.js";
 export * from "./kinds/table.js";
+export * from "./kinds/issues.js";
+export * from "./kinds/rows.js";
 export * from "./kinds/fields.js";
 export * from "./kinds/states.js";
 export * from "./select.js";
@@ -267,6 +288,7 @@ export * from "./ui/shapes/prs.js";
 export * from "./ui/shapes/sprint.js";
 export * from "./ui/shapes/backlog.js";
 export * from "./ui/shapes/table.js";
+export * from "./ui/shapes/issues.js";
 export * from "./ui/shapes/placeholder.js";
 export * from "./ui/modals/index.js";
 export * from "./ui/modals/columns.js";
@@ -278,6 +300,7 @@ export * from "./ui/modals/sprints.js";
 export * from "./ui/modals/start.js";
 export * from "./ui/modals/sessions.js";
 export * from "./ui/modals/status.js";
+export * from "./ui/modals/solo.js";
 
 const TICK_MS = 30000;
 export const PREFETCH_GAP_MS = 1500;
@@ -307,8 +330,6 @@ export const BAND_MS = 100;
 // Why "nur meine" cannot tell one's own items, where the source has no words
 // of its own for it (noViewer): it did not name the login it read as.
 const NO_VIEWER = "die Quelle hat nicht gesagt, als wer sie gelesen wurde";
-// Where the store keeps the view a team's or a project's tab shows.
-const tabViewKey = (tab) => `${tab.kind === "team" ? "teamView" : "projectView"}:${tab.id}`;
 // Keys the board binds in its own key context. herdr binds Tab and
 // shift-Tab app-wide (gpui-kit's ShellRoot), to moving the keyboard to the
 // next or previous tab stop, and runs a matching binding's action before
@@ -520,14 +541,16 @@ export default class Board extends View {
   // one; never stored), saved (the data drawn is the saved state, or what a
   // read drew over it so far), restored (the saved state was looked for),
   // unsaved (why the store did not take its last read: UNSAVED; null where
-  // it did), progress ({ page, pages }) and unavailable (the last read since
-  // views.json was read found its source unavailable).
+  // it did), progress ({ page, pages }), unavailable (the last read since
+  // views.json was read found its source unavailable), readFor (the view as
+  // the read under way, or the last, reads it) and soloRepo (the repo an
+  // Issues tab's view shows alone, null for all; soloKey).
   state(id) {
     this.views[id] ??= {
       data: null, error: null, loading: false, again: false, at: 0, tried: 0, warnings: [], moves: [], pending: {}, unclear: [],
       hidden: null, sel: null, picked: null, runs: 0, want: null, detail: false,
       related: new Map(), folds: readStoredFolds(store.get(`folded:${id}`)), chosenFolds: new Map(), sprint: null,
-      saved: false, restored: false, unsaved: null, progress: null, unavailable: false,
+      saved: false, restored: false, unsaved: null, progress: null, unavailable: false, readFor: null, soloRepo: storedSolo(store.get(soloKey(id))),
     };
     return this.views[id];
   }
@@ -619,8 +642,8 @@ export default class Board extends View {
     return pick(context.tabs, this.tabIds[context.id]);
   }
 
-  // The view a team's or a project's tab shows, by its id (one of
-  // TEAM_VIEWS; a project's view by its number): the one chosen last on
+  // The view a tab with views shows, by its id (one of TEAM_VIEWS or
+  // ISSUE_VIEWS; a project's view by its number): the one chosen last on
   // this machine where the tab has it, else its first; for a project the
   // board knows none of the views of, the one chosen last.
   tabViewOf(tab) {
@@ -628,7 +651,7 @@ export default class Board extends View {
     return tab.views.length ? tabView(tab, this.tabViews[tab.id]) : this.tabViews[tab.id];
   }
 
-  // The view a tab shows (a team, a project: the view it shows).
+  // The view a tab shows (one with views, hasViews: the view it shows).
   viewFor(tab) {
     return viewOf(tab, hasViews(tab) ? this.tabViewOf(tab) : null);
   }
@@ -696,6 +719,16 @@ export default class Board extends View {
     const m = this.modal;
     if (m?.view && kinds.get(m.view.id) !== viewKind(m.view)) this.modal = null;
     return before;
+  }
+
+  // A view whose data is gone (`st` its state): no selection, and its
+  // dialog that draws from that data closes, unless it is busy.
+  dataGone(view, st) {
+    Object.assign(st, { sel: null, picked: null, detail: false });
+    const m = this.modal;
+    if (m?.view?.id !== view.id || !MODALS[m.kind].needsData || m.busy) return;
+    this.modal = null;
+    this.takeKeyboard();
   }
 
   moveShownSource() {
@@ -826,8 +859,8 @@ export default class Board extends View {
 
   // After a settings change by the board: what of a view's settings its
   // shape draws from without a read (withView) shows at once; a view whose
-  // hide changed shows it so and is read again; `before` as in
-  // changeSettings.
+  // hide changed shows it so and is read again, as is one whose query now
+  // leaves other repos out (readsAgain); `before` as in changeSettings.
   followSettings(cx, before = null) {
     for (const view of this.viewsNow()) {
       const st = this.views[view.id];
@@ -836,6 +869,7 @@ export default class Board extends View {
         st.data = settled;
         this.keepSelection(view);
       }
+      if (st?.data && SHAPES[st.data.shape].readsAgain?.(st, view)) this.refresh(view, cx);
       if (!st?.hidden || !st.data) continue;
       const hidden = hiddenColumns(view);
       if (sameNames(hidden, st.hidden)) continue;
@@ -925,6 +959,7 @@ export default class Board extends View {
     // A refresh asked for while one runs (a column shown or hidden) follows it.
     if (st.loading) return void (st.again = true);
     st.loading = true;
+    st.readFor = view;
     st.again = false;
     st.tried = Date.now();
     st.progress = null;
@@ -993,7 +1028,7 @@ export default class Board extends View {
           st.data = before.data && SHAPES[before.data.shape].received(before.data, st, this.viewById(view.id) ?? view, before.data);
           st.warnings = before.warnings;
           if (st.data) this.keepSelection(view);
-          else Object.assign(st, { sel: null, picked: null, detail: false });
+          else this.dataGone(view, st);
         }
         const open = st.unclear.filter(isDue(st, started));
         if (open.length) {
@@ -1575,11 +1610,27 @@ export default class Board extends View {
     this.showTab(cx);
   }
 
-  // v: the shown team's or project's tab's next view.
+  // v: the shown tab's next view.
   nextTabView(cx) {
     const tab = this.tab();
     if (!hasViewSwitch(tab)) return;
     this.setTabView(tabViewAfter(tab, this.tabViewOf(tab)), cx);
+  }
+
+  setSoloRepo(view, repo, cx) {
+    const st = this.state(view.id);
+    st.soloRepo = repo;
+    if (repo === null) store.remove(soloKey(view.id));
+    else store.set(soloKey(view.id), repo);
+    this.keepSelection(view);
+    cx.notify();
+  }
+
+  nextSoloRepo(cx) {
+    const view = this.view();
+    const st = view && this.state(view.id);
+    const solo = st?.data && this.shape(view).soloSwitch?.(this, st);
+    if (solo) this.setSoloRepo(view, solo.after, cx);
   }
 
   // m: "nur meine" on or off, over whatever shows; nothing is read again.
@@ -2059,14 +2110,15 @@ export default class Board extends View {
 
   // The top bar, two rows so that neither the tabs nor the filter have to
   // give way on a small screen: the context switch and the shown context's
-  // tabs; then a team's view switch (where it has two), "nur
-  // meine", the filter, the read under way, the age of the data drawn and
-  // refresh. Without a valid views.json the first row holds only the
-  // board's name.
+  // tabs; then a tab's view switch (where it has more than one), an Issues
+  // tab's field „Repo:“, "nur meine", the filter, the read under way, the age
+  // of the data drawn and refresh. Without a valid views.json the first row
+  // holds only the board's name.
   toolbar(t, view, st) {
     const { reading, age, unsaved } = readLabels(st, Date.now());
     const context = this.context();
     const tab = this.tab();
+    const solo = view && st?.data ? this.shape(view).soloSwitch?.(this, st) : null;
     const row = () => h_flex().gap(12).px(16).items_center();
     let nav = row().pt(8).pb(4);
     if (!context) nav = nav.child(div().flex_none().text_size(15).font_semibold().child("Board"));
@@ -2078,6 +2130,7 @@ export default class Board extends View {
         const views = tab.views.map((v) => ({ id: v, label: tabViewName(tab, v) }));
         return el.child(this.segments(t, "tab-view", views, this.tabViewOf(tab), (id, cx) => this.setTabView(id, cx)));
       })
+      .when(Boolean(solo), (el) => el.child(soloField(this, t, view, solo)))
       .when(Boolean(context), (el) => el.child(this.mineToggle(t)))
       .child(
         h_flex()
@@ -2361,9 +2414,10 @@ export default class Board extends View {
   }
 
   // The hint line: the keys of what shows now, as the action table says
-  // them (hintsOf).
+  // them (hintsOf), or the open dialog's hint where it has one.
   hints(t) {
-    const keys = hintsOf(this.situation());
+    const said = this.modal ? MODALS[this.modal.kind].hint : null;
+    const keys = said ? [] : hintsOf(this.situation());
     // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()
@@ -2377,7 +2431,8 @@ export default class Board extends View {
       .bg(t.chrome)
       .text_size(12)
       .text_color(t.muted)
-      .children(keys.map(([k, what]) => h_flex().gap(5).child(div().font_semibold().text_color(t.foreground).child(k)).child(div().child(what))));
+      .children(keys.map(([k, what]) => h_flex().gap(5).child(div().font_semibold().text_color(t.foreground).child(k)).child(div().child(what))))
+      .when(Boolean(said), (el) => el.child(div().child(said)));
   }
 
 }

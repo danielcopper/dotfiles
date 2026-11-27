@@ -51,6 +51,9 @@ const FULL_REPO = /^[^/\s]+\/[^/\s]+$/;
 const SECTION_KEYS = ["name", "query", "tone"];
 const TONE_NAMES = Object.keys(SECTION_TONES).map((n) => `"${n}"`).join(", ").replace(/, ([^,]+)$/, " oder $1");
 
+const hideReposProblems = (list) =>
+  (list === undefined || (textList(list) && list.every((r) => FULL_REPO.test(r))) ? [] : ["„hideRepos“ ist eine Liste von Repos mit Besitzer, etwa [\"owner/repo\"]"]);
+
 const limitProblems = (limit, most, at = "„limit“") =>
   (limit === undefined || (Number.isInteger(limit) && limit >= 1 && limit <= most) ? [] : [`${at} ist eine ganze Zahl von 1 bis ${most}`]);
 
@@ -97,14 +100,17 @@ function projectViewsProblems(views) {
 }
 
 // Per kind of a GitHub context's entry (its `entryKind`: a project, whose
-// views come from GitHub, or the context's PR list, a view of kind "github
+// views come from GitHub, the context's Issues tab, with a view of kind
+// "github issues" per state, or its PR list, a view of kind "github
 // list"): its own keys, the keys of an older form that leave it out
 // (`before`), what is wrong with its keys, the key that names it (`name`;
 // `named`: whether a value of it names one; `nameIn`: whose entries it is
-// its own among, its context's or all contexts'), its place as an error
-// names it (`at`), its id and its settings' path, whether it needs the PR
-// sections of sources.github.prs (`needsShared`), and its fields with their
-// defaults filled in (`owner`: the context's; `shared`: those sections).
+// its own among, its context's or all contexts' of its kind), its place as
+// an error names it (`at`), its id (and its tab's, `tabId`, where that is
+// another; a tab's is its own among all contexts' tabs) and its settings'
+// path, whether it needs the PR sections of sources.github.prs
+// (`needsShared`), and its fields with their defaults filled in (`owner`:
+// the context's; `shared`: those sections).
 const ENTRY_KINDS = {
   project: {
     keys: ["number", "limit", "views"],
@@ -122,6 +128,26 @@ const ENTRY_KINDS = {
     settingsPath: (v, context) => [...context, "projects", String(v.number)],
     defaults: (v, owner) => ({ owner, number: v.number, limit: v.limit ?? BOARD_LIMIT, start: v.start ?? {}, views: v.views ?? {} }),
   },
+  issues: {
+    keys: ["id", "name", "limit", "hideRepos"],
+    before: [],
+    problems: (v) => [
+      ...(isText(v.id) ? [] : ["„id“ fehlt"]),
+      ...(v.name === undefined || isText(v.name) ? [] : ["„name“ muss Text sein"]),
+      ...limitProblems(v.limit, ISSUES_LIMIT),
+      ...hideReposProblems(v.hideRepos),
+    ],
+    name: "id",
+    named: isText,
+    nameIn: "kind",
+    at: () => "Issues-Tab",
+    id: (v) => issuesTabId(v.id),
+    settingsPath: (v, context) => [...context, "issues"],
+    defaults: (v, owner) => ({
+      ...viewDefaults(), ...(v.start && { start: v.start }),
+      owner, name: v.name ?? ISSUES_NAME, limit: v.limit ?? ISSUES_LIMIT, hideRepos: v.hideRepos ?? [],
+    }),
+  },
   prs: {
     keys: ["id", "name", "hide", "hideRepos", ...SHARED_PRS_KEYS],
     before: [],
@@ -130,15 +156,14 @@ const ENTRY_KINDS = {
       ...(v.name === undefined || isText(v.name) ? [] : ["„name“ muss Text sein"]),
       ...(v.hide === undefined || textList(v.hide) ? [] : ["„hide“ muss eine Liste von Texten sein"]),
       ...SHARED_PRS_KEYS.filter((k) => v[k] !== undefined).map((k) => `„${k}“ ${SHARED_PRS}`),
-      ...(v.hideRepos === undefined || (textList(v.hideRepos) && v.hideRepos.every((r) => FULL_REPO.test(r)))
-        ? []
-        : ["„hideRepos“ ist eine Liste von Repos mit Besitzer, etwa [\"owner/repo\"]"]),
+      ...hideReposProblems(v.hideRepos),
     ],
     name: "id",
     named: isText,
-    nameIn: "all",
+    nameIn: "kind",
     at: () => "PR-Tab",
     id: (v) => v.id,
+    tabId: (v) => githubTabId(v.id),
     settingsPath: (v, context) => [...context, "prs"],
     needsShared: true,
     defaults: (v, _owner, shared) => ({
@@ -149,6 +174,15 @@ const ENTRY_KINDS = {
 };
 
 const PRS_NAME = "PRs";
+const ISSUES_NAME = "Issues";
+
+// GitHub's search finds a thousand results at most.
+const ISSUES_LIMIT = 10 * PAGE;
+
+export const issuesTabId = (id) => `github:issues:${id}`;
+
+// The id of a GitHub PR tab.
+export const githubTabId = (viewId) => `github:${viewId}`;
 
 function tabProblems(v, entryKind) {
   if (!isObject(v)) return ["muss ein Objekt sein"];
@@ -172,7 +206,7 @@ function normalizeTab(v, entryKind, owner, shared) {
   return { ...common, ...kind.defaults(v, owner, shared) };
 }
 
-const GITHUB_CONTEXT_KEYS = ["owner", "projects", "prs"];
+const GITHUB_CONTEXT_KEYS = ["owner", "projects", "issues", "prs"];
 const GITHUB_CONTEXTS = ["sources", "github", "contexts"];
 const AZURE_CONTEXTS = ["sources", "azure", "contexts"];
 
@@ -181,10 +215,11 @@ export const nameKeyAt = (path) => LIST_NAMES.find(([at]) => at.length === path.
 
 // sources.github → { github: { contexts: [{ owner, tabs }] } or null,
 // errors }: tabs are the context's projects (entryKind "project", whose
-// views GitHub names: contexts.js) and its PR list (entryKind "prs", layout
-// "list"). A context or a tab with problems is left out and each problem is
-// listed; a project's number is the first of its context's that has it, a
-// PR tab's id the first of all contexts' PR tabs. Each tab carries `owners`
+// views GitHub names: contexts.js), its Issues tab (entryKind "issues") and
+// its PR list (entryKind "prs", layout "list"). A context or a tab with
+// problems is left out and each problem is listed; a project's number is the
+// first of its context's that has it, an Issues or PR tab's id the first of
+// all contexts' tabs of its kind. Each tab carries `owners`
 // (repoOwnership, kinds/list.js), folded. The PR tabs all take the sections
 // of sources.github.prs (readSharedPrs); without valid ones there are none.
 function readGithub(raw) {
@@ -197,7 +232,8 @@ function readGithub(raw) {
   const wanted = raw.prs !== undefined || list.some((a) => isObject(a) && a.prs !== undefined);
   const { shared, errors: sharedErrors } = wanted ? readSharedPrs(raw.prs) : { shared: null, errors: [] };
   errors.push(...sharedErrors);
-  const names = { all: new Set() };
+  const names = {};
+  const tabIds = new Set();
   const contexts = [];
   list.forEach((a, i) => {
     const where = `GitHub-Kontext ${i + 1}${isText(a?.owner) ? ` („${a.owner}“)` : ""}`;
@@ -211,6 +247,7 @@ function readGithub(raw) {
     if (a.prs === undefined) errors.push(`${where}: „prs“ fehlt: der PR-Tab, der letzte Tab des Kontexts, mit „id“`);
     const entries = [
       ...(Array.isArray(a.projects) ? a.projects : []).map((v) => ({ v, entryKind: "project" })),
+      ...(a.issues === undefined ? [] : [{ v: a.issues, entryKind: "issues" }]),
       ...(a.prs === undefined ? [] : [{ v: a.prs, entryKind: "prs" }]),
     ];
     const tabs = [];
@@ -218,10 +255,13 @@ function readGithub(raw) {
     entries.forEach(({ v, entryKind }, j) => {
       const kind = ENTRY_KINDS[entryKind];
       const problems = tabProblems(v, entryKind);
-      const seen = names[kind.nameIn];
+      const seen = kind.nameIn === "kind" ? (names[entryKind] ??= new Set()) : names.context;
       const name = v?.[kind.name];
       if (!problems.length && seen.has(name)) problems.push(`„${kind.name}“ ${name} gibt es schon`);
       if (kind.named(name)) seen.add(name);
+      const id = problems.length ? null : (kind.tabId ?? kind.id)(v, a.owner);
+      if (id !== null && tabIds.has(id)) problems.push(`„${kind.name}“ ${name} ergibt die Kennung „${id}“, die schon ein anderer Tab hat`);
+      if (id !== null) tabIds.add(id);
       if (problems.length) errors.push(...problems.map((p) => `${where}, ${kind.at(v, j)}: ${p}`));
       else if (!kind.needsShared || shared) tabs.push(normalizeTab(v, entryKind, a.owner, shared));
     });

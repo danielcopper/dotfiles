@@ -12,10 +12,8 @@
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { NOTIFIED, ageLabel, cardLabel } from "../../shared.js";
-import { repoHidePath } from "../../config.js";
-import { sameNames } from "../../kinds/board.js";
-import { keptRows, repoGroups, repoSwitches, toggledRepos } from "../../kinds/list.js";
-import { checkColor, checksSection, detailNote, detailSection, foreignChip, listRow, shownOf, toggleSwitch } from "../helpers.js";
+import { keptRows, repoGroups, repoSwitches, withRepoView } from "../../kinds/list.js";
+import { checkColor, checksSection, detailNote, detailSection, foreignChip, listRow, repoLine, shownOf, toggleRepoSetting } from "../helpers.js";
 import { NOTE_TONES, headBg, markColor, toneColor } from "../tones.js";
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
@@ -27,10 +25,6 @@ const sectionGroups = (b, data, s) => repoGroups(data, keptRows(data, s), (r) =>
 const prsRows = (b, st) => [{ shown: (st.data?.sections ?? []).flatMap((s) => sectionGroups(b, st.data, s).flatMap((g) => g.rows)) }];
 
 const keptAll = (data) => data.sections.flatMap((s) => keptRows(data, s));
-
-function withView(data, view) {
-  return sameNames(data.hideRepos ?? [], view.hideRepos) ? data : { ...data, hideRepos: [...view.hideRepos] };
-}
 
 export const prsShape = {
   state: () => ({ scroll: ScrollHandle.new() }),
@@ -46,12 +40,10 @@ export const prsShape = {
   dirs: ["up", "down"],
   loads: true,
   enterHint: "Detail · Review",
-  received: (data, _st, view) => withView(data, view),
-  withView,
-  toggleRepo(b, view, repo, cx) {
-    const now = b.viewById(view.id) ?? view;
-    b.changeSetting(repoHidePath(now), toggledRepos(now.hideRepos, repo), cx);
-  },
+  received: (data, _st, view) => withRepoView(data, view),
+  withView: withRepoView,
+  toggleRepo: toggleRepoSetting,
+  repoSwitches: (b, data) => repoSwitches(data, (r) => b.visible(r, data)),
   warnings: (_view, data) =>
     data.sections.flatMap((s) => [
       ...(s.skipped ? [`${s.skipped} Treffer in „${s.name}“ sind keine Pull Requests`] : []),
@@ -120,7 +112,7 @@ function drawPrs(b, t, mono, view, st) {
     }
   }
   const list = v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(prsState(b).scroll).children(children);
-  const above = [repoLine(b, t, view, st), st.data.notifiedPending ? div().id("notified-pending").px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.info)).child(NOTIFIED_PENDING) : null].filter(Boolean);
+  const above = [repoLine(b, t, view, st.data), st.data.notifiedPending ? div().id("notified-pending").px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.info)).child(NOTIFIED_PENDING) : null].filter(Boolean);
   return above.length ? v_flex().flex_1().min_h(0).children(above).child(list) : list;
 }
 
@@ -129,18 +121,6 @@ function repoRow(t, mono, id, group) {
     .child(div().font_family(mono).text_size(11).text_color(t.muted).child(group.name))
     .child(div().text_size(11).text_color(t.dim).child(shownOf(group.rows.length, group.held)))
     .when(group.foreign, (el) => el.child(foreignChip(t)));
-}
-
-function repoLine(b, t, view, st) {
-  const switches = repoSwitches(st.data, (r) => b.visible(r, st.data));
-  if (!switches.length) return null;
-  return h_flex().id("repo-line").flex_none().flex_wrap().gap(6).px(16).pt(10).pb(2).items_center().text_size(12)
-    .child(div().text_color(t.muted).child("Repos:"))
-    .children(switches.map((e) =>
-      toggleSwitch(b, t, `repo-switch-${e.repo}`, !e.hidden, (cx) => b.toggleRepo(view, e.repo, cx))
-        .child(`${e.hidden ? "" : "✓ "}${e.name}`)
-        .child(div().text_color(t.muted).child(shownOf(e.shown, e.held)))
-        .when(e.foreign, (el) => el.child(foreignChip(t)))));
 }
 
 function scrollToRow(b, view, key) {

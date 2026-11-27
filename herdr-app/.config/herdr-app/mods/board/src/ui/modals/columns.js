@@ -20,6 +20,8 @@ function toggleAt(b, m, at, cx) {
 }
 
 export const columnsModal = {
+  needsData: true,
+
   open(b, view, cx) {
     b.modal = { kind: "columns", view, at: 0 };
     cx.notify();

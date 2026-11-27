@@ -3,7 +3,9 @@
 // herdr gives a mod's draw 50 ms, which a column of a few hundred whole
 // cards outgrows.
 
-import { clampOffset, revealOffset } from "../scroll.js";
+import { div } from "gpui-kit";
+import { v_flex, ScrollHandle } from "gpui-base";
+import { clampOffset, revealOffset, spanStarts } from "../scroll.js";
 
 // The list's height until herdr laid it out (scrollOf).
 export const VIEWPORT_GUESS = 1000;
@@ -50,4 +52,41 @@ export function revealTop(s, at) {
 export function revealCard(s, at, content, top, height) {
   const to = revealOffset({ offset: at.offset, viewport: at.viewport, content }, top, height);
   s.revealed = to === at.offset ? null : { from: at.offset, to };
+}
+
+// A list of lines drawn in its band (a table's, an Issues tab's): its state
+// on the Board (windowedState), the scroll that shows a line (scrollToLine),
+// whether the list left its band (linesLeftBand), and the list itself
+// (windowedLines).
+export function windowedState() {
+  const scroll = ScrollHandle.new();
+  return { scroll, band: bandState(), windowed: readsScroll(scroll) };
+}
+
+export function scrollToLine(s, heights, at) {
+  if (s.windowed) {
+    const { starts, content } = spanStarts(heights, 0);
+    revealCard(s.band, scrollOf(s.scroll), content, starts[at], heights[at]);
+  }
+  s.scroll.scroll_to_item(at);
+}
+
+export const linesLeftBand = (s) => s.windowed && leftBand(s.band, scrollOf(s.scroll));
+
+// The list `id` of `lines`, `heights` high: each line in its band drawn
+// (draw), every other an empty frame of its height; `wheel` takes a wheel
+// event over it first. Null for no lines, the band placed all the same.
+export function windowedLines(s, id, lines, heights, draw, wheel = null) {
+  const at = s.windowed ? scrollOf(s.scroll) : null;
+  const layout = at && spanStarts(heights, 0);
+  if (at) placeBand(s.band, layout.content, at);
+  if (!lines.length) return null;
+  const lineEl = (l, i) => (layout && !inBand(s.band, layout.starts[i], heights[i]) ? div().flex_none().h(heights[i]) : draw(l));
+  return v_flex().id(id).flex_1().min_h(0).overflow_y_scrollbar().track_scroll(s.scroll)
+    .when(s.windowed || Boolean(wheel), (el) => el.on_scroll_wheel((e, cx) => {
+      if (wheel) wheel(e, cx);
+      // GPUI moved the list before the event reached it.
+      if (s.windowed && leftBand(s.band, scrollOf(s.scroll))) cx.notify();
+    }))
+    .children(lines.map(lineEl));
 }
