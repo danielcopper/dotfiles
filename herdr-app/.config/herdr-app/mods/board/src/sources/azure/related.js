@@ -148,7 +148,8 @@ export function azureReview(reviewers, draft) {
 
 // az's answer for azPullRequestArgs → the pull request's details
 // (related.js, pullRequest): its title, state, draft mark, author, review,
-// source branch and azureRepo (not `repo`, which is GitHub's owner/name).
+// source branch, azureRepo (not `repo`, which is GitHub's owner/name) and
+// azureProject, its repository's project.
 export function parseAzurePullRequest(stdout) {
   const json = azJson(stdout, "den Pull Request");
   if (!isObject(json) || !Number.isInteger(json.pullRequestId)) throw new BoardError("Azure lieferte keinen Pull Request");
@@ -161,6 +162,7 @@ export function parseAzurePullRequest(stdout) {
     review: azureReview(json.reviewers, json.isDraft === true),
     branch: String(json.sourceRefName ?? "").replace(/^refs\/heads\//, "") || null,
     azureRepo: typeof json.repository?.name === "string" ? json.repository.name : null,
+    azureProject: typeof json.repository?.project?.name === "string" ? json.repository.project.name : null,
   };
 }
 

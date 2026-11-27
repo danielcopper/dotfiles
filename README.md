@@ -1024,12 +1024,12 @@ by that run. Which files of the package git tracks is set in the root
   Sitzung starten" and "Abbrechen" (`j/k` and `Enter`, a digit or a click;
   `Esc` cancels); its action and button say "Sitzung wählen" where one of
   them is in a terminal, else "Agent starten" ("Review starten" for a pull
-  request), as the question then only confirms a start. With no session at all, or "Trotzdem neue Sitzung
-  starten", it starts one: a new tab on the chosen machine, in the repo's
-  checkout (for an item without a repo, in the repo chosen under "Repo"),
-  whose agent gets the first message views.json sets (`/implement <n>`,
-  `/pr-review <n>` for a pull request) and makes its own worktree. In the
-  start dialog `Enter` starts the session from every field. The
+  request), as the question then only confirms a start. With no session at all,
+  or "Trotzdem neue Sitzung starten", it starts one: a new tab on the chosen
+  machine, in the folder of the repo chosen under "Repo" (where it lies: "Repos
+  auf diesem Rechner", below), whose agent gets the first message views.json
+  sets (`/implement <n>`, `/pr-review <n>` for a pull request) and makes its own
+  worktree. In the start dialog `Enter` starts the session from every field. The
   first message grows with its text up to six lines and then scrolls
   (`PageUp`/`PageDown`, herdr's own keys there); shift-`Enter` breaks the line.
   The board binds `Enter` in the message's own key context (why: the comment
@@ -1040,69 +1040,72 @@ by that run. Which files of the package git tracks is set in the root
   message after such a load binds them again and puts the message back as it was
   before that `Enter`. Where that `Enter` put in only its one line break, in
   place of the selection, it starts; where it put in more (several cursors), it
-  starts nothing and asks for `Enter` once more. The choices "Repo" (only for an
-  item without a repo), "Agent", "Rechner" and "Öffnen in" work alike: `←`/`→`
-  (or `h`/`l`) step through the entries in place, space or a click opens a list
-  under the field, whose filter then has the keyboard. Typing filters the list,
-  `↑`/`↓` (or `ctrl-n/p`, `ctrl-j/k`) mark a row, `Enter` or a click takes it
-  and closes the list, and `Esc` or a press beside the list closes only the
-  list. The hint line names the keys of the field that has the keyboard. "Öffnen
-  in" says where the tab goes, with "Neuer Space …" and the chosen machine's
-  spaces. An existing space gets the tab, in the checkout's folder whatever the
-  space's own; a new space takes the name typed in the field that then shows,
-  prefilled with the repo's name (for an item without a repo the chosen repo's
-  folder name). Preselected is the space of that name, ignoring case, else the
-  space I am in, else that machine's first; "Neuer Space …" only where the
-  machine has none. Another machine in "Rechner" chooses anew among its spaces,
-  unless a new space with a name I typed is chosen; a machine whose spaces herdr
-  has not read says so and offers only a new space. A chosen space that closes
-  while the dialog is open is said there, and the dialog starts nothing until I
-  choose again; for one chosen on a machine whose spaces herdr is reading
-  (again), it starts nothing until they are read. "Repo" offers a work item, or
-  a pull request reached from one, the git repositories (a folder holding a
-  `.git`) directly beneath the folders `repoFolders` in views.json names, the
-  team's own or else those for every team under `sources.azure` (`~` is the
-  machine's home), as they are on the machine chosen under "Rechner" (the
-  header's "Calls:" says what that costs). A repo chosen stays chosen where the
-  other machine has it too. The first time nothing is chosen, and `Enter` then
-  starts nothing and says "Repo wählen"; after a start the view's next dialog
-  preselects that repo where it is among the repos listed, and otherwise, where
-  others are listed, says that it is not. A pull request the details went down
-  to from a work item has, once its details are read, the repo named like its
-  Azure repository preselected where exactly one listed repo is, and its start
-  is not remembered. A listing that fails says why in the field, a folder that
-  is not there or cannot be read is named, and where no folder is set or none
-  holds a repo the dialog says what to set in views.json; it then starts
-  nothing, and never in `start.checkout`. In the start dialog and the create
+  starts nothing and asks for `Enter` once more. The choices "Repo", "Agent",
+  "Rechner" and "Öffnen in" work alike: `←`/`→` (or `h`/`l`) step through the
+  entries in place, space or a click opens a list under the field, whose filter
+  then has the keyboard. Typing filters the list, `↑`/`↓` (or `ctrl-n/p`,
+  `ctrl-j/k`) mark a row, `Enter` or a click takes it and closes the list, and
+  `Esc` or a press beside the list closes only the list. The hint line names the
+  keys of the field that has the keyboard. "Öffnen in" says where the tab goes,
+  with "Neuer Space …" and the chosen machine's spaces. An existing space gets
+  the tab, in the repo's folder whatever the space's own; a new space takes the
+  name typed in the field that then shows, prefilled with the short name of the
+  repo chosen (its key's last part, the session runs there). Preselected is the
+  space of that name, ignoring case, else the space I am in, else that machine's
+  first; "Neuer Space …" only where the machine has none. Another machine in
+  "Rechner" chooses anew among its spaces, unless a new space with a name I
+  typed is chosen; a machine whose spaces herdr has not read says so and offers
+  only a new space. A chosen space that closes while the dialog is open is said
+  there, and the dialog starts nothing until I choose again; for one chosen on a
+  machine whose spaces herdr is reading (again), it starts nothing until they
+  are read. "Repo" offers every repo on the machine chosen under "Rechner"
+  ("Repos auf diesem Rechner", below), each by its key with its folder beside
+  it, for an item of any source; the closed field shows the chosen repo's folder
+  beside its key too. The item's own repo is preselected (a GitHub item's repo,
+  the repo of an Azure pull request's repository, by its project and name, once
+  the details have read it); where the machine has it in more than one folder,
+  none is: the dialog names those folders and asks for one, and where the
+  machine has it in none the dialog says so and asks for one (not while no
+  folder is set, nor while a repo's remotes are not read). A repo chosen stays
+  chosen where the other machine has it too, in the same folder where it has it
+  in several. A work item has none of its own: the first time nothing is chosen,
+  and `Enter` then starts nothing and says "Repo wählen"; after a start the
+  view's next dialog preselects that repo where it is among the repos listed,
+  and otherwise, where others are listed, says that it is not (a folder an older
+  board kept in its place is not taken); a pull request's start is not
+  remembered. The repos with a folder of their own are listed while the folders
+  are read, and stay where they cannot be. A listing that fails says why in the
+  field; a folder that is not there or cannot be read is named, and so is a repo
+  whose remotes git did not read; where no folder is set the dialog says what to
+  set in views.json, and where nothing is listed it names where the folders are
+  set; with no repo listed it starts nothing. In the start dialog and the create
   dialog `Tab` and shift-`Tab` move between the fields, from the message or
   title too: the board binds them in its own key context, as the leader does
-  (the comment above `BOARD_KEYS` in `mods/board/src/main.js`).
-  The tab is named after the item (`romm-tender#2845 …`, `AB#456 …` for a work
-  item), which is one way the board finds it again. The details' "SITZUNG"
-  lists every session of the item, the sure ones (a dot in their agent's
-  status color, and that status) before the likely ones (a ring and
-  "Kandidat"), one per place with every reason it was found by; a click, or
-  `Enter` on its line in the details panel, goes there (its space, tab and
-  pane). Sure: the item's key (`tender#3000`, `AB#101`, `!57`; on GitHub
-  also with its repo's owner, `owner/tender#3000`, the only key that names an
-  item of a foreign repo) in a space's, tab's or pane's name, or a bare `#3000`
-  there in a folder of the item's repo; on GitHub its number in the branch
-  of any terminal in a folder of its repo (a part that starts with `3000-`,
-  or a last part `3000`; a pull request's own head branch) or in a
-  worktree's folder below
-  `<repo>.worktrees/` (its first two parts there); the name of a Claude Code
-  session running on this machine that names the item so. Likely: an open
-  task in such a session's task list, or a terminal's title, that names it
-  so. A number stands alone (`#12` is not in `#123`), and an Azure work item
-  counts only by its whole key. A Claude session shows in the pane whose
-  terminal runs its process or one of that process's parents; else, where it
-  is the only Claude session in its folder not found by its process, in the
-  one pane on this machine in that folder whose agent reports itself as
-  Claude Code and runs no other session; where neither is found, it is
-  listed with "kein Terminal gefunden". A Claude session in no terminal
-  shows the status Claude Code writes (busy and shell: "arbeitet", waiting:
-  "wartet auf dich", idle: "bereit"); one in a pane shows that pane's, like
-  any place, and Claude Code's where the pane has none. "SITZUNG" names a
+  (the comment above `BOARD_KEYS` in `mods/board/src/main.js`). The tab is named
+  after the item (`romm-tender#2845 …`, `AB#456 …` for a work item), which is
+  one way the board finds it again. The details' "SITZUNG" lists every session
+  of the item, the sure ones (a dot in their agent's status color, and that
+  status) before the likely ones (a ring and "Kandidat"), one per place with
+  every reason it was found by; a click, or `Enter` on its line in the details
+  panel, goes there (its space, tab and pane). Sure: the item's key
+  (`tender#3000`, `AB#101`, `!57`; on GitHub also with its repo's owner,
+  `owner/tender#3000`, the only key that names an item of a foreign repo) in a
+  space's, tab's or pane's name, or a bare `#3000` there in a folder of the
+  item's repo; on GitHub its number in the branch of any terminal in a folder of
+  its repo (a part that starts with `3000-`, or a last part `3000`; a pull
+  request's own head branch) or in a worktree's folder below `<repo>.worktrees/`
+  (its first two parts there); the name of a Claude Code session running on this
+  machine that names the item so. Likely: an open task in such a session's task
+  list, or a terminal's title, that names it so. A number stands alone (`#12` is
+  not in `#123`), and an Azure work item counts only by its whole key. A Claude
+  session shows in the pane whose terminal runs its process or one of that
+  process's parents; else, where it is the only Claude session in its folder not
+  found by its process, in the one pane on this machine in that folder whose
+  agent reports itself as Claude Code and runs no other session; where neither
+  is found, it is listed with "kein Terminal gefunden". A Claude session in no
+  terminal shows the status Claude Code writes (busy and shell: "arbeitet",
+  waiting: "wartet auf dich", idle: "bereit"); one in a pane shows that pane's,
+  like any place, and Claude Code's where the pane has none. "SITZUNG" names a
   status Claude Code does not write. The board reads the files of the
   sessions whose process runs (`~/.claude/sessions/<pid>.json`, or under
   `CLAUDE_CONFIG_DIR`; never the `.key` files beside them) and, where `ps`
@@ -1144,6 +1147,47 @@ by that run. Which files of the package git tracks is set in the root
   functions and a few of its key paths against sample answers of gh, GitHub and
   az; the test file's header says which answers are recorded, which built by
   hand and which written from az's documentation. It needs node.
+- **"Repos auf diesem Rechner": one list of repo folders for the whole
+  machine.** The start dialog finds the folder of an item's repo, for every
+  source, in the repo folders `repoFolders` at the top of `views.json` names
+  (`"repoFolders": ["~/Repos", "~/work"]`; `~` is that machine's home; each
+  once, a trailing `/` aside), as they are on the machine chosen in the dialog:
+  each git repository directly beneath one of them (a folder holding a `.git`, a
+  worktree's file too) is a repo there, unless its path holds a line break
+  (herdr's log names it: `board: repos left out[ on <machine>] for a line break
+  in their path: <folder>, …`, each line break a `?`). A repo is known by its
+  remotes, not its folder's name: by the URLs of its `origin` and its
+  `upstream`, owner/repo on GitHub (`https`, `ssh` and `git@` forms),
+  project/repo on Azure DevOps (`dev.azure.com/<org>/<project>/_git/<repo>` and
+  `<org>.visualstudio.com/[DefaultCollection/]<project>/_git/<repo>`, without
+  `<project>/` for the project's own repo, and
+  `ssh.dev.azure.com:v3/<org>/<project>/<repo>` or
+  `vs-ssh.visualstudio.com:v3/…`), and host/path on any other host; so
+  `~/Repos/LRPS2` with the origin `libretro/ps2` is `libretro/ps2`, and a fork
+  with its `upstream` is found under both keys, the place for the pull requests
+  of either. A repo without either remote goes by its folder's name, and so does
+  one whose remotes git cannot read (no git on the machine, a `.git` it cannot
+  read), which the dialog names (where git is not installed on the machine, it
+  says only that) and herdr's log too, with git's exit status (`board: remotes
+  not read[ on <machine>]: <folder> (git <status>), …`). Keys compare in any
+  case. Repos of one key in more than one folder are all listed, in the folders'
+  order: the dialog preselects none of them, and herdr's log names them (`board:
+  repo <key>[ on <machine>] in more than one folder: <folder>, <folder>`). A
+  repo with a folder of its own, `repos.<owner/repo>.checkout` (`"repos": {
+  "sample-user/tender": { "checkout": "~/src/tender" } }`; a blank one is an
+  error: while it stands, the entry holding it does not apply, and in the
+  machine's settings file none of that file does), takes the place of those of
+  its key in the repo folders, on every machine; it is listed while the repo
+  folders are read, its folder is looked up when the session starts, and where
+  that folder is missing the dialog names the setting and where it comes from
+  and starts nothing. The machine's settings file may set both (a list of
+  folders replaces `views.json`'s whole, a repo's checkout overrides its own),
+  and the board records where each value comes from ("dieser Rechner",
+  "views.json", "Standard"). Listing the repos costs sh calls (the header's
+  "Calls:" says what that costs). `repoFolders` under `sources.azure` or at a
+  team, and a `checkout` in `start` or a view's `start`, are an older form: the
+  board names where they stand now, and leaves out the team, the tab whose start
+  holds it, or views.json's whole `start`; the rest of `sources.azure` is read.
 - **herdr writes `layouts/personal.json` itself.** `layout.set` saves the
   whole tree, in herdr's key order, through the link into this repo, so such
   a change shows up in `git diff`; clicks (sizes, shown or hidden, the child a

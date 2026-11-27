@@ -3,17 +3,26 @@
 
 import { BoardError, CONFIG_NAME, PAGE, SECTION_TONES, SECTION_TONE_ORDER, foldedName, isObject, isText, textList } from "./shared.js";
 import { viewDefaults } from "./kinds/index.js";
-import { entryByName, mergeSettings, pathText, readSettings, valueAt, withSetting } from "./settings.js";
+import { ORIGIN, entryByName, mergeSettings, pathText, readSettings, valueAt, withSetting } from "./settings.js";
 
-export const START_DEFAULTS = { agent: null, machine: null, checkout: null, message: "", review: "" };
+export const START_DEFAULTS = { agent: null, machine: null, message: "", review: "" };
 const START_KEYS = Object.keys(START_DEFAULTS);
+const REPO_KEYS = [...START_KEYS, "checkout"];
 // Keys of a start that made a worktree or set the status: the agent's own
 // skills do both.
-const GONE = "gibt es nicht mehr: der Start öffnet eine Sitzung im Checkout, den Worktree legt der Agent an";
+const GONE = "gibt es nicht mehr: der Start öffnet eine Sitzung im Ordner des Repos, den Worktree legt der Agent an";
 const GONE_START = ["branch", "worktree", "base"];
 const GONE_OPEN = "gibt es nicht mehr: „Öffnen in“ im Startdialog wählt den Space";
 const GONE_STATUS = "„startColumn“ gibt es nicht mehr: den Status setzt der Agent selbst";
-const TOP_KEYS = ["refreshMinutes", "start", "repos", "sources"];
+const REPO_FOLDERS_PLACE = "die Repo-Ordner stehen jetzt oben in views.json unter „repoFolders“, für alle Quellen";
+const GONE_CHECKOUT = "gibt es nicht mehr: ein Repo startet in seinem Ordner unter „repoFolders“ oder in dem, den „repos.<Besitzer/Repo>.checkout“ setzt";
+const staleText = (where) => `solange es dasteht, gilt „${where}“ nicht`;
+const STALE_START = staleText("start");
+const STALE_VIEW_START = "solange es dasteht, fehlt der Tab";
+const STALE_TEAM = "solange es dasteht, fehlt das Team";
+const STALE_AZURE = "es gilt nicht, der Rest von „sources.azure“ schon";
+const BLANK_CHECKOUT = "ist der Ordner des Repos (Text, nicht leer), etwa \"~/Repos/<Repo>\"";
+const TOP_KEYS = ["refreshMinutes", "start", "repoFolders", "repos", "sources"];
 // What an old views.json, with its views at the top, is told.
 const OLD_SHAPE = "views.json hat noch die alte Form: die Einträge von „views“ stehen jetzt unter „sources“, die von GitHub in " +
   "„sources.github.contexts“, die von Azure in „sources.azure“ mit „org“ und „contexts“ (Kopf von mods/board/src/main.js)";
@@ -24,15 +33,19 @@ const BEFORE_CONTEXTS = "views.json hat noch die Form vor den Kontexten: die Ein
   "die Azure-Teams je Projekt in „sources.azure.contexts“ ({ \"project\", \"teams\": [{ \"team\", \"views\" }] }; den PR-Tab hat jedes Projekt von selbst) " +
   "(Kopf von mods/board/src/main.js)";
 
-function startProblems(start, where) {
+// inMachineFile: what settingsAlone says of the whole file stands in place
+// of what a blank checkout leaves out.
+function startProblems(start, where, { keys = START_KEYS, stale = STALE_START, inMachineFile = false } = {}) {
   if (start === undefined) return [];
   if (!isObject(start)) return [`„${where}“ muss ein Objekt sein`];
   const out = [];
   for (const [key, value] of Object.entries(start)) {
     if (GONE_START.includes(key)) out.push(`„${where}.${key}“ ${GONE}`);
     else if (key === "open") out.push(`„${where}.open“ ${GONE_OPEN}`);
-    else if (!START_KEYS.includes(key)) out.push(`„${where}.${key}“ gibt es nicht`);
+    else if (key === "checkout" && !keys.includes(key)) out.push(`„${where}.checkout“ ${GONE_CHECKOUT}; ${stale}`);
+    else if (!keys.includes(key)) out.push(`„${where}.${key}“ gibt es nicht`);
     else if (value !== null && typeof value !== "string") out.push(`„${where}.${key}“ muss Text sein`);
+    else if (key === "checkout" && value !== null && !isText(value)) out.push(`„${where}.checkout“ ${BLANK_CHECKOUT}${inMachineFile ? "" : `; ${staleText(where)}`}`);
   }
   return out;
 }
@@ -194,7 +207,7 @@ function tabProblems(v, entryKind) {
     if (key === "startColumn") out.push(GONE_STATUS);
     else if (!COMMON_KEYS.includes(key) && !kind.keys.includes(key)) out.push(`„${key}“ gibt es nicht`);
   }
-  return [...out, ...kind.problems(v), ...startProblems(v.start, "start")];
+  return [...out, ...kind.problems(v), ...startProblems(v.start, "start", { stale: STALE_VIEW_START })];
 }
 
 // A project's tab id: its owner's and its number, which name it on GitHub.
@@ -321,30 +334,27 @@ const REPO_FOLDERS_TEXT = "ist eine Liste aus mindestens einem Ordner (Text), je
 const trimFolders = (v) => v.map((f) => f.replace(/(.)\/+$/, "$1"));
 const repoFoldersOk = (v) => v === undefined || (Array.isArray(v) && v.length > 0 && v.every(isText) && new Set(trimFolders(v)).size === v.length);
 
-const TEAM_KEYS = ["team", "views", "repoFolders"];
+const TEAM_KEYS = ["team", "views"];
 
-// What is wrong with a team of an Azure context: { "team", "views"?: [...],
-// "repoFolders"?: [...] }.
+// What is wrong with a team of an Azure context: { "team", "views"?: [...] }.
 function teamProblems(t) {
   if (!isObject(t)) return ["muss ein Objekt sein"];
-  const out = Object.keys(t).filter((k) => !TEAM_KEYS.includes(k)).map((k) => `„${k}“ gibt es nicht`);
+  const out = Object.keys(t).filter((k) => !TEAM_KEYS.includes(k)).map((k) => (k === "repoFolders" ? `„repoFolders“ gibt es hier nicht mehr: ${REPO_FOLDERS_PLACE}; ${STALE_TEAM}` : `„${k}“ gibt es nicht`));
   if (!isText(t.team)) out.push("„team“ fehlt: der Name des Teams im Projekt");
   const views = t.views;
   if (views !== undefined && !(textList(views) && views.length && views.every((v) => TEAM_VIEW_IDS.includes(v)) && new Set(views).size === views.length)) {
     out.push(`„views“ ist eine Liste aus ${TEAM_VIEWS_TEXT}, jede höchstens einmal`);
   }
-  if (!repoFoldersOk(t.repoFolders)) out.push(`„repoFolders“ ${REPO_FOLDERS_TEXT}`);
   return out;
 }
 
 // The tabs of an Azure context: { id, source: "azure", kind: "team", name,
-// org, project, team, views, repoFolders } per team, views in the switch's
-// order, then { id, source: "azure", kind: "prs", name, org, project } for
-// the project's pull requests; org the organisation's address (orgUrl).
-function teamTab(t, project, org, folders) {
+// org, project, team, views } per team, views in the switch's order, then {
+// id, source: "azure", kind: "prs", name, org, project } for the project's
+// pull requests; org the organisation's address (orgUrl).
+function teamTab(t, project, org) {
   const views = t.views ?? TEAM_VIEW_IDS;
-  const repoFolders = t.repoFolders ? trimFolders(t.repoFolders) : folders;
-  return { id: `azure:team:${project}/${t.team}`, source: "azure", kind: "team", name: t.team, org, project, team: t.team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)), repoFolders };
+  return { id: `azure:team:${project}/${t.team}`, source: "azure", kind: "team", name: t.team, org, project, team: t.team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)) };
 }
 const prsTab = (project, org) => ({ id: `azure:prs:${project}`, source: "azure", kind: "prs", name: PRS_NAME, org, project });
 
@@ -367,11 +377,9 @@ const holdsBeforeContexts = (contexts) => Array.isArray(contexts) && contexts.so
 // or a team with problems is left out and each problem is listed.
 function readAzure(raw) {
   if (!isObject(raw)) return { azure: null, errors: ["„sources.azure“ muss ein Objekt sein"] };
-  const errors = Object.keys(raw).filter((k) => !["org", "contexts", "repoFolders"].includes(k)).map((k) => `„sources.azure.${k}“ gibt es nicht`);
+  const errors = Object.keys(raw).filter((k) => !["org", "contexts"].includes(k))
+    .map((k) => (k === "repoFolders" ? `„sources.azure.repoFolders“ gibt es nicht mehr: ${REPO_FOLDERS_PLACE}; ${STALE_AZURE}` : `„sources.azure.${k}“ gibt es nicht`));
   const org = orgUrl(raw.org);
-  const foldersOk = repoFoldersOk(raw.repoFolders);
-  if (!foldersOk) errors.push(`„sources.azure.repoFolders“ ${REPO_FOLDERS_TEXT}`);
-  const folders = foldersOk && raw.repoFolders ? trimFolders(raw.repoFolders) : [];
   if (!org) errors.push("„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>");
   const list = Array.isArray(raw.contexts) ? raw.contexts.filter((c) => !beforeContexts(c)) : [];
   if (!list.length && !holdsBeforeContexts(raw.contexts)) {
@@ -389,7 +397,7 @@ function readAzure(raw) {
       const team = teamProblems(t);
       if (!team.length && tabs.some((c) => c.team === t.team)) team.push("gibt es schon");
       if (team.length) return errors.push(...team.map((p) => `${at}: ${p}`));
-      tabs.push(teamTab(t, a.project, org, folders));
+      tabs.push(teamTab(t, a.project, org));
     });
     contexts.push({ project: a.project, tabs: [...tabs, prsTab(a.project, org)] });
   });
@@ -399,11 +407,11 @@ function readAzure(raw) {
 // views.json as text (null: there is none) and this machine's settings as
 // read (`settingsRead`: { name, text }, text null for no file, or { name,
 // error }) → { config, errors, settings, origin, moving? }: config is {
-// refreshMinutes, start, repos, azure: { org, contexts } or null, github: {
-// contexts } or null }, settings those applied (null: none), origin
-// mergeSettings's, moving settingsForContexts's move where the settings can
-// move. A context or a tab with problems is left out and each problem is
-// listed; config is null only when nothing usable is left.
+// refreshMinutes, start, repoFolders, repos, azure: { org, contexts } or
+// null, github: { contexts } or null }, settings those applied (null:
+// none), origin mergeSettings's, moving settingsForContexts's move where
+// the settings can move. A context or a tab with problems is left out and
+// each problem is listed; config is null only when nothing usable is left.
 export function readConfig(text, settingsRead = null) {
   const none = (error) => ({ config: null, errors: [error], settings: null, origin: mergeSettings(null, {}, nameKeyAt).origin });
   if (text === null || text === undefined) return none(`${CONFIG_NAME}.json fehlt im Ordner der Mod`);
@@ -426,7 +434,7 @@ export function readConfig(text, settingsRead = null) {
   if (moving) return { ...unused([`${name} hat noch die Form vor den Kontexten und ist nicht umgestellt; ${MOVE_AGAIN}`]), moving };
   const { settings: applied, errors: before } = withoutProjectsBefore(settings);
   const { merged, errors: unmatched, origin } = mergeSettings(raw, applied, nameKeyAt);
-  const read = validateConfig(merged);
+  const read = validateConfig(merged, origin);
   const added = read.errors.filter((e) => !alone.errors.includes(e));
   if (added.length) return unused(named([...before, ...unmatched, ...added]));
   return { ...read, errors: [...read.errors, ...named([...before, ...unmatched])], settings: applied, origin };
@@ -465,7 +473,7 @@ export const MOVE_AGAIN = "das nächste Lesen (r) versucht es noch einmal";
 
 export const settingsAlone = (subject) => `${subject} gilt nicht: das Board zeigt ${CONFIG_NAME}.json allein`;
 
-export function validateConfig(raw) {
+export function validateConfig(raw, origin = null) {
   if (!isObject(raw)) return { config: null, errors: ["Oben muss ein Objekt stehen"] };
   // Views at the top are views.json's old form, also beside sources.
   const old = raw.views !== undefined;
@@ -478,10 +486,14 @@ export function validateConfig(raw) {
   }
   const startErrors = startProblems(raw.start, "start");
   errors.push(...startErrors);
+  const foldersOk = repoFoldersOk(raw.repoFolders);
+  if (!foldersOk) errors.push(`„repoFolders“ ${REPO_FOLDERS_TEXT}`);
+  const repoFolders = foldersOk && raw.repoFolders ? trimFolders(raw.repoFolders) : [];
   const repos = {};
   if (raw.repos !== undefined && !isObject(raw.repos)) errors.push("„repos“ muss ein Objekt sein");
   for (const [name, entry] of Object.entries(isObject(raw.repos) ? raw.repos : {})) {
-    const problems = startProblems(entry, `repos.${name}`);
+    const inMachineFile = origin?.(["repos", name, "checkout"]) === ORIGIN.machine;
+    const problems = startProblems(entry, `repos.${name}`, { keys: REPO_KEYS, inMachineFile });
     if (problems.length) errors.push(...problems);
     else repos[name] = entry;
   }
@@ -505,7 +517,7 @@ export function validateConfig(raw) {
   } else if (raw.sources !== undefined) errors.push("„sources“ muss ein Objekt sein");
   else if (!old) errors.push("„sources“ fehlt: „sources.azure“ oder „sources.github“");
   const start = startErrors.length ? {} : raw.start ?? {};
-  return { config: azure || github ? { refreshMinutes, start, repos, azure, github } : null, errors };
+  return { config: azure || github ? { refreshMinutes, start, repoFolders, repos, azure, github } : null, errors };
 }
 
 export const hidePath = (view) => [...view.settingsPath, "hide"];
@@ -593,7 +605,12 @@ export function settingsForContexts(raw, settings) {
 }
 
 // The start for an item: the defaults, then views.json's start, then the
-// view's start, then the repo's entry in repos; a later one wins.
+// view's start, then the repo's entry in repos; a later one wins. Where a
+// repo lies is the start dialog's (repoExceptions).
 export function startSettings(config, view, repo) {
-  return { ...START_DEFAULTS, ...config.start, ...view.start, ...(config.repos[repo] ?? {}) };
+  const own = { ...config.repos[repo] };
+  delete own.checkout;
+  return { ...START_DEFAULTS, ...config.start, ...view.start, ...own };
 }
+
+export const repoExceptions = (config) => Object.entries(config.repos).filter(([, e]) => isText(e.checkout));

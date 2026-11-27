@@ -1,9 +1,10 @@
-// A dialog's choice fields (the start dialog's Agent, Rechner and Öffnen
-// in, the create dialog's Typ; the Issues tab's field „Repo:“ opens its list
-// as a dialog of its own, ui/modals/solo.js), from a table of the dialog's,
-// by field: { entries(m), each { id, name, aside (the texts at its right:
-// a space's folder, a repo's count) }; current(m), the id of the entry the
-// field is on; value(m), the text the field shows; take(b, row, cx), which
+// A dialog's choice fields (the start dialog's Repo, Agent, Rechner and
+// Öffnen in, the create dialog's Typ; the Issues tab's field „Repo:“ opens
+// its list as a dialog of its own, ui/modals/solo.js), from a table of the
+// dialog's, by field: { entries(m), each { id, name, aside (the texts at its
+// right: a space's folder, a repo's count) }; current(m), the id of the
+// entry the field is on; value(m), the text the field shows, and
+// valueAside(m), the one beside it (null: none); take(b, row, cx), which
 // puts the field on that entry; fieldAfter(row), the field the dialog goes
 // on to once the list took `row` (by default it stays); closes (the dialog
 // ends once the list took a row or a press beside it closed it); the
@@ -33,6 +34,7 @@ export function choiceBox(b, t, choices, field) {
       openList(b, choices, field, cx);
     })
     .child(div().flex_1().min_w(0).truncate().child(choices[field].value(m)))
+    .when(Boolean(choices[field].valueAside?.(m)), (el) => el.child(div().flex_none().max_w(240).truncate().text_size(11).text_color(t.dim).child(choices[field].valueAside(m))))
     .child(div().text_color(t.dim).child("▾"));
   return listPopup(b, t, field, choices[field].anchor, fieldFrame(t, m, field, trigger));
 }

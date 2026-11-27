@@ -34,22 +34,21 @@
 //     without one a section takes the next of SECTION_TONE_ORDER by its
 //     place that no other section sets. A PR tab's id is its own among all
 //     contexts' PR tabs (readGithub in config.js).
-//   - azure: { org (https://dev.azure.com/<org>), repoFolders?, contexts: [{
-//     project, teams?: [{ team, views?: ["sprint", "backlog"] (both when
-//     missing), repoFolders? }] }] }, a context per project: a tab per team,
-//     then one for the project's pull requests. repoFolders: the folders (~
-//     is a machine's home; each once, a trailing / aside) whose git
-//     repositories the start dialog offers for a team's items without a repo
-//     ("Repo"); a team's own in place of those for all.
+//   - azure: { org (https://dev.azure.com/<org>), contexts: [{ project,
+//     teams?: [{ team, views?: ["sprint", "backlog"] (both when missing)
+//     }] }] }, a context per project: a tab per team, then one for the
+//     project's pull requests.
+// - repoFolders: the folders (~ is a machine's home; each once, a trailing
+//   / aside) whose git repositories the start dialog offers for an item of
+//   any source ("Repo"), each by the keys of its origin and upstream
+//   (remoteKey, actions/start.js).
 // - start: what the start dialog proposes: agent (a programs.json key),
-//   machine, checkout (the folder the session starts in; ~ is that
-//   machine's home; an item without a repo (an Azure work item, or a pull
-//   request reached from one) starts in a repo of repoFolders instead),
-//   message (the first message for issues and work items) and review (for
-//   pull requests). Templates take {number} {title} {url} {owner} {repo}
-//   {key}.
-// - repos: { "<owner>/<repo>": { any start field } }. startSettings says
-//   which start applies.
+//   machine, message (the first message for issues and work items) and
+//   review (for pull requests). Templates take {number} {title} {url}
+//   {owner} {repo} {key}.
+// - repos: { "<owner>/<repo>": { any start field, checkout? } }.
+//   startSettings says which start applies; checkout is the repo's folder
+//   (~ is that machine's home), in place of those of its key in repoFolders.
 // In an older views.json, with its views at the top or its sources without
 // contexts (sources.github.views, an Azure context with team or prs), the
 // old part is not read: the board says where its views and teams go now.
@@ -137,13 +136,14 @@
 // whose answer was unclear asks one WIQL query more after that refresh; a
 // create for a team whose default iteration follows the current one reads the
 // team's settings first, one call more. Azure's PR tabs read nothing yet. The
-// start dialog's Repo field costs one sh call when it opens and one per
-// machine chosen in it (its repos; none without repoFolders). Finding gh and
-// az costs one sh call now and then (toolPaths says when). The Claude Code
-// sessions on this machine cost one sh call (their files and ps), and one
-// more where any of them runs (their task lists), each with its log line:
-// when the board starts, after a look that sees it come to show, every
-// CLAUDE_MS while it shows, and when the focus or a space's count of tabs
+// start dialog's Repo field costs one sh call when it opens and one per machine
+// chosen in it (its repos, with one git call per repo for their remotes; none
+// without repoFolders), and one at the start for a repo with a checkout of its
+// own. Finding gh and az costs one sh call now and then (toolPaths says when).
+// The Claude Code sessions on this machine cost one sh call (their files and
+// ps), and one more where any of them runs (their task lists), each with its
+// log line: when the board starts, after a look that sees it come to show,
+// every CLAUDE_MS while it shows, and when the focus or a space's count of tabs
 // changes (readClaude, followSessions); never in a render. A view refreshes
 // when its tab first shows (unless it has data the prefetch tried within
 // refreshMinutes), on `r` (which first drops what its source keeps of it: its
@@ -212,7 +212,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { appHome, checking, exec, focused, home, layout, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, terminals, theme, writeTextFile } from "herdr";
-import { MOD, CONFIG_NAME, boardLog, cardType, errorText, firstLine, itemKey, itemLabel, lineKey, parentLabel, report, sameItem } from "./shared.js";
+import { MOD, CONFIG_NAME, andJoined, boardLog, cardType, errorText, firstLine, itemKey, itemLabel, lineKey, parentLabel, report, sameItem } from "./shared.js";
 import { MOVE_AGAIN, hidePath, nameKeyAt, readConfig, settingsAlone, settingsBeforeContexts, startSettings } from "./config.js";
 import { CHANGED_MEANWHILE, CHANGED_SINCE, ORIGIN, pathText, readSettings, sameAtPaths, settingsAfter, settingsFileIn, settingsText, staleRefusal } from "./settings.js";
 import { hiddenColumns, hiddenKey, isDue, pendingMoves, sameNames, storedHiddenMoves, withHidden } from "./kinds/board.js";
@@ -491,7 +491,7 @@ export default class Board extends View {
       ...Object.values(MODALS).flatMap((d) => d.keys ?? []),
     ];
     const strokes = keys.map((k) => k.keystroke.replace(/[a-z]+$/, (key) => key[0].toUpperCase() + key.slice(1)));
-    const names = `${strokes.slice(0, -1).join(", ")} und ${strokes.at(-1)}`;
+    const names = andJoined(strokes);
     try {
       const count = cx.bind_keys(keys);
       if (count !== keys.length) {

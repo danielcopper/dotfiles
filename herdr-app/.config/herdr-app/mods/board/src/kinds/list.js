@@ -2,7 +2,7 @@
 // ones this machine turns off (hideRepos, whose rows do not show), rows
 // grouped by repo, and the switches of the repo menu.
 
-import { foldedName } from "../shared.js";
+import { foldedName, repoShortName } from "../shared.js";
 import { sameNames } from "./board.js";
 
 // Whose the repo `repo` ("owner/repo") is, for a tab of the context whose
@@ -29,7 +29,7 @@ export const toggledRepos = (list, repo) =>
 
 export function repoLook(data, repo) {
   const ownership = repoOwnership(repo, data.owners);
-  return { repo, name: ownership === "own" ? repo.split("/").pop() : repo, foreign: ownership === "foreign" };
+  return { repo, name: ownership === "own" ? repoShortName(repo) : repo, foreign: ownership === "foreign" };
 }
 
 // A section's rows `rows` (those of repos turned on) that `visible` lets

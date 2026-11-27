@@ -3,7 +3,7 @@
 // what gh's answers and failures mean, and the source as the board uses it
 // (makeGithub).
 
-import { CONFIG_NAME, BoardError, DRAFT_REVIEW, NOTIFIED, PAGE, STATE_LOOKS, errorText, failure, firstLine, foldedName, isText, otherLook, personName, readMemo, SECTION_TONES } from "../shared.js";
+import { CONFIG_NAME, BoardError, DRAFT_REVIEW, NOTIFIED, PAGE, STATE_LOOKS, errorText, failure, firstLine, foldedName, isText, otherLook, personName, readMemo, repoShortName, SECTION_TONES } from "../shared.js";
 import { NO_LIVE } from "../loading.js";
 import { GH_TIMEOUT, call, what } from "../tools.js";
 import { repoOwnership } from "../kinds/list.js";
@@ -435,7 +435,7 @@ function githubCard(node, owners, plan) {
     kind: c.__typename === "PullRequest" ? "pr" : c.__typename === "DraftIssue" ? "draft" : "issue",
     number: c.number ?? null,
     repo,
-    repoShort: repo.split("/").pop(),
+    repoShort: repoShortName(repo),
     ...foreignMark(owners, repo),
     title: c.title ?? "(kein Zugriff)",
     url: c.url ?? null,
@@ -799,7 +799,7 @@ function prRow(pr, lost = false) {
   return {
     number: pr.number,
     repo,
-    repoShort: repo.split("/").pop(),
+    repoShort: repoShortName(repo),
     title: pr.title,
     url: pr.url,
     author: pr.author?.login ?? "?",
@@ -1166,7 +1166,7 @@ function relatedLine(node, kind, owners) {
     kind,
     source: "github",
     repo,
-    repoShort: repo.split("/").pop(),
+    repoShort: repoShortName(repo),
     ...foreignMark(owners, repo),
     number: node.number,
     title: node.title ?? "(kein Zugriff)",

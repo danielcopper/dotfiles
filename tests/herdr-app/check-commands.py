@@ -48,9 +48,10 @@ REPO = Path(__file__).resolve().parents[2]
 MODS = REPO / "herdr-app/.config/herdr-app/mods"
 KEYS = REPO / "herdr-app/.config/herdr-app/keys.json"
 
-# Shaped like commands but none: shared-state keys, and the mod commands
-# that mods send with run().
-NOT_COMMANDS = {"focus.history", "leader.state", "workspace.panels", "leader.send_prefix", "board.focus"}
+# Shaped like commands but none: shared-state keys, the mod commands that
+# mods send with run(), and the host by which the board tells a GitHub
+# remote.
+NOT_COMMANDS = {"focus.history", "leader.state", "workspace.panels", "leader.send_prefix", "board.focus", "github.com"}
 # File names in the prose (keys.json, mod.json) are no commands.
 FILE_TYPES = {"js", "json", "md", "svg", "png", "ts", "toml"}
 

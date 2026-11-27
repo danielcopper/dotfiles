@@ -36,9 +36,9 @@
 // reads the pull request's details as the PR list has a row's (title,
 // state, color, done, draft, author, review, branch; on GitHub its checks
 // and assignees too, and warnings: what GitHub said besides; on Azure
-// azureRepo, its repository's name), which the panel shows as the PR
-// list's details do; the Board keeps them as { pr } beside the related
-// items.
+// azureRepo and azureProject, its repository's name and project), which
+// the panel shows as the PR list's details do; the Board keeps them as {
+// pr } beside the related items.
 
 import { cardLabel, lineKey, relativeLabel } from "./shared.js";
 import { fits, placeKey } from "./sessions.js";

@@ -5,10 +5,7 @@
     "message": "/implement {number}",
     "review": "/pr-review {number}"
   },
-  "repos": {
-    "danielcopper/romm-tender": { "checkout": "~/Repos/romm-tender" },
-    "danielcopper/emu-atlas": { "checkout": "~/Repos/emu-atlas" }
-  },
+  "repoFolders": ["~/Repos", "~/Projects/VC", "~/Projects/Captano"],
   "sources": {
     "github": {
       "contexts": [
@@ -30,8 +27,8 @@
     "azure": {
       "org": "https://dev.azure.com/l-p-a",
       "contexts": [
-        { "project": "VC", "teams": [{ "team": "VC Core Team", "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/VC"] }] },
-        { "project": "LPA Captano", "teams": [{ "team": "LPA Captano Team", "views": ["sprint", "backlog"], "repoFolders": ["~/Projects/Captano"] }] }
+        { "project": "VC", "teams": [{ "team": "VC Core Team", "views": ["sprint", "backlog"] }] },
+        { "project": "LPA Captano", "teams": [{ "team": "LPA Captano Team", "views": ["sprint", "backlog"] }] }
       ]
     }
   }

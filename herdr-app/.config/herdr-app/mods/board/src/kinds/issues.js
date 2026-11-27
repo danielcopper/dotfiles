@@ -5,7 +5,7 @@
 // saved state takes.
 // parseGithubIssues (sources/github.js) builds the data.
 
-import { COPPER_HUES, foldedName, isText } from "../shared.js";
+import { COPPER_HUES, foldedName, isText, repoShortName } from "../shared.js";
 import { packRows, unpackRows } from "../loading.js";
 import { sameNames } from "./board.js";
 import { countedSwitches, hidesRepo, repoGroups, repoLook } from "./list.js";
@@ -42,7 +42,7 @@ export function issueSoloSwitch(data, chosen) {
   const ids = [null, ...repos];
   const shown = soloAmong(repos, chosen);
   return {
-    choices: ids.map((id) => ({ id, label: id === null ? "Alle" : id.split("/").pop() })),
+    choices: ids.map((id) => ({ id, label: id === null ? "Alle" : repoShortName(id) })),
     chosen: shown,
     after: ids[(ids.indexOf(shown) + 1) % ids.length],
   };

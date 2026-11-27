@@ -89,6 +89,10 @@ export function itemKey(item) {
 // GitHub's owner and repo names ignore case.
 export const foldedName = (name) => name.toLowerCase();
 
+export const repoShortName = (key) => key.split("/").pop();
+
+export const andJoined = (texts) => (texts.length > 1 ? `${texts.slice(0, -1).join(", ")} und ${texts.at(-1)}` : texts.join(""));
+
 export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
 
 // An item's label on a card or a list's row: an Azure work item's number
@@ -152,7 +156,7 @@ export const SECTION_TONE_ORDER = ["blue", "violet", "teal", "green", "yellow", 
 function parentOf(item) {
   const repo = item.parentRepo ?? item.repo;
   return {
-    source: item.source, kind: item.source === "azure" ? "workitem" : "issue", number: item.parent, repo, repoShort: repo?.split("/").pop(), foreign: item.parentForeign === true,
+    source: item.source, kind: item.source === "azure" ? "workitem" : "issue", number: item.parent, repo, repoShort: repo && repoShortName(repo), foreign: item.parentForeign === true,
   };
 }
 

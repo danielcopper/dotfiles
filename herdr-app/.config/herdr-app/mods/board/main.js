@@ -36,22 +36,21 @@
 //     without one a section takes the next of SECTION_TONE_ORDER by its
 //     place that no other section sets. A PR tab's id is its own among all
 //     contexts' PR tabs (readGithub in config.js).
-//   - azure: { org (https://dev.azure.com/<org>), repoFolders?, contexts: [{
-//     project, teams?: [{ team, views?: ["sprint", "backlog"] (both when
-//     missing), repoFolders? }] }] }, a context per project: a tab per team,
-//     then one for the project's pull requests. repoFolders: the folders (~
-//     is a machine's home; each once, a trailing / aside) whose git
-//     repositories the start dialog offers for a team's items without a repo
-//     ("Repo"); a team's own in place of those for all.
+//   - azure: { org (https://dev.azure.com/<org>), contexts: [{ project,
+//     teams?: [{ team, views?: ["sprint", "backlog"] (both when missing)
+//     }] }] }, a context per project: a tab per team, then one for the
+//     project's pull requests.
+// - repoFolders: the folders (~ is a machine's home; each once, a trailing
+//   / aside) whose git repositories the start dialog offers for an item of
+//   any source ("Repo"), each by the keys of its origin and upstream
+//   (remoteKey, actions/start.js).
 // - start: what the start dialog proposes: agent (a programs.json key),
-//   machine, checkout (the folder the session starts in; ~ is that
-//   machine's home; an item without a repo (an Azure work item, or a pull
-//   request reached from one) starts in a repo of repoFolders instead),
-//   message (the first message for issues and work items) and review (for
-//   pull requests). Templates take {number} {title} {url} {owner} {repo}
-//   {key}.
-// - repos: { "<owner>/<repo>": { any start field } }. startSettings says
-//   which start applies.
+//   machine, message (the first message for issues and work items) and
+//   review (for pull requests). Templates take {number} {title} {url}
+//   {owner} {repo} {key}.
+// - repos: { "<owner>/<repo>": { any start field, checkout? } }.
+//   startSettings says which start applies; checkout is the repo's folder
+//   (~ is that machine's home), in place of those of its key in repoFolders.
 // In an older views.json, with its views at the top or its sources without
 // contexts (sources.github.views, an Azure context with team or prs), the
 // old part is not read: the board says where its views and teams go now.
@@ -139,13 +138,14 @@
 // whose answer was unclear asks one WIQL query more after that refresh; a
 // create for a team whose default iteration follows the current one reads the
 // team's settings first, one call more. Azure's PR tabs read nothing yet. The
-// start dialog's Repo field costs one sh call when it opens and one per
-// machine chosen in it (its repos; none without repoFolders). Finding gh and
-// az costs one sh call now and then (toolPaths says when). The Claude Code
-// sessions on this machine cost one sh call (their files and ps), and one
-// more where any of them runs (their task lists), each with its log line:
-// when the board starts, after a look that sees it come to show, every
-// CLAUDE_MS while it shows, and when the focus or a space's count of tabs
+// start dialog's Repo field costs one sh call when it opens and one per machine
+// chosen in it (its repos, with one git call per repo for their remotes; none
+// without repoFolders), and one at the start for a repo with a checkout of its
+// own. Finding gh and az costs one sh call now and then (toolPaths says when).
+// The Claude Code sessions on this machine cost one sh call (their files and
+// ps), and one more where any of them runs (their task lists), each with its
+// log line: when the board starts, after a look that sees it come to show,
+// every CLAUDE_MS while it shows, and when the focus or a space's count of tabs
 // changes (readClaude, followSessions); never in a render. A view refreshes
 // when its tab first shows (unless it has data the prefetch tried within
 // refreshMinutes), on `r` (which first drops what its source keeps of it: its
@@ -306,6 +306,10 @@ export function itemKey(item) {
 // GitHub's owner and repo names ignore case.
 export const foldedName = (name) => name.toLowerCase();
 
+export const repoShortName = (key) => key.split("/").pop();
+
+export const andJoined = (texts) => (texts.length > 1 ? `${texts.slice(0, -1).join(", ")} und ${texts.at(-1)}` : texts.join(""));
+
 export const itemLabel = (item) => itemKey(item) ?? "Entwurf";
 
 // An item's label on a card or a list's row: an Azure work item's number
@@ -369,7 +373,7 @@ export const SECTION_TONE_ORDER = ["blue", "violet", "teal", "green", "yellow", 
 function parentOf(item) {
   const repo = item.parentRepo ?? item.repo;
   return {
-    source: item.source, kind: item.source === "azure" ? "workitem" : "issue", number: item.parent, repo, repoShort: repo?.split("/").pop(), foreign: item.parentForeign === true,
+    source: item.source, kind: item.source === "azure" ? "workitem" : "issue", number: item.parent, repo, repoShort: repo && repoShortName(repo), foreign: item.parentForeign === true,
   };
 }
 
@@ -654,15 +658,24 @@ export function sameAtPaths(then, now, changes, name, nameKeyAt) {
 // views.json: reading it with this machine's settings over it, what is
 // wrong with them, and the start settings for an item.
 
-export const START_DEFAULTS = { agent: null, machine: null, checkout: null, message: "", review: "" };
+export const START_DEFAULTS = { agent: null, machine: null, message: "", review: "" };
 const START_KEYS = Object.keys(START_DEFAULTS);
+const REPO_KEYS = [...START_KEYS, "checkout"];
 // Keys of a start that made a worktree or set the status: the agent's own
 // skills do both.
-const GONE = "gibt es nicht mehr: der Start öffnet eine Sitzung im Checkout, den Worktree legt der Agent an";
+const GONE = "gibt es nicht mehr: der Start öffnet eine Sitzung im Ordner des Repos, den Worktree legt der Agent an";
 const GONE_START = ["branch", "worktree", "base"];
 const GONE_OPEN = "gibt es nicht mehr: „Öffnen in“ im Startdialog wählt den Space";
 const GONE_STATUS = "„startColumn“ gibt es nicht mehr: den Status setzt der Agent selbst";
-const TOP_KEYS = ["refreshMinutes", "start", "repos", "sources"];
+const REPO_FOLDERS_PLACE = "die Repo-Ordner stehen jetzt oben in views.json unter „repoFolders“, für alle Quellen";
+const GONE_CHECKOUT = "gibt es nicht mehr: ein Repo startet in seinem Ordner unter „repoFolders“ oder in dem, den „repos.<Besitzer/Repo>.checkout“ setzt";
+const staleText = (where) => `solange es dasteht, gilt „${where}“ nicht`;
+const STALE_START = staleText("start");
+const STALE_VIEW_START = "solange es dasteht, fehlt der Tab";
+const STALE_TEAM = "solange es dasteht, fehlt das Team";
+const STALE_AZURE = "es gilt nicht, der Rest von „sources.azure“ schon";
+const BLANK_CHECKOUT = "ist der Ordner des Repos (Text, nicht leer), etwa \"~/Repos/<Repo>\"";
+const TOP_KEYS = ["refreshMinutes", "start", "repoFolders", "repos", "sources"];
 // What an old views.json, with its views at the top, is told.
 const OLD_SHAPE = "views.json hat noch die alte Form: die Einträge von „views“ stehen jetzt unter „sources“, die von GitHub in " +
   "„sources.github.contexts“, die von Azure in „sources.azure“ mit „org“ und „contexts“ (Kopf von mods/board/src/main.js)";
@@ -673,15 +686,19 @@ const BEFORE_CONTEXTS = "views.json hat noch die Form vor den Kontexten: die Ein
   "die Azure-Teams je Projekt in „sources.azure.contexts“ ({ \"project\", \"teams\": [{ \"team\", \"views\" }] }; den PR-Tab hat jedes Projekt von selbst) " +
   "(Kopf von mods/board/src/main.js)";
 
-function startProblems(start, where) {
+// inMachineFile: what settingsAlone says of the whole file stands in place
+// of what a blank checkout leaves out.
+function startProblems(start, where, { keys = START_KEYS, stale = STALE_START, inMachineFile = false } = {}) {
   if (start === undefined) return [];
   if (!isObject(start)) return [`„${where}“ muss ein Objekt sein`];
   const out = [];
   for (const [key, value] of Object.entries(start)) {
     if (GONE_START.includes(key)) out.push(`„${where}.${key}“ ${GONE}`);
     else if (key === "open") out.push(`„${where}.open“ ${GONE_OPEN}`);
-    else if (!START_KEYS.includes(key)) out.push(`„${where}.${key}“ gibt es nicht`);
+    else if (key === "checkout" && !keys.includes(key)) out.push(`„${where}.checkout“ ${GONE_CHECKOUT}; ${stale}`);
+    else if (!keys.includes(key)) out.push(`„${where}.${key}“ gibt es nicht`);
     else if (value !== null && typeof value !== "string") out.push(`„${where}.${key}“ muss Text sein`);
+    else if (key === "checkout" && value !== null && !isText(value)) out.push(`„${where}.checkout“ ${BLANK_CHECKOUT}${inMachineFile ? "" : `; ${staleText(where)}`}`);
   }
   return out;
 }
@@ -843,7 +860,7 @@ function tabProblems(v, entryKind) {
     if (key === "startColumn") out.push(GONE_STATUS);
     else if (!COMMON_KEYS.includes(key) && !kind.keys.includes(key)) out.push(`„${key}“ gibt es nicht`);
   }
-  return [...out, ...kind.problems(v), ...startProblems(v.start, "start")];
+  return [...out, ...kind.problems(v), ...startProblems(v.start, "start", { stale: STALE_VIEW_START })];
 }
 
 // A project's tab id: its owner's and its number, which name it on GitHub.
@@ -970,30 +987,27 @@ const REPO_FOLDERS_TEXT = "ist eine Liste aus mindestens einem Ordner (Text), je
 const trimFolders = (v) => v.map((f) => f.replace(/(.)\/+$/, "$1"));
 const repoFoldersOk = (v) => v === undefined || (Array.isArray(v) && v.length > 0 && v.every(isText) && new Set(trimFolders(v)).size === v.length);
 
-const TEAM_KEYS = ["team", "views", "repoFolders"];
+const TEAM_KEYS = ["team", "views"];
 
-// What is wrong with a team of an Azure context: { "team", "views"?: [...],
-// "repoFolders"?: [...] }.
+// What is wrong with a team of an Azure context: { "team", "views"?: [...] }.
 function teamProblems(t) {
   if (!isObject(t)) return ["muss ein Objekt sein"];
-  const out = Object.keys(t).filter((k) => !TEAM_KEYS.includes(k)).map((k) => `„${k}“ gibt es nicht`);
+  const out = Object.keys(t).filter((k) => !TEAM_KEYS.includes(k)).map((k) => (k === "repoFolders" ? `„repoFolders“ gibt es hier nicht mehr: ${REPO_FOLDERS_PLACE}; ${STALE_TEAM}` : `„${k}“ gibt es nicht`));
   if (!isText(t.team)) out.push("„team“ fehlt: der Name des Teams im Projekt");
   const views = t.views;
   if (views !== undefined && !(textList(views) && views.length && views.every((v) => TEAM_VIEW_IDS.includes(v)) && new Set(views).size === views.length)) {
     out.push(`„views“ ist eine Liste aus ${TEAM_VIEWS_TEXT}, jede höchstens einmal`);
   }
-  if (!repoFoldersOk(t.repoFolders)) out.push(`„repoFolders“ ${REPO_FOLDERS_TEXT}`);
   return out;
 }
 
 // The tabs of an Azure context: { id, source: "azure", kind: "team", name,
-// org, project, team, views, repoFolders } per team, views in the switch's
-// order, then { id, source: "azure", kind: "prs", name, org, project } for
-// the project's pull requests; org the organisation's address (orgUrl).
-function teamTab(t, project, org, folders) {
+// org, project, team, views } per team, views in the switch's order, then {
+// id, source: "azure", kind: "prs", name, org, project } for the project's
+// pull requests; org the organisation's address (orgUrl).
+function teamTab(t, project, org) {
   const views = t.views ?? TEAM_VIEW_IDS;
-  const repoFolders = t.repoFolders ? trimFolders(t.repoFolders) : folders;
-  return { id: `azure:team:${project}/${t.team}`, source: "azure", kind: "team", name: t.team, org, project, team: t.team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)), repoFolders };
+  return { id: `azure:team:${project}/${t.team}`, source: "azure", kind: "team", name: t.team, org, project, team: t.team, views: TEAM_VIEW_IDS.filter((v) => views.includes(v)) };
 }
 const prsTab = (project, org) => ({ id: `azure:prs:${project}`, source: "azure", kind: "prs", name: PRS_NAME, org, project });
 
@@ -1016,11 +1030,9 @@ const holdsBeforeContexts = (contexts) => Array.isArray(contexts) && contexts.so
 // or a team with problems is left out and each problem is listed.
 function readAzure(raw) {
   if (!isObject(raw)) return { azure: null, errors: ["„sources.azure“ muss ein Objekt sein"] };
-  const errors = Object.keys(raw).filter((k) => !["org", "contexts", "repoFolders"].includes(k)).map((k) => `„sources.azure.${k}“ gibt es nicht`);
+  const errors = Object.keys(raw).filter((k) => !["org", "contexts"].includes(k))
+    .map((k) => (k === "repoFolders" ? `„sources.azure.repoFolders“ gibt es nicht mehr: ${REPO_FOLDERS_PLACE}; ${STALE_AZURE}` : `„sources.azure.${k}“ gibt es nicht`));
   const org = orgUrl(raw.org);
-  const foldersOk = repoFoldersOk(raw.repoFolders);
-  if (!foldersOk) errors.push(`„sources.azure.repoFolders“ ${REPO_FOLDERS_TEXT}`);
-  const folders = foldersOk && raw.repoFolders ? trimFolders(raw.repoFolders) : [];
   if (!org) errors.push("„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>");
   const list = Array.isArray(raw.contexts) ? raw.contexts.filter((c) => !beforeContexts(c)) : [];
   if (!list.length && !holdsBeforeContexts(raw.contexts)) {
@@ -1038,7 +1050,7 @@ function readAzure(raw) {
       const team = teamProblems(t);
       if (!team.length && tabs.some((c) => c.team === t.team)) team.push("gibt es schon");
       if (team.length) return errors.push(...team.map((p) => `${at}: ${p}`));
-      tabs.push(teamTab(t, a.project, org, folders));
+      tabs.push(teamTab(t, a.project, org));
     });
     contexts.push({ project: a.project, tabs: [...tabs, prsTab(a.project, org)] });
   });
@@ -1048,11 +1060,11 @@ function readAzure(raw) {
 // views.json as text (null: there is none) and this machine's settings as
 // read (`settingsRead`: { name, text }, text null for no file, or { name,
 // error }) → { config, errors, settings, origin, moving? }: config is {
-// refreshMinutes, start, repos, azure: { org, contexts } or null, github: {
-// contexts } or null }, settings those applied (null: none), origin
-// mergeSettings's, moving settingsForContexts's move where the settings can
-// move. A context or a tab with problems is left out and each problem is
-// listed; config is null only when nothing usable is left.
+// refreshMinutes, start, repoFolders, repos, azure: { org, contexts } or
+// null, github: { contexts } or null }, settings those applied (null:
+// none), origin mergeSettings's, moving settingsForContexts's move where
+// the settings can move. A context or a tab with problems is left out and
+// each problem is listed; config is null only when nothing usable is left.
 export function readConfig(text, settingsRead = null) {
   const none = (error) => ({ config: null, errors: [error], settings: null, origin: mergeSettings(null, {}, nameKeyAt).origin });
   if (text === null || text === undefined) return none(`${CONFIG_NAME}.json fehlt im Ordner der Mod`);
@@ -1075,7 +1087,7 @@ export function readConfig(text, settingsRead = null) {
   if (moving) return { ...unused([`${name} hat noch die Form vor den Kontexten und ist nicht umgestellt; ${MOVE_AGAIN}`]), moving };
   const { settings: applied, errors: before } = withoutProjectsBefore(settings);
   const { merged, errors: unmatched, origin } = mergeSettings(raw, applied, nameKeyAt);
-  const read = validateConfig(merged);
+  const read = validateConfig(merged, origin);
   const added = read.errors.filter((e) => !alone.errors.includes(e));
   if (added.length) return unused(named([...before, ...unmatched, ...added]));
   return { ...read, errors: [...read.errors, ...named([...before, ...unmatched])], settings: applied, origin };
@@ -1114,7 +1126,7 @@ export const MOVE_AGAIN = "das nächste Lesen (r) versucht es noch einmal";
 
 export const settingsAlone = (subject) => `${subject} gilt nicht: das Board zeigt ${CONFIG_NAME}.json allein`;
 
-export function validateConfig(raw) {
+export function validateConfig(raw, origin = null) {
   if (!isObject(raw)) return { config: null, errors: ["Oben muss ein Objekt stehen"] };
   // Views at the top are views.json's old form, also beside sources.
   const old = raw.views !== undefined;
@@ -1127,10 +1139,14 @@ export function validateConfig(raw) {
   }
   const startErrors = startProblems(raw.start, "start");
   errors.push(...startErrors);
+  const foldersOk = repoFoldersOk(raw.repoFolders);
+  if (!foldersOk) errors.push(`„repoFolders“ ${REPO_FOLDERS_TEXT}`);
+  const repoFolders = foldersOk && raw.repoFolders ? trimFolders(raw.repoFolders) : [];
   const repos = {};
   if (raw.repos !== undefined && !isObject(raw.repos)) errors.push("„repos“ muss ein Objekt sein");
   for (const [name, entry] of Object.entries(isObject(raw.repos) ? raw.repos : {})) {
-    const problems = startProblems(entry, `repos.${name}`);
+    const inMachineFile = origin?.(["repos", name, "checkout"]) === ORIGIN.machine;
+    const problems = startProblems(entry, `repos.${name}`, { keys: REPO_KEYS, inMachineFile });
     if (problems.length) errors.push(...problems);
     else repos[name] = entry;
   }
@@ -1154,7 +1170,7 @@ export function validateConfig(raw) {
   } else if (raw.sources !== undefined) errors.push("„sources“ muss ein Objekt sein");
   else if (!old) errors.push("„sources“ fehlt: „sources.azure“ oder „sources.github“");
   const start = startErrors.length ? {} : raw.start ?? {};
-  return { config: azure || github ? { refreshMinutes, start, repos, azure, github } : null, errors };
+  return { config: azure || github ? { refreshMinutes, start, repoFolders, repos, azure, github } : null, errors };
 }
 
 export const hidePath = (view) => [...view.settingsPath, "hide"];
@@ -1242,10 +1258,15 @@ export function settingsForContexts(raw, settings) {
 }
 
 // The start for an item: the defaults, then views.json's start, then the
-// view's start, then the repo's entry in repos; a later one wins.
+// view's start, then the repo's entry in repos; a later one wins. Where a
+// repo lies is the start dialog's (repoExceptions).
 export function startSettings(config, view, repo) {
-  return { ...START_DEFAULTS, ...config.start, ...view.start, ...(config.repos[repo] ?? {}) };
+  const own = { ...config.repos[repo] };
+  delete own.checkout;
+  return { ...START_DEFAULTS, ...config.start, ...view.start, ...own };
 }
+
+export const repoExceptions = (config) => Object.entries(config.repos).filter(([, e]) => isText(e.checkout));
 
 // ==== src/select.js ====
 
@@ -2364,29 +2385,58 @@ export function templateVars(item) {
 // Sets dir to the folder $1 names, a leading ~ that machine's home.
 const TO_DIR = "to_dir() { case $1 in \\~) dir=$HOME ;; \\~/*) dir=$HOME/${1#\\~/} ;; *) dir=$1 ;; esac; }";
 
-// Prints the checkout's folder on the chosen machine ($1), or exits 3 when
-// there is none.
+export const NO_FOLDER = 3;
+
+// Prints the folder $1 names on the chosen machine, or exits NO_FOLDER
+// where there is none.
 export const CHECKOUT_SCRIPT = [
   TO_DIR,
   'to_dir "$1"',
-  '[ -d "$dir" ] || { echo "Kein Checkout unter $dir" >&2; exit 3; }',
+  `[ -d "$dir" ] || { echo "Kein Checkout unter $dir" >&2; exit ${NO_FOLDER}; }`,
   'cd "$dir" && pwd',
 ].join("\n");
 
 export const checkoutArgs = (checkout) => ["-c", CHECKOUT_SCRIPT, "board-checkout", checkout];
 
-// Prints, per folder given ($@) by its place among them, "<place><tab><repo's
-// folder>" for each folder directly beneath it that holds a .git (a folder,
-// or a worktree's file); "<place><tab>" alone for a folder that is not
-// there, "<place><tab><tab>" for one it cannot enter or list.
+// Prints, per folder given ($@) by its place among them,
+// "<place><tab><git><tab><origin><tab><upstream><tab><repo's folder>" for
+// each folder directly beneath it that holds a .git (a folder, or a
+// worktree's file): origin and upstream the URLs of those remotes (empty
+// where there is none, or where it holds a tab), git empty where git read
+// them, else its exit status (127: no git); "<place><tab>" alone for a
+// folder that is not there, "<place><tab><tab>" for one it cannot enter or
+// list. A repo's folder whose path holds a line break is left out, as a
+// line break would break the scan's lines, and named by
+// "<place><tab><tab><tab><tab><tab><its path, each line break a ?>".
 export const REPOS_SCRIPT = [
   TO_DIR,
+  "tab=$(printf '\\t')",
+  "nl='\n'",
   "i=0",
   'for f in "$@"; do',
   '  to_dir "$f"',
   '  if [ ! -d "$dir" ]; then printf \'%s\\t\\n\' "$i"',
   '  elif [ -r "$dir" ] && dir=$(cd "$dir" && pwd); then',
-  '    for d in "$dir"/*/; do [ -e "$d.git" ] && printf \'%s\\t%s\\n\' "$i" "${d%/}"; done',
+  '    for d in "$dir"/*/; do',
+  '      [ -e "$d.git" ] || continue',
+  '      case $d in *"$nl"*)',
+  "        n=${d%/}",
+  '        while :; do case $n in *"$nl"*) n=${n%%"$nl"*}?${n#*"$nl"} ;; *) break ;; esac; done',
+  '        printf \'%s\\t\\t\\t\\t\\t%s\\n\' "$i" "$n"',
+  "        continue ;;",
+  "      esac",
+  "      o= u=",
+  '      r=$(git --git-dir="$d.git" config --local --get-regexp \'^remote\\.(origin|upstream)\\.url$\' 2>/dev/null)',
+  "      s=$?",
+  '      [ "$s" -gt 1 ] || s=',
+  "      while read -r k v; do",
+  '        case $v in *"$tab"*) v= ;; esac',
+  "        case $k in remote.origin.url) o=$v ;; remote.upstream.url) u=$v ;; esac",
+  "      done <<EOF",
+  "$r",
+  "EOF",
+  '      printf \'%s\\t%s\\t%s\\t%s\\t%s\\n\' "$i" "$s" "$o" "$u" "${d%/}"',
+  "    done",
   "  else printf '%s\\t\\t\\n' \"$i\"; fi",
   "  i=$((i + 1))",
   "done",
@@ -2395,28 +2445,116 @@ export const REPOS_SCRIPT = [
 
 export const reposArgs = (folders) => ["-c", REPOS_SCRIPT, "board-repos", ...folders];
 
-// REPOS_SCRIPT's answer for `folders` → { repos, missing, unreadable }:
-// repos [{ key, name, folder, parent }] by name, then in the order of the
-// folders; key the parent as views.json writes it and the repo's name (the
-// same on every machine), folder where it is on that machine.
+const GITHUB_HOST = "github.com";
+const AZURE_HOST = "dev.azure.com";
+const AZURE_SSH_HOSTS = ["ssh.dev.azure.com", "vs-ssh.visualstudio.com"];
+const OLD_AZURE_HOST = /\.visualstudio\.com$/;
+const OLD_AZURE_COLLECTION = "defaultcollection";
+const SCP_LIKE = /^(?:[^@/]+@)?([^:/]+):(?!\/\/)(.+)$/;
+const WITH_SCHEME = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]+@)?([^/:]+)(?::\d*)?\/(.+)$/i;
+
+const unescaped = (part) => {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return part;
+  }
+};
+
+export const azureRepoKey = (project, repo) => `${project}/${repo}`;
+
+// An Azure DevOps remote's path → [project, repo]: .../_git/<repo> after
+// its organisation (dev.azure.com/<org>, <org>.visualstudio.com with or
+// without DefaultCollection) and its project, or without a project for the
+// project's own repo; v3/<org>/<project>/<repo> over ssh.
+function azureParts(host, parts) {
+  if (AZURE_SSH_HOSTS.includes(host)) return parts[0] === "v3" ? [parts[2], parts[3]] : [];
+  const git = parts.indexOf("_git");
+  const org = host === AZURE_HOST || parts[0]?.toLowerCase() === OLD_AZURE_COLLECTION ? 1 : 0;
+  return [git === org ? parts[git + 1] : parts[git - 1], parts[git + 1]];
+}
+
+// A remote's URL → the key of its repo: "owner/repo" on GitHub,
+// "project/repo" on Azure DevOps (azureParts), "host/path" anywhere else;
+// null for a URL of no host, a local path.
+export function remoteKey(url) {
+  const text = String(url ?? "").trim();
+  const [, host, rest] = text.match(WITH_SCHEME) ?? text.match(SCP_LIKE) ?? [];
+  if (!host) return null;
+  const parts = rest.replace(/[?#].*$/, "").replace(/\/+$/, "").replace(/\.git$/, "").split("/").filter(Boolean);
+  const at = host.toLowerCase();
+  if (at === AZURE_HOST || AZURE_SSH_HOSTS.includes(at) || OLD_AZURE_HOST.test(at)) {
+    const [project, repo] = azureParts(at, parts);
+    return project && repo ? azureRepoKey(unescaped(project), unescaped(repo)) : null;
+  }
+  if (parts.length < 2) return null;
+  return at === GITHUB_HOST ? `${parts[0]}/${parts[1]}` : `${at}/${parts.join("/")}`;
+}
+
+const sameRepoKey = (a, b) => foldedName(a) === foldedName(b);
+const NO_GIT = 127;
+
+// REPOS_SCRIPT's answer for `folders` → { repos, missing, unreadable,
+// remotesUnread, gitMissing, withLineBreak }: repos [{ key, folder,
+// written }] by key, once per key of its origin and its upstream
+// (remoteKey), or by its folder's name where neither has one; folder where
+// it is on that machine, written that folder as views.json writes its repo
+// folder. remotesUnread: [{ written, status }] for each repo whose remotes
+// git did not read, with git's exit status; gitMissing where that is NO_GIT
+// for every repo found; withLineBreak the repos left out for a line break
+// in their path, as written.
 export function parseRepos(stdout, folders) {
   const repos = [];
   const missing = [];
   const unreadable = [];
+  const remotesUnread = [];
+  const withLineBreak = [];
+  let found = 0;
   for (const line of String(stdout ?? "").split("\n")) {
-    const tab = line.indexOf("\t");
-    const parent = folders[Number(line.slice(0, tab))];
-    if (tab < 1 || parent === undefined) continue;
-    const folder = line.slice(tab + 1);
-    if (!folder) missing.push(parent);
-    else if (folder === "\t") unreadable.push(parent);
-    else {
+    const [place, ...fields] = line.split("\t");
+    const parent = /^\d+$/.test(place) ? folders[Number(place)] : undefined;
+    if (parent === undefined || !fields.length) continue;
+    if (fields.length === 1 && !fields[0]) missing.push(parent);
+    else if (fields.length === 2 && !fields[0] && !fields[1]) unreadable.push(parent);
+    else if (fields[3]) {
+      const [git, origin, upstream] = fields;
+      const folder = fields.slice(3).join("\t");
       const name = folder.split("/").pop();
-      repos.push({ key: `${parent.endsWith("/") ? parent : `${parent}/`}${name}`, name, folder, parent });
-    }
+      const written = writtenIn(parent, folder);
+      found++;
+      if (git) remotesUnread.push({ written, status: Number(git) });
+      const keys = [origin, upstream].map(remoteKey).filter(Boolean);
+      for (const key of keys.length ? keys : [name]) {
+        if (!repos.some((r) => r.folder === folder && sameRepoKey(r.key, key))) repos.push({ key, folder, written });
+      }
+    } else if (fields[4]) withLineBreak.push(writtenIn(parent, fields.slice(4).join("\t")));
   }
-  repos.sort((a, b) => a.name.localeCompare(b.name));
-  return { repos, missing, unreadable };
+  const gitMissing = found > 0 && remotesUnread.length === found && remotesUnread.every((u) => u.status === NO_GIT);
+  return { repos: sortedByKey(repos), missing, unreadable, remotesUnread, gitMissing, withLineBreak };
+}
+
+const writtenIn = (parent, folder) => `${parent.endsWith("/") ? parent : `${parent}/`}${folder.split("/").pop()}`;
+
+const sortedByKey = (repos) => repos.sort((a, b) => a.key.localeCompare(b.key));
+
+// The repos with a folder of their own (repoExceptions), each in place of
+// those of its key the folders hold: { key, folder: null (looked up at the
+// start, CHECKOUT_SCRIPT), written: its checkout }.
+export function withExceptions(repos, exceptions) {
+  const own = exceptions.map(([key, e]) => ({ key, folder: null, written: e.checkout }));
+  return sortedByKey([...repos.filter((r) => !own.some((o) => sameRepoKey(o.key, r.key))), ...own]);
+}
+
+export const reposOfKey = (repos, key) => (typeof key === "string" ? repos.filter((r) => sameRepoKey(r.key, key)) : []);
+
+export function sameKeyGroups(repos) {
+  const groups = [];
+  for (const r of repos) {
+    const group = groups.find((g) => sameRepoKey(g[0].key, r.key));
+    if (group) group.push(r);
+    else groups.push([r]);
+  }
+  return groups.filter((g) => g.length > 1);
 }
 
 export const spacesOn = (allSpaces, on) => allSpaces.filter((s) => (s.machine ?? null) === (on ?? null));
@@ -4063,7 +4201,8 @@ export function azureReview(reviewers, draft) {
 
 // az's answer for azPullRequestArgs → the pull request's details
 // (related.js, pullRequest): its title, state, draft mark, author, review,
-// source branch and azureRepo (not `repo`, which is GitHub's owner/name).
+// source branch, azureRepo (not `repo`, which is GitHub's owner/name) and
+// azureProject, its repository's project.
 export function parseAzurePullRequest(stdout) {
   const json = azJson(stdout, "den Pull Request");
   if (!isObject(json) || !Number.isInteger(json.pullRequestId)) throw new BoardError("Azure lieferte keinen Pull Request");
@@ -4076,6 +4215,7 @@ export function parseAzurePullRequest(stdout) {
     review: azureReview(json.reviewers, json.isDraft === true),
     branch: String(json.sourceRefName ?? "").replace(/^refs\/heads\//, "") || null,
     azureRepo: typeof json.repository?.name === "string" ? json.repository.name : null,
+    azureProject: typeof json.repository?.project?.name === "string" ? json.repository.project.name : null,
   };
 }
 
@@ -4312,7 +4452,7 @@ export const toggledRepos = (list, repo) =>
 
 export function repoLook(data, repo) {
   const ownership = repoOwnership(repo, data.owners);
-  return { repo, name: ownership === "own" ? repo.split("/").pop() : repo, foreign: ownership === "foreign" };
+  return { repo, name: ownership === "own" ? repoShortName(repo) : repo, foreign: ownership === "foreign" };
 }
 
 // A section's rows `rows` (those of repos turned on) that `visible` lets
@@ -4920,7 +5060,7 @@ function githubCard(node, owners, plan) {
     kind: c.__typename === "PullRequest" ? "pr" : c.__typename === "DraftIssue" ? "draft" : "issue",
     number: c.number ?? null,
     repo,
-    repoShort: repo.split("/").pop(),
+    repoShort: repoShortName(repo),
     ...foreignMark(owners, repo),
     title: c.title ?? "(kein Zugriff)",
     url: c.url ?? null,
@@ -5284,7 +5424,7 @@ function prRow(pr, lost = false) {
   return {
     number: pr.number,
     repo,
-    repoShort: repo.split("/").pop(),
+    repoShort: repoShortName(repo),
     title: pr.title,
     url: pr.url,
     author: pr.author?.login ?? "?",
@@ -5651,7 +5791,7 @@ function relatedLine(node, kind, owners) {
     kind,
     source: "github",
     repo,
-    repoShort: repo.split("/").pop(),
+    repoShort: repoShortName(repo),
     ...foreignMark(owners, repo),
     number: node.number,
     title: node.title ?? "(kein Zugriff)",
@@ -6142,9 +6282,9 @@ export const makeSources = (paths) => ({ azure: makeAzure(paths), github: makeGi
 // reads the pull request's details as the PR list has a row's (title,
 // state, color, done, draft, author, review, branch; on GitHub its checks
 // and assignees too, and warnings: what GitHub said besides; on Azure
-// azureRepo, its repository's name), which the panel shows as the PR
-// list's details do; the Board keeps them as { pr } beside the related
-// items.
+// azureRepo and azureProject, its repository's name and project), which
+// the panel shows as the PR list's details do; the Board keeps them as {
+// pr } beside the related items.
 
 // What a view keeps of its related items after a refresh starts: only
 // those of the item whose details show (`openKey`, null when none) and of
@@ -8746,12 +8886,13 @@ export const commandsModal = {
 
 // ==== src/ui/choices.js ====
 
-// A dialog's choice fields (the start dialog's Agent, Rechner and Öffnen
-// in, the create dialog's Typ; the Issues tab's field „Repo:“ opens its list
-// as a dialog of its own, ui/modals/solo.js), from a table of the dialog's,
-// by field: { entries(m), each { id, name, aside (the texts at its right:
-// a space's folder, a repo's count) }; current(m), the id of the entry the
-// field is on; value(m), the text the field shows; take(b, row, cx), which
+// A dialog's choice fields (the start dialog's Repo, Agent, Rechner and
+// Öffnen in, the create dialog's Typ; the Issues tab's field „Repo:“ opens
+// its list as a dialog of its own, ui/modals/solo.js), from a table of the
+// dialog's, by field: { entries(m), each { id, name, aside (the texts at its
+// right: a space's folder, a repo's count) }; current(m), the id of the
+// entry the field is on; value(m), the text the field shows, and
+// valueAside(m), the one beside it (null: none); take(b, row, cx), which
 // puts the field on that entry; fieldAfter(row), the field the dialog goes
 // on to once the list took `row` (by default it stays); closes (the dialog
 // ends once the list took a row or a press beside it closed it); the
@@ -8776,6 +8917,7 @@ export function choiceBox(b, t, choices, field) {
       openList(b, choices, field, cx);
     })
     .child(div().flex_1().min_w(0).truncate().child(choices[field].value(m)))
+    .when(Boolean(choices[field].valueAside?.(m)), (el) => el.child(div().flex_none().max_w(240).truncate().text_size(11).text_color(t.dim).child(choices[field].valueAside(m))))
     .child(div().text_color(t.dim).child("▾"));
   return listPopup(b, t, field, choices[field].anchor, fieldFrame(t, m, field, trigger));
 }
@@ -9210,8 +9352,8 @@ export const sprintsModal = {
 
 // ==== src/ui/modals/start.js ====
 
-// The start dialog: opens an item's session in its checkout (an item
-// without a repo: in the repo chosen under "Repo"), on a machine and with an
+// The start dialog: opens an item's session in the folder of the repo
+// chosen under "Repo" (the item's own preselected), on a machine and with an
 // agent chosen here, as a new tab in a space of that machine or in a new
 // space ("Öffnen in"), with a first message to edit.
 
@@ -9219,12 +9361,8 @@ const SH_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
 // ms (1, 3 and 6 s after the start).
 const SESSION_CHECKS = [1000, 2000, 3000];
-const FIELDS = ["message", "agent", "machine", "open"];
-const REPO_FIELDS = ["message", "repo", "agent", "machine", "open"];
-const fieldsOf = (m) => {
-  const fields = m.repos ? REPO_FIELDS : FIELDS;
-  return whereToOpen(m).newSpace ? [...fields, "name"] : fields;
-};
+const FIELDS = ["message", "repo", "agent", "machine", "open"];
+const fieldsOf = (m) => (whereToOpen(m).newSpace ? [...FIELDS, "name"] : FIELDS);
 const stillOpen = (b, m) => b.modal === m;
 const MESSAGE_ROWS = 6;
 
@@ -9247,8 +9385,9 @@ export const START_HINTS = {
 const agentsPending = (m) => m.agentsError ?? "lädt …";
 
 export const repoStoreKey = (view) => `repo:${view.id}`;
-const reposLoading = (on, folders) => ({ state: "loading", on, folders, list: [], missing: [], unreadable: [], lost: null, error: null });
-const chosenRepo = (m) => m.repos?.list.find((r) => r.key === m.repo) ?? null;
+const reposLoading = (on, folders, list) => ({ state: "loading", on, folders, list, missing: [], unreadable: [], remotesUnread: [], gitMissing: false, lost: null, sameKey: null, error: null });
+const repoId = (r) => `${r.key}\n${r.written}`;
+const chosenRepo = (m) => m.repos.list.find((r) => repoId(r) === m.repoId) ?? null;
 
 function reposPending(m) {
   const { state, error, list } = m.repos;
@@ -9260,13 +9399,15 @@ const openedIn = (where) => where.space ?? where.gone ?? where.unread;
 
 const START_CHOICES = {
   repo: {
-    entries: (m) => m.repos.list.map((r) => ({ id: r.key, name: r.name, aside: m.repos.folders.length > 1 ? [r.parent] : [] })),
-    current: (m) => m.repo,
-    value: (m) => chosenRepo(m)?.name ?? reposPending(m),
+    entries: (m) => m.repos.list.map((r) => ({ id: repoId(r), name: r.key, aside: [r.written] })),
+    current: (m) => m.repoId,
+    value: (m) => chosenRepo(m)?.key ?? reposPending(m),
+    valueAside: (m) => chosenRepo(m)?.written ?? null,
     take: (b, row) => {
-      b.modal.error = null;
-      b.modal.repos.lost = null;
-      chooseRepo(b.modal, row.id);
+      const m = b.modal;
+      m.error = null;
+      Object.assign(m.repos, { lost: null, sameKey: null });
+      chooseRepo(m, m.repos.list.find((r) => repoId(r) === row.id));
     },
     notes: (m) => reposNotes(m),
     placeholder: "Filter: Name des Repos",
@@ -9319,30 +9460,27 @@ export function spacesNote({ on, layout }) {
 }
 
 function reposNotes(m) {
-  const { state, on, folders, list, missing, unreadable, lost } = m.repos ?? {};
+  const { state, on, folders, list, missing, unreadable, remotesUnread, gitMissing, lost, sameKey } = m.repos;
   if (state !== "ready") return [];
   const notes = [
     ...missing.map((f) => `Den Repo-Ordner ${f} gibt es ${onMachine(on)} nicht`),
     ...unreadable.map((f) => `Der Repo-Ordner ${f} ist ${onMachine(on)} nicht lesbar`),
   ];
+  if (gitMissing) notes.push(`git ist ${onMachine(on)} nicht installiert`);
+  else if (remotesUnread.length) notes.push(`Die Remotes von ${andJoined(remotesUnread.map((u) => u.written))} sind ${onMachine(on)} nicht lesbar`);
   if (!folders.length) {
-    notes.push(`Kein Repo-Ordner gesetzt: in ${CONFIG_NAME}.json „repoFolders“ eintragen, unter „sources.azure“ für alle Teams oder beim Team, etwa "repoFolders": ["~/Repos"]`);
+    notes.push(`Kein Repo-Ordner gesetzt: in ${CONFIG_NAME}.json oben „repoFolders“ eintragen, für alle Quellen, etwa "repoFolders": ["~/Repos"]`);
   } else if (!list.length) {
-    notes.push(`In ${folders.join(", ")} liegt ${onMachine(on)} kein Git-Repo; die Ordner stehen in ${CONFIG_NAME}.json unter „repoFolders“`);
+    notes.push(`In ${folders.join(", ")} liegt ${onMachine(on)} kein Git-Repo; die Ordner stehen unter „repoFolders“ in ${CONFIG_NAME}.json oder in den Einstellungen dieses Rechners`);
   }
+  if (sameKey) notes.push(`„${sameKey[0].key}“ liegt ${onMachine(on)} in ${andJoined(sameKey.map((r) => r.written))}; bitte eines davon wählen`);
   if (lost) notes.push(`„${lost}“ liegt ${onMachine(on)} in keinem Repo-Ordner; bitte ein Repo wählen`);
   return notes;
 }
 
 export const startModal = {
-  // Opens the dialog for an item, or says where its checkout is missing. An
-  // item without a repo takes its folder from the Repo field.
   open(b, view, item, cx) {
     const settings = startSettings(b.config, view, item.repo);
-    if (item.repo && !settings.checkout) {
-      const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
-      return b.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
-    }
     const input = TextareaState.new({ placeholder: "Erste Nachricht an den Agent" });
     input.set_auto_grow(1, MESSAGE_ROWS);
     const template = item.kind === "pr" ? settings.review : settings.message;
@@ -9358,7 +9496,7 @@ export const startModal = {
     const m = {
       kind: "start", view, item, settings, input, nameInput, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
       notes: [machineNote].filter(Boolean), machines: list, machine, spaceName, target: null, renamed: false, list: null, busy: null, error: null,
-      repos: item.repo ? null : reposLoading(null, []), repo: null,
+      repos: reposLoading(null, [], []), repo: null, repoId: null,
     };
     wireMessage(b, m, input);
     wireTextField(b, m, nameInput, "name", (_e, cx) => startModal.start(b, cx));
@@ -9373,20 +9511,20 @@ export const startModal = {
     cx.notify();
   },
 
-  // Opens the item's session on the chosen machine, in its checkout's folder
-  // there (an item without a repo: the folder of the repo chosen), then runs
-  // tab.new in the chosen space, where it is still there, or space.new with
-  // the name given. run() answers nothing, so the board says the session is
-  // being opened and watches for a new tab of its name (watchSession). The
-  // dialog stays until run() opens the session; a failure that comes after
-  // the dialog went shows in the banner and as a toast.
+  // Opens the item's session on the chosen machine, in the chosen repo's
+  // folder there, then runs tab.new in the chosen space, where it is still
+  // there, or space.new with the name given. run() answers nothing, so the
+  // board says the session is being opened and watches for a new tab of its
+  // name (watchSession). The dialog stays until run() opens the session; a
+  // failure that comes after the dialog went shows in the banner and as a
+  // toast.
   start(b, cx) {
     const m = b.modal;
     if (m?.kind !== "start") return;
     m.error = null;
     if (m.busy) return void cx.notify();
     const repo = chosenRepo(m);
-    if (m.repos && !repo) {
+    if (!repo) {
       m.error = m.repos.state === "loading" ? "Die Repos werden noch gelesen" : reposPending(m);
       m.field = "repo";
       b.takeKeyboard();
@@ -9404,7 +9542,7 @@ export const startModal = {
     const before = tabsNamed(name);
     cx.spawn(async (cx) => {
       try {
-        const folder = repo ? repo.folder : await checkoutFolder(m, on);
+        const folder = repo.folder ?? (await ownFolder(b, m, repo, on));
         if (space && !spaces().some((s) => s.id === space.id)) {
           // Its dialog says so for a space chosen there (goneNote, unreadNote).
           if (m.target && stillOpen(b, m)) return;
@@ -9412,7 +9550,7 @@ export const startModal = {
           throw new BoardError(`Den Space „${space.name}“ ${onMachine(on)} gibt es nicht mehr`);
         }
         run(...startCommand({ on, folder, argv: agent.run, task, name, space: space?.id, spaceName }));
-        if (repo && m.item.kind !== "pr") store.set(repoStoreKey(m.view), repo.key);
+        if (!m.item.repo && m.item.kind !== "pr") store.set(repoStoreKey(m.view), repo.key);
         if (stillOpen(b, m)) {
           b.modal = null;
           b.handle.focus();
@@ -9490,7 +9628,7 @@ export const startModal = {
             .px(20)
             .py(16)
             .gap(14)
-            .child(m.repos ? v_flex().gap(6).child(label("Repo")).child(choiceBox(b, t, START_CHOICES, "repo")) : label(`Neue Sitzung im Checkout ${m.settings.checkout}`))
+            .child(v_flex().gap(6).child(label("Repo")).child(choiceBox(b, t, START_CHOICES, "repo")))
             .child(
               h_flex()
                 .gap(12)
@@ -9577,32 +9715,51 @@ function chooseMachine(b, machine, cx) {
   loadRepos(b, cx);
 }
 
-async function shOutput(m, args, on, kind) {
+async function shOutput(m, args, on, kind, said = () => null) {
   const r = await call("sh", args, on, SH_TIMEOUT, what(m.view, kind));
-  if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
+  if (r.code !== 0) throw new BoardError(said(r.code) ?? (firstLine(r.stderr) || `sh endete mit ${r.code}`));
   return r.stdout;
 }
 
-async function checkoutFolder(m, on) {
-  const folder = lastLine(await shOutput(m, checkoutArgs(m.settings.checkout), on, "checkout"));
+async function ownFolder(b, m, repo, on) {
+  const gone = (code) => {
+    if (code !== NO_FOLDER) return null;
+    const path = ["repos", repo.key, "checkout"];
+    return `Den Ordner ${repo.written} aus ${pathText(path)} (${b.origin(path)}) gibt es ${onMachine(on)} nicht; das Repo dort klonen oder den Ordner ändern`;
+  };
+  const folder = lastLine(await shOutput(m, checkoutArgs(repo.written), on, "checkout", gone));
   if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
   return folder;
 }
 
+const NONE_FOUND = { repos: [], missing: [], unreadable: [], remotesUnread: [], gitMissing: false, withLineBreak: [] };
+
 function loadRepos(b, cx) {
   const m = b.modal;
-  if (!m.repos) return;
   const on = m.machines[m.machine];
-  const folders = m.view.tab?.repoFolders ?? [];
-  const repos = reposLoading(on, folders);
+  const folders = b.config.repoFolders;
+  const exceptions = repoExceptions(b.config);
+  const repos = reposLoading(on, folders, withExceptions([], exceptions));
   m.repos = repos;
-  const listed = ({ repos: list, missing, unreadable }) => {
-    const wanted = m.repo ?? wantedRepo(m, list);
-    const there = list.some((r) => r.key === wanted);
-    Object.assign(repos, { state: "ready", list, missing, unreadable, lost: wanted && list.length && !there ? wanted : null });
-    if (there) chooseRepo(m, wanted);
+  const own = wantedRepos(m, repos.list);
+  if (own.length === 1) chooseRepo(m, own[0]);
+  const listed = (found) => {
+    const list = withExceptions(found.repos, exceptions);
+    const onText = on ? ` on ${on}` : "";
+    for (const group of sameKeyGroups(list)) boardLog.write(`board: repo ${group[0].key}${onText} in more than one folder: ${group.map((r) => r.written).join(", ")}`);
+    if (found.remotesUnread.length) boardLog.write(`board: remotes not read${onText}: ${found.remotesUnread.map((u) => `${u.written} (git ${u.status})`).join(", ")}`);
+    if (found.withLineBreak.length) boardLog.write(`board: repos left out${onText} for a line break in their path: ${found.withLineBreak.join(", ")}`);
+    const wanted = m.repo ?? wantedRepo(m);
+    const matches = wantedRepos(m, list);
+    const sure = !found.remotesUnread.length && folders.length && list.length;
+    Object.assign(repos, {
+      state: "ready", list, missing: found.missing, unreadable: found.unreadable, remotesUnread: found.remotesUnread, gitMissing: found.gitMissing,
+      sameKey: matches.length > 1 ? matches : null,
+      lost: wanted && !matches.length && sure ? wanted : null,
+    });
+    if (matches.length === 1) chooseRepo(m, matches[0]);
   };
-  if (!folders.length) return listed({ repos: [], missing: [], unreadable: [] });
+  if (!folders.length) return listed(NONE_FOUND);
   cx.spawn(async (cx) => {
     let found = null;
     let why = null;
@@ -9618,18 +9775,27 @@ function loadRepos(b, cx) {
   });
 }
 
-function wantedRepo(m, list) {
-  if (m.item.kind === "pr") {
-    const named = list.filter((r) => r.name === m.item.azureRepo);
-    return named.length === 1 ? named[0].key : null;
-  }
+// The item's own repo; for an Azure pull request its repository's, once its
+// details are read; else the one its view last started in, unless that
+// names a folder (~ or / first), the key an older board kept.
+function wantedRepo(m) {
+  const { item } = m;
+  if (item.repo) return item.repo;
+  if (item.kind === "pr") return item.azureProject && item.azureRepo ? azureRepoKey(item.azureProject, item.azureRepo) : null;
   const remembered = store.get(repoStoreKey(m.view));
-  return typeof remembered === "string" ? remembered : null;
+  return typeof remembered === "string" && !/^[~/]/.test(remembered) ? remembered : null;
 }
 
-function chooseRepo(m, key) {
-  m.repo = key;
-  m.spaceName = chosenRepo(m)?.name ?? "";
+function wantedRepos(m, list) {
+  const matches = reposOfKey(list, m.repo ?? wantedRepo(m));
+  const kept = matches.length > 1 ? matches.find((r) => repoId(r) === m.repoId) : null;
+  return kept ? [kept] : matches;
+}
+
+function chooseRepo(m, repo) {
+  m.repo = repo.key;
+  m.repoId = repoId(repo);
+  m.spaceName = repoShortName(repo.key);
   if (!m.renamed) m.nameInput.set_value(m.spaceName);
 }
 
@@ -9831,7 +9997,7 @@ export function issueSoloSwitch(data, chosen) {
   const ids = [null, ...repos];
   const shown = soloAmong(repos, chosen);
   return {
-    choices: ids.map((id) => ({ id, label: id === null ? "Alle" : id.split("/").pop() })),
+    choices: ids.map((id) => ({ id, label: id === null ? "Alle" : repoShortName(id) })),
     chosen: shown,
     after: ids[(ids.indexOf(shown) + 1) % ids.length],
   };
@@ -12416,7 +12582,7 @@ export default class Board extends View {
       ...Object.values(MODALS).flatMap((d) => d.keys ?? []),
     ];
     const strokes = keys.map((k) => k.keystroke.replace(/[a-z]+$/, (key) => key[0].toUpperCase() + key.slice(1)));
-    const names = `${strokes.slice(0, -1).join(", ")} und ${strokes.at(-1)}`;
+    const names = andJoined(strokes);
     try {
       const count = cx.bind_keys(keys);
       if (count !== keys.length) {

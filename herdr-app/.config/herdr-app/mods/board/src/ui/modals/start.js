@@ -1,15 +1,19 @@
-// The start dialog: opens an item's session in its checkout (an item
-// without a repo: in the repo chosen under "Repo"), on a machine and with an
+// The start dialog: opens an item's session in the folder of the repo
+// chosen under "Repo" (the item's own preselected), on a machine and with an
 // agent chosen here, as a new tab in a space of that machine or in a new
 // space ("Öffnen in"), with a first message to edit.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState, Textarea, TextareaState } from "gpui-base";
 import { knownAgents, machines, notify, run, spaces } from "herdr";
-import { BoardError, CONFIG_NAME, firstLine, itemLabel, lastLine, report } from "../../shared.js";
-import { startSettings } from "../../config.js";
+import { BoardError, CONFIG_NAME, andJoined, boardLog, firstLine, itemLabel, lastLine, repoShortName, report } from "../../shared.js";
+import { repoExceptions, startSettings } from "../../config.js";
+import { pathText } from "../../settings.js";
 import { call, what } from "../../tools.js";
-import { checkoutArgs, parseRepos, preselectedSpace, renderTemplate, reposArgs, sessionName, spacesOn, startCommand, templateVars } from "../../actions/start.js";
+import {
+  NO_FOLDER, azureRepoKey, checkoutArgs, parseRepos, preselectedSpace, renderTemplate, reposArgs, reposOfKey, sameKeyGroups, sessionName, spacesOn, startCommand,
+  templateVars, withExceptions,
+} from "../../actions/start.js";
 import { backdrop, button, cycleField, fieldBox, fieldFrame, fieldLabel, machineName, onMachine, store, wireTextField } from "../helpers.js";
 import { LIST_HINT, choiceBox, choiceHint, choiceKey, escapeList, listKey, listKeyboard, listShield } from "../choices.js";
 import { NOTE_TONES, toneColor } from "../tones.js";
@@ -18,12 +22,8 @@ const SH_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
 // ms (1, 3 and 6 s after the start).
 const SESSION_CHECKS = [1000, 2000, 3000];
-const FIELDS = ["message", "agent", "machine", "open"];
-const REPO_FIELDS = ["message", "repo", "agent", "machine", "open"];
-const fieldsOf = (m) => {
-  const fields = m.repos ? REPO_FIELDS : FIELDS;
-  return whereToOpen(m).newSpace ? [...fields, "name"] : fields;
-};
+const FIELDS = ["message", "repo", "agent", "machine", "open"];
+const fieldsOf = (m) => (whereToOpen(m).newSpace ? [...FIELDS, "name"] : FIELDS);
 const stillOpen = (b, m) => b.modal === m;
 const MESSAGE_ROWS = 6;
 
@@ -46,8 +46,9 @@ export const START_HINTS = {
 const agentsPending = (m) => m.agentsError ?? "lädt …";
 
 export const repoStoreKey = (view) => `repo:${view.id}`;
-const reposLoading = (on, folders) => ({ state: "loading", on, folders, list: [], missing: [], unreadable: [], lost: null, error: null });
-const chosenRepo = (m) => m.repos?.list.find((r) => r.key === m.repo) ?? null;
+const reposLoading = (on, folders, list) => ({ state: "loading", on, folders, list, missing: [], unreadable: [], remotesUnread: [], gitMissing: false, lost: null, sameKey: null, error: null });
+const repoId = (r) => `${r.key}\n${r.written}`;
+const chosenRepo = (m) => m.repos.list.find((r) => repoId(r) === m.repoId) ?? null;
 
 function reposPending(m) {
   const { state, error, list } = m.repos;
@@ -59,13 +60,15 @@ const openedIn = (where) => where.space ?? where.gone ?? where.unread;
 
 const START_CHOICES = {
   repo: {
-    entries: (m) => m.repos.list.map((r) => ({ id: r.key, name: r.name, aside: m.repos.folders.length > 1 ? [r.parent] : [] })),
-    current: (m) => m.repo,
-    value: (m) => chosenRepo(m)?.name ?? reposPending(m),
+    entries: (m) => m.repos.list.map((r) => ({ id: repoId(r), name: r.key, aside: [r.written] })),
+    current: (m) => m.repoId,
+    value: (m) => chosenRepo(m)?.key ?? reposPending(m),
+    valueAside: (m) => chosenRepo(m)?.written ?? null,
     take: (b, row) => {
-      b.modal.error = null;
-      b.modal.repos.lost = null;
-      chooseRepo(b.modal, row.id);
+      const m = b.modal;
+      m.error = null;
+      Object.assign(m.repos, { lost: null, sameKey: null });
+      chooseRepo(m, m.repos.list.find((r) => repoId(r) === row.id));
     },
     notes: (m) => reposNotes(m),
     placeholder: "Filter: Name des Repos",
@@ -118,30 +121,27 @@ export function spacesNote({ on, layout }) {
 }
 
 function reposNotes(m) {
-  const { state, on, folders, list, missing, unreadable, lost } = m.repos ?? {};
+  const { state, on, folders, list, missing, unreadable, remotesUnread, gitMissing, lost, sameKey } = m.repos;
   if (state !== "ready") return [];
   const notes = [
     ...missing.map((f) => `Den Repo-Ordner ${f} gibt es ${onMachine(on)} nicht`),
     ...unreadable.map((f) => `Der Repo-Ordner ${f} ist ${onMachine(on)} nicht lesbar`),
   ];
+  if (gitMissing) notes.push(`git ist ${onMachine(on)} nicht installiert`);
+  else if (remotesUnread.length) notes.push(`Die Remotes von ${andJoined(remotesUnread.map((u) => u.written))} sind ${onMachine(on)} nicht lesbar`);
   if (!folders.length) {
-    notes.push(`Kein Repo-Ordner gesetzt: in ${CONFIG_NAME}.json „repoFolders“ eintragen, unter „sources.azure“ für alle Teams oder beim Team, etwa "repoFolders": ["~/Repos"]`);
+    notes.push(`Kein Repo-Ordner gesetzt: in ${CONFIG_NAME}.json oben „repoFolders“ eintragen, für alle Quellen, etwa "repoFolders": ["~/Repos"]`);
   } else if (!list.length) {
-    notes.push(`In ${folders.join(", ")} liegt ${onMachine(on)} kein Git-Repo; die Ordner stehen in ${CONFIG_NAME}.json unter „repoFolders“`);
+    notes.push(`In ${folders.join(", ")} liegt ${onMachine(on)} kein Git-Repo; die Ordner stehen unter „repoFolders“ in ${CONFIG_NAME}.json oder in den Einstellungen dieses Rechners`);
   }
+  if (sameKey) notes.push(`„${sameKey[0].key}“ liegt ${onMachine(on)} in ${andJoined(sameKey.map((r) => r.written))}; bitte eines davon wählen`);
   if (lost) notes.push(`„${lost}“ liegt ${onMachine(on)} in keinem Repo-Ordner; bitte ein Repo wählen`);
   return notes;
 }
 
 export const startModal = {
-  // Opens the dialog for an item, or says where its checkout is missing. An
-  // item without a repo takes its folder from the Repo field.
   open(b, view, item, cx) {
     const settings = startSettings(b.config, view, item.repo);
-    if (item.repo && !settings.checkout) {
-      const where = `„repos“ → „${item.repo}“ oder „start.checkout“ der Ansicht „${view.name}“`;
-      return b.say(`Für ${item.repo} steht kein „checkout“ in ${CONFIG_NAME}.json: ${where}`, "error", cx);
-    }
     const input = TextareaState.new({ placeholder: "Erste Nachricht an den Agent" });
     input.set_auto_grow(1, MESSAGE_ROWS);
     const template = item.kind === "pr" ? settings.review : settings.message;
@@ -157,7 +157,7 @@ export const startModal = {
     const m = {
       kind: "start", view, item, settings, input, nameInput, field: "message", agents: [], agent: 0, agentsError: null, machineNote, agentNote: null,
       notes: [machineNote].filter(Boolean), machines: list, machine, spaceName, target: null, renamed: false, list: null, busy: null, error: null,
-      repos: item.repo ? null : reposLoading(null, []), repo: null,
+      repos: reposLoading(null, [], []), repo: null, repoId: null,
     };
     wireMessage(b, m, input);
     wireTextField(b, m, nameInput, "name", (_e, cx) => startModal.start(b, cx));
@@ -172,20 +172,20 @@ export const startModal = {
     cx.notify();
   },
 
-  // Opens the item's session on the chosen machine, in its checkout's folder
-  // there (an item without a repo: the folder of the repo chosen), then runs
-  // tab.new in the chosen space, where it is still there, or space.new with
-  // the name given. run() answers nothing, so the board says the session is
-  // being opened and watches for a new tab of its name (watchSession). The
-  // dialog stays until run() opens the session; a failure that comes after
-  // the dialog went shows in the banner and as a toast.
+  // Opens the item's session on the chosen machine, in the chosen repo's
+  // folder there, then runs tab.new in the chosen space, where it is still
+  // there, or space.new with the name given. run() answers nothing, so the
+  // board says the session is being opened and watches for a new tab of its
+  // name (watchSession). The dialog stays until run() opens the session; a
+  // failure that comes after the dialog went shows in the banner and as a
+  // toast.
   start(b, cx) {
     const m = b.modal;
     if (m?.kind !== "start") return;
     m.error = null;
     if (m.busy) return void cx.notify();
     const repo = chosenRepo(m);
-    if (m.repos && !repo) {
+    if (!repo) {
       m.error = m.repos.state === "loading" ? "Die Repos werden noch gelesen" : reposPending(m);
       m.field = "repo";
       b.takeKeyboard();
@@ -203,7 +203,7 @@ export const startModal = {
     const before = tabsNamed(name);
     cx.spawn(async (cx) => {
       try {
-        const folder = repo ? repo.folder : await checkoutFolder(m, on);
+        const folder = repo.folder ?? (await ownFolder(b, m, repo, on));
         if (space && !spaces().some((s) => s.id === space.id)) {
           // Its dialog says so for a space chosen there (goneNote, unreadNote).
           if (m.target && stillOpen(b, m)) return;
@@ -211,7 +211,7 @@ export const startModal = {
           throw new BoardError(`Den Space „${space.name}“ ${onMachine(on)} gibt es nicht mehr`);
         }
         run(...startCommand({ on, folder, argv: agent.run, task, name, space: space?.id, spaceName }));
-        if (repo && m.item.kind !== "pr") store.set(repoStoreKey(m.view), repo.key);
+        if (!m.item.repo && m.item.kind !== "pr") store.set(repoStoreKey(m.view), repo.key);
         if (stillOpen(b, m)) {
           b.modal = null;
           b.handle.focus();
@@ -289,7 +289,7 @@ export const startModal = {
             .px(20)
             .py(16)
             .gap(14)
-            .child(m.repos ? v_flex().gap(6).child(label("Repo")).child(choiceBox(b, t, START_CHOICES, "repo")) : label(`Neue Sitzung im Checkout ${m.settings.checkout}`))
+            .child(v_flex().gap(6).child(label("Repo")).child(choiceBox(b, t, START_CHOICES, "repo")))
             .child(
               h_flex()
                 .gap(12)
@@ -376,32 +376,51 @@ function chooseMachine(b, machine, cx) {
   loadRepos(b, cx);
 }
 
-async function shOutput(m, args, on, kind) {
+async function shOutput(m, args, on, kind, said = () => null) {
   const r = await call("sh", args, on, SH_TIMEOUT, what(m.view, kind));
-  if (r.code !== 0) throw new BoardError(firstLine(r.stderr) || `sh endete mit ${r.code}`);
+  if (r.code !== 0) throw new BoardError(said(r.code) ?? (firstLine(r.stderr) || `sh endete mit ${r.code}`));
   return r.stdout;
 }
 
-async function checkoutFolder(m, on) {
-  const folder = lastLine(await shOutput(m, checkoutArgs(m.settings.checkout), on, "checkout"));
+async function ownFolder(b, m, repo, on) {
+  const gone = (code) => {
+    if (code !== NO_FOLDER) return null;
+    const path = ["repos", repo.key, "checkout"];
+    return `Den Ordner ${repo.written} aus ${pathText(path)} (${b.origin(path)}) gibt es ${onMachine(on)} nicht; das Repo dort klonen oder den Ordner ändern`;
+  };
+  const folder = lastLine(await shOutput(m, checkoutArgs(repo.written), on, "checkout", gone));
   if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
   return folder;
 }
 
+const NONE_FOUND = { repos: [], missing: [], unreadable: [], remotesUnread: [], gitMissing: false, withLineBreak: [] };
+
 function loadRepos(b, cx) {
   const m = b.modal;
-  if (!m.repos) return;
   const on = m.machines[m.machine];
-  const folders = m.view.tab?.repoFolders ?? [];
-  const repos = reposLoading(on, folders);
+  const folders = b.config.repoFolders;
+  const exceptions = repoExceptions(b.config);
+  const repos = reposLoading(on, folders, withExceptions([], exceptions));
   m.repos = repos;
-  const listed = ({ repos: list, missing, unreadable }) => {
-    const wanted = m.repo ?? wantedRepo(m, list);
-    const there = list.some((r) => r.key === wanted);
-    Object.assign(repos, { state: "ready", list, missing, unreadable, lost: wanted && list.length && !there ? wanted : null });
-    if (there) chooseRepo(m, wanted);
+  const own = wantedRepos(m, repos.list);
+  if (own.length === 1) chooseRepo(m, own[0]);
+  const listed = (found) => {
+    const list = withExceptions(found.repos, exceptions);
+    const onText = on ? ` on ${on}` : "";
+    for (const group of sameKeyGroups(list)) boardLog.write(`board: repo ${group[0].key}${onText} in more than one folder: ${group.map((r) => r.written).join(", ")}`);
+    if (found.remotesUnread.length) boardLog.write(`board: remotes not read${onText}: ${found.remotesUnread.map((u) => `${u.written} (git ${u.status})`).join(", ")}`);
+    if (found.withLineBreak.length) boardLog.write(`board: repos left out${onText} for a line break in their path: ${found.withLineBreak.join(", ")}`);
+    const wanted = m.repo ?? wantedRepo(m);
+    const matches = wantedRepos(m, list);
+    const sure = !found.remotesUnread.length && folders.length && list.length;
+    Object.assign(repos, {
+      state: "ready", list, missing: found.missing, unreadable: found.unreadable, remotesUnread: found.remotesUnread, gitMissing: found.gitMissing,
+      sameKey: matches.length > 1 ? matches : null,
+      lost: wanted && !matches.length && sure ? wanted : null,
+    });
+    if (matches.length === 1) chooseRepo(m, matches[0]);
   };
-  if (!folders.length) return listed({ repos: [], missing: [], unreadable: [] });
+  if (!folders.length) return listed(NONE_FOUND);
   cx.spawn(async (cx) => {
     let found = null;
     let why = null;
@@ -417,18 +436,27 @@ function loadRepos(b, cx) {
   });
 }
 
-function wantedRepo(m, list) {
-  if (m.item.kind === "pr") {
-    const named = list.filter((r) => r.name === m.item.azureRepo);
-    return named.length === 1 ? named[0].key : null;
-  }
+// The item's own repo; for an Azure pull request its repository's, once its
+// details are read; else the one its view last started in, unless that
+// names a folder (~ or / first), the key an older board kept.
+function wantedRepo(m) {
+  const { item } = m;
+  if (item.repo) return item.repo;
+  if (item.kind === "pr") return item.azureProject && item.azureRepo ? azureRepoKey(item.azureProject, item.azureRepo) : null;
   const remembered = store.get(repoStoreKey(m.view));
-  return typeof remembered === "string" ? remembered : null;
+  return typeof remembered === "string" && !/^[~/]/.test(remembered) ? remembered : null;
 }
 
-function chooseRepo(m, key) {
-  m.repo = key;
-  m.spaceName = chosenRepo(m)?.name ?? "";
+function wantedRepos(m, list) {
+  const matches = reposOfKey(list, m.repo ?? wantedRepo(m));
+  const kept = matches.length > 1 ? matches.find((r) => repoId(r) === m.repoId) : null;
+  return kept ? [kept] : matches;
+}
+
+function chooseRepo(m, repo) {
+  m.repo = repo.key;
+  m.repoId = repoId(repo);
+  m.spaceName = repoShortName(repo.key);
   if (!m.renamed) m.nameInput.set_value(m.spaceName);
 }
 
