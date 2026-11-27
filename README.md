@@ -761,16 +761,16 @@ by that run. Which files of the package git tracks is set in the root
   go over the pull requests alone, and a section's count is theirs. The key
   of an issue or pull request of a foreign repo names its owner too
   ("owner/repo#12") wherever it shows: in a PR row, on a board, in the
-  details and their lines, the notices and the start dialog. A line
-  "Repos:" above the sections has a switch per repo with pull requests in
-  the tab and per repo turned off there, the owner's first, each with how
-  many of its pull requests the filter and "nur meine" let through, a
-  foreign one marked "fremd", a turned-on one marked "✓"; a click turns it
-  off or on on this machine (`hideRepos`, above), at once and without a
-  read. A turned-off repo's pull requests show nowhere in the tab, and the
-  counts of its sections and of the tab leave them out. `R`, or "Repos…" in
-  the command menu, opens a menu of the same switches, where `Enter`, a
-  digit or a click turns one off or on.
+  details and their lines, the notices and the start dialog. `R` (or
+  "Repos…" in the command menu) chooses which repos the tab covers: its
+  menu has a switch per repo with pull requests in the tab and per repo
+  turned off there, the owner's first, each with how many of its pull
+  requests the filter and "nur meine" let through, a foreign one marked
+  "fremd", a turned-on one marked "✓"; `Enter`, a digit or a click turns
+  one off or on on this machine (`hideRepos`, above), at once and without
+  a read. The tab draws no "Repos:" line. A turned-off repo's pull
+  requests show nowhere in the tab, and the counts of its sections and of
+  the tab leave them out.
   A GitHub context's Issues tab, which its `issues` entry in `views.json` makes
   (`"issues": { "id": "issues" }`, with, where wanted, `name`, by default
   "Issues", `limit`, `hideRepos` and `start`; its `id` its own among all

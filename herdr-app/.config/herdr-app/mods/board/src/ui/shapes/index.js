@@ -27,13 +27,12 @@
 // unclear writes of its items ended up), withView (data, view: the data as
 // the view's settings show it now, the same data where they change nothing
 // for it), toggleRepo (b, view, repo, cx: turns a repo off or on, beside the
-// repo menu, ui/modals/repos.js, and a PR tab's „Repos:“ line, ui/helpers.js
-// repoLine, which list its repoSwitches (b, data)), readsAgain (st, view:
-// whether the view's settings now leave other repos out of its query than
-// its data or the read under way did, which reads it again), soloSwitch
-// (b, st: { choices ({ id, label }), chosen, after: the choice V picks },
-// the field „Repo:“ beside the view switch and its list, ui/modals/solo.js,
-// Board.setSoloRepo), moveTo, toggleColumn,
+// repo menu, ui/modals/repos.js, which lists its repoSwitches (b, data)),
+// readsAgain (st, view: whether the view's settings now leave other repos
+// out of its query than its data or the read under way did, which reads it
+// again), soloSwitch (b, st: { choices ({ id, label }), chosen, after: the
+// choice V picks }, the field „Repo:“ beside the view switch and its list,
+// ui/modals/solo.js, Board.setSoloRepo), moveTo, toggleColumn,
 // openStatusMenu with statusField (b, view: the name of what the status menu
 // sets, where it is not the status; null for none), navigate (its own
 // keyboard movement in place of navigate's, select.js), sideways (b, view,

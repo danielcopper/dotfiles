@@ -563,20 +563,6 @@ export const toggleSwitch = (b, t, id, on, toggle) =>
       if (!b.modal) toggle(cx);
     });
 
-// The „Repos:“ line of a PR tab: its shape's repoSwitches for
-// the data, a repo's count where it has one (held); null for none.
-export function repoLine(b, t, view, data) {
-  const switches = b.shape(view).repoSwitches(b, data);
-  if (!switches.length) return null;
-  return h_flex().id("repo-line").flex_none().flex_wrap().gap(6).px(16).pt(10).pb(2).items_center().text_size(12)
-    .child(div().text_color(t.muted).child("Repos:"))
-    .children(switches.map((e) =>
-      toggleSwitch(b, t, `repo-switch-${e.repo}`, !e.hidden, (cx) => b.toggleRepo(view, e.repo, cx))
-        .child(`${e.hidden ? "" : "✓ "}${e.name}`)
-        .when(e.held !== null, (el) => el.child(div().text_color(t.muted).child(shownOf(e.shown, e.held))))
-        .when(e.foreign, (el) => el.child(foreignChip(t)))));
-}
-
 // The note below a list its limit cut, `text`, once the read is whole;
 // null for none.
 export const limitNote = (t, data, text) =>

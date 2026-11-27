@@ -4,16 +4,15 @@
 // is drawn in its color, a theme name: its head on a band of it, each row
 // with a stripe of it at its left. Within a section the rows stand grouped
 // by repo (kinds/list.js, repoGroups says which groups have a repo row),
-// and nothing selects a repo row. The „Repos:“ line above the sections,
-// and the repo menu (modals/repos.js), turn a repo off and on; a repo
-// turned off shows none of its pull requests. View fields it reads: id,
-// settingsPath, hideRepos.
+// and nothing selects a repo row. The repo menu (R, modals/repos.js) turns
+// a repo off and on; a repo turned off shows none of its pull requests.
+// View fields it reads: id, settingsPath, hideRepos.
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, ScrollHandle } from "gpui-base";
 import { NOTIFIED, ageLabel, cardLabel } from "../../shared.js";
 import { keptRows, repoGroups, repoSwitches, withRepoView } from "../../kinds/list.js";
-import { checkColor, checksSection, detailNote, detailSection, foreignChip, listRow, repoLine, shownOf, toggleRepoSetting } from "../helpers.js";
+import { checkColor, checksSection, detailNote, detailSection, foreignChip, listRow, shownOf, toggleRepoSetting } from "../helpers.js";
 import { NOTE_TONES, headBg, markColor, toneColor } from "../tones.js";
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
@@ -112,8 +111,8 @@ function drawPrs(b, t, mono, view, st) {
     }
   }
   const list = v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(prsState(b).scroll).children(children);
-  const above = [repoLine(b, t, view, st.data), st.data.notifiedPending ? div().id("notified-pending").px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.info)).child(NOTIFIED_PENDING) : null].filter(Boolean);
-  return above.length ? v_flex().flex_1().min_h(0).children(above).child(list) : list;
+  if (!st.data.notifiedPending) return list;
+  return v_flex().flex_1().min_h(0).child(div().id("notified-pending").px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.info)).child(NOTIFIED_PENDING)).child(list);
 }
 
 function repoRow(t, mono, id, group) {

@@ -7512,21 +7512,17 @@ test("UI: a section of one own repo has no repo row; the rows scroll to their pl
   assert.deepEqual(host.scrolled.map((s) => s.row), [4, 5, 7], "each row's place counts the section and repo rows above it");
 });
 
-test("UI: the „Repos:“ line names the PR tab's repos with their pull requests, own ones first, foreign ones marked; a click turns one off on this machine at once, its rows and counts gone, and on again", async () => {
+test("UI: R names the PR tab's repos with their pull requests, own ones first, foreign ones marked; turning one off there turns it off on this machine at once, its rows and counts gone, and on again; the tab draws no „Repos:“ line", async () => {
   const { b, cx, host, st } = await openPrList({ config: JSON.stringify(twoContexts({ hideRepos: ["sample-user/gone"] })), list: contextList() });
-  const line = () => byId(b.render(), "repo-line");
-  const switches = () => line().kids.slice(1).map((k) => texts(k).join(" "));
-  assert.deepEqual(texts(line())[0], "Repos:");
-  assert.deepEqual(switches(), ["✓ tender 2", "✓ atlas 1", `✓ ${ORG_FOREIGN} 2 fremd`, "gone 0"], "one turned off in views.json, though it has none");
+  assert.equal(byId(b.render(), "repo-line"), null, "R chooses the repos");
+  assert.ok(!texts(b.render()).includes("Repos:"));
+  const menu = async () => (await repoMenuNow(b, cx)).map((r) => r.filter(Boolean).slice(1).join(" "));
+  assert.deepEqual(await menu(), ["✓ tender 2 gezeigt", "✓ atlas 1 gezeigt", `✓ ${ORG_FOREIGN} fremd 2 gezeigt`, "gone 0 ausgeblendet"], "one turned off in views.json, though it has none");
   b.filterText = "lib";
-  assert.deepEqual(switches(), ["✓ tender 0/2", "✓ atlas 0/1", `✓ ${ORG_FOREIGN} 2 fremd`, "gone 0"], "what the filter hides is said");
+  assert.deepEqual(await menu(), ["✓ tender 0/2 gezeigt", "✓ atlas 0/1 gezeigt", `✓ ${ORG_FOREIGN} fremd 2 gezeigt`, "gone 0 ausgeblendet"], "what the filter hides is said");
   b.filterText = "";
-  const t = copperTheme("dark");
-  host.theme = () => t;
-  const look = (id) => { const el = byId(b.render(), id); return [el.with.bg[0], el.with.text_color[0], el.with.border_color[0]]; };
-  assert.deepEqual([look("repo-switch-sample-user/tender"), look("repo-switch-sample-user/gone")], [[t.selected, t.foreground, t.accent], [t.chrome, t.muted, t.border]], "on and off as „nur meine“");
   const reads = host.open("gh").length;
-  await click(b, cx, "repo-switch-sample-user/tender");
+  await toggleInRepoMenu(b, cx, "tender");
   assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { sources: { github: { contexts: { "sample-user": { prs: { hideRepos: ["sample-user/gone", "sample-user/tender"] } } } } } });
   assert.equal(b.origin(["sources", "github", "contexts", "sample-user", "prs", "hideRepos"]), "dieser Rechner");
   assert.equal(host.open("gh").length, reads, "nothing read again");
@@ -7534,21 +7530,16 @@ test("UI: the „Repos:“ line names the PR tab's repos with their pull request
   assert.deepEqual(byId(b.render(), "rows").kids.map((k) => texts(k)[0]), ["REVIEW · 1", ORG_FOREIGN, `${ORG_FOREIGN}#30`, "MINE · 2", "atlas", "atlas#40", "other-owner/lib", "other-owner/lib#31"]);
   assert.equal(texts(byId(b.render(), "tab-github:prs")).at(-1), "3", "the tab counts what shows");
   assert.equal(st().sel.key, "PR_ctx3", "the selection leaves the rows turned off");
-  assert.deepEqual(switches(), ["tender 2", "✓ atlas 1", `✓ ${ORG_FOREIGN} 2 fremd`, "gone 0"], "it stays in the line, with its count");
-  await click(b, cx, "repo-switch-sample-user/tender");
+  assert.deepEqual(await menu(), ["tender 2 ausgeblendet", "✓ atlas 1 gezeigt", `✓ ${ORG_FOREIGN} fremd 2 gezeigt`, "gone 0 ausgeblendet"], "it stays in the menu, with its count");
+  await toggleInRepoMenu(b, cx, "tender");
   assert.deepEqual(JSON.parse(host.files[MACHINE_FILE]), { sources: { github: { contexts: { "sample-user": { prs: { hideRepos: ["sample-user/gone"] } } } } } });
   assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [10, 30, 11, 40, 31]);
-  assert.equal(byId((await openPrList({ list: JSON.stringify({ data: { viewer: { login: "sample-user" }, s0: { issueCount: 0, nodes: [] }, s1: { issueCount: 0, nodes: [] } } }) })).b.render(), "repo-line"), null, "no repo: no line");
+  assert.equal(byId(b.render(), "repo-line"), null);
+  const empty = await openPrList({ list: JSON.stringify({ data: { viewer: { login: "sample-user" }, s0: { issueCount: 0, nodes: [] }, s1: { issueCount: 0, nodes: [] } } }) });
+  assert.deepEqual(await repoMenuNow(empty.b, empty.cx), [], "no repo: none in the menu");
 });
 
-test("UI: a click on a repo switch while a dialog is open turns nothing off", async () => {
-  const { b, cx } = await openPrList({ config: JSON.stringify(twoContexts()), list: contextList() });
-  await press(b, cx, "r", { char: "R", modifiers: { shift: true } });
-  await click(b, cx, "repo-switch-sample-user/tender");
-  assert.deepEqual(b.viewById("prs").hideRepos, []);
-});
-
-test("UI: R opens the repo menu: the PR tab's repos as its „Repos:“ line names them; Enter, a digit or a click turns one off or on, and it stays open until Esc", async () => {
+test("UI: R opens the repo menu: the PR tab's repos; Enter, a digit or a click turns one off or on, and it stays open until Esc", async () => {
   const { b, cx, host } = await openPrList({ config: JSON.stringify(twoContexts()), list: contextList() });
   await press(b, cx, "r", { char: "R", modifiers: { shift: true } });
   assert.equal(b.modal?.kind, "repos");
@@ -18290,7 +18281,7 @@ test("UI: a PR tab's repos turned off apply to a saved state it draws and to a r
   assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [2820, 77, 1921], "without the repo turned off now");
   await host.answer("gh", ok(fixture("github-list.json")));
   await press(b, cx, "r");
-  await click(b, cx, "repo-switch-sample-user/tender");
+  await toggleInRepoMenu(b, cx, "tender");
   while (host.open("gh").length) await host.answer("gh", ok(fixture("github-list.json")));
   assert.deepEqual(b.navColumns(b.view())[0].shown.map((r) => r.number), [], "the read that ends after the switch shows neither");
 });
@@ -19162,7 +19153,7 @@ test("an Issues tab's solo switch names a repo whose name changed in case only a
   assert.deepEqual(solo.choices.map((c) => count(c.id)), [{ held: 3, shown: 2 }, { held: 2, shown: 1 }, { held: 1, shown: 1 }]);
 });
 
-test("an Issues tab's „Repos:“ switches: the repos with issues in the read where their first issue stands, with their counts, then the owner's others turned on, by name, then those turned off and those waiting, without a count", () => {
+test("an Issues tab's repo switches: the repos with issues in the read where their first issue stands, with their counts, then the owner's others turned on, by name, then those turned off and those waiting, without a count", () => {
   const data = { ...issuesData("open", { hidden: ["sample-user/quiet"] }), hideRepos: ["sample-user/gone"] };
   const look = (switches) => switches.map((s) => [s.repo, s.name, s.hidden, s.held, s.shown, s.foreign]);
   assert.deepEqual(look(board.issueSwitches(data, (r) => r.number !== 5)), [

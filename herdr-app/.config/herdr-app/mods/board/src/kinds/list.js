@@ -1,7 +1,6 @@
 // A GitHub PR or Issues tab's repos: whose they are (repoOwnership), the
 // ones this machine turns off (hideRepos, whose rows do not show), rows
-// grouped by repo, and the switches of the repo menu and a PR tab's
-// „Repos:“ line.
+// grouped by repo, and the switches of the repo menu.
 
 import { foldedName } from "../shared.js";
 import { sameNames } from "./board.js";

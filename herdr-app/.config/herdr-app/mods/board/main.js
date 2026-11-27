@@ -4286,8 +4286,7 @@ export function makeAzure(paths) {
 
 // A GitHub PR or Issues tab's repos: whose they are (repoOwnership), the
 // ones this machine turns off (hideRepos, whose rows do not show), rows
-// grouped by repo, and the switches of the repo menu and a PR tab's
-// „Repos:“ line.
+// grouped by repo, and the switches of the repo menu.
 
 // Whose the repo `repo` ("owner/repo") is, for a tab of the context whose
 // owner is owners.tabOwner: "own"; "other" where its owner is another
@@ -7220,20 +7219,6 @@ export const toggleSwitch = (b, t, id, on, toggle) =>
     .on_click((_e, cx) => {
       if (!b.modal) toggle(cx);
     });
-
-// The „Repos:“ line of a PR tab: its shape's repoSwitches for
-// the data, a repo's count where it has one (held); null for none.
-export function repoLine(b, t, view, data) {
-  const switches = b.shape(view).repoSwitches(b, data);
-  if (!switches.length) return null;
-  return h_flex().id("repo-line").flex_none().flex_wrap().gap(6).px(16).pt(10).pb(2).items_center().text_size(12)
-    .child(div().text_color(t.muted).child("Repos:"))
-    .children(switches.map((e) =>
-      toggleSwitch(b, t, `repo-switch-${e.repo}`, !e.hidden, (cx) => b.toggleRepo(view, e.repo, cx))
-        .child(`${e.hidden ? "" : "✓ "}${e.name}`)
-        .when(e.held !== null, (el) => el.child(div().text_color(t.muted).child(shownOf(e.shown, e.held))))
-        .when(e.foreign, (el) => el.child(foreignChip(t)))));
-}
 
 // The note below a list its limit cut, `text`, once the read is whole;
 // null for none.
@@ -10983,10 +10968,9 @@ export const placeholderShape = {
 // is drawn in its color, a theme name: its head on a band of it, each row
 // with a stripe of it at its left. Within a section the rows stand grouped
 // by repo (kinds/list.js, repoGroups says which groups have a repo row),
-// and nothing selects a repo row. The „Repos:“ line above the sections,
-// and the repo menu (modals/repos.js), turn a repo off and on; a repo
-// turned off shows none of its pull requests. View fields it reads: id,
-// settingsPath, hideRepos.
+// and nothing selects a repo row. The repo menu (R, modals/repos.js) turns
+// a repo off and on; a repo turned off shows none of its pull requests.
+// View fields it reads: id, settingsPath, hideRepos.
 
 // The prs shape's own state on a Board (state(), shapes/index.js): the
 // list's scroll handle.
@@ -11084,8 +11068,8 @@ function drawPrs(b, t, mono, view, st) {
     }
   }
   const list = v_flex().id("rows").flex_1().min_h(0).py(4).overflow_y_scrollbar().track_scroll(prsState(b).scroll).children(children);
-  const above = [repoLine(b, t, view, st.data), st.data.notifiedPending ? div().id("notified-pending").px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.info)).child(NOTIFIED_PENDING) : null].filter(Boolean);
-  return above.length ? v_flex().flex_1().min_h(0).children(above).child(list) : list;
+  if (!st.data.notifiedPending) return list;
+  return v_flex().flex_1().min_h(0).child(div().id("notified-pending").px(16).pt(6).text_size(12).text_color(toneColor(t, NOTE_TONES.info)).child(NOTIFIED_PENDING)).child(list);
 }
 
 function repoRow(t, mono, id, group) {
@@ -11754,13 +11738,12 @@ function drawTable(b, t, mono, view, st) {
 // unclear writes of its items ended up), withView (data, view: the data as
 // the view's settings show it now, the same data where they change nothing
 // for it), toggleRepo (b, view, repo, cx: turns a repo off or on, beside the
-// repo menu, ui/modals/repos.js, and a PR tab's „Repos:“ line, ui/helpers.js
-// repoLine, which list its repoSwitches (b, data)), readsAgain (st, view:
-// whether the view's settings now leave other repos out of its query than
-// its data or the read under way did, which reads it again), soloSwitch
-// (b, st: { choices ({ id, label }), chosen, after: the choice V picks },
-// the field „Repo:“ beside the view switch and its list, ui/modals/solo.js,
-// Board.setSoloRepo), moveTo, toggleColumn,
+// repo menu, ui/modals/repos.js, which lists its repoSwitches (b, data)),
+// readsAgain (st, view: whether the view's settings now leave other repos
+// out of its query than its data or the read under way did, which reads it
+// again), soloSwitch (b, st: { choices ({ id, label }), chosen, after: the
+// choice V picks }, the field „Repo:“ beside the view switch and its list,
+// ui/modals/solo.js, Board.setSoloRepo), moveTo, toggleColumn,
 // openStatusMenu with statusField (b, view: the name of what the status menu
 // sets, where it is not the status; null for none), navigate (its own
 // keyboard movement in place of navigate's, select.js), sideways (b, view,
