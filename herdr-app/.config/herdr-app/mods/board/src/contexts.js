@@ -26,12 +26,22 @@ export const PROJECT_PREFIX = "project:";
 export const projectKey = (id) => `${PROJECT_PREFIX}${id}`;
 export const goneProjects = (keys, tabs) => keys.filter((k) => k.startsWith(PROJECT_PREFIX) && !tabs.has(k.slice(PROJECT_PREFIX.length)));
 
+// A project's views (meta.views, GitHub's order) in the order of its
+// switch (`order`, its entry's switchOrder: GITHUB_ORDER or its own): those
+// it names first, in its order, then the rest in GitHub's.
+export function orderedViews(views, order) {
+  if (!Array.isArray(order)) return views;
+  const named = order.map((n) => views.find((v) => v.number === n)).filter(Boolean);
+  return [...named, ...views.filter((v) => !named.includes(v))];
+}
+
 // A project's tab, its views.json entry as `entry`: named as GitHub names
-// the project, its views GitHub's (their numbers) once the board knows
-// them.
+// the project, its views GitHub's (their numbers, in its switch's order)
+// once the board knows them.
 function projectTab(entry, known) {
   const meta = known.get(entry.id);
-  return { id: entry.id, source: "github", kind: "project", name: meta?.title ?? `Projekt ${entry.number}`, entry, meta, views: (meta?.views ?? []).map((v) => v.number) };
+  const views = orderedViews(meta?.views ?? [], entry.switchOrder).map((v) => v.number);
+  return { id: entry.id, source: "github", kind: "project", name: meta?.title ?? `Projekt ${entry.number}`, entry, meta, views };
 }
 
 // A PR tab: its entry is its view, as GitHub's "list".
@@ -55,6 +65,8 @@ export const SOURCES = [
     contexts: (config) => (config?.azure?.contexts ?? []).map((c) => ({ id: `azure:${c.project}`, name: c.project, tabs: c.tabs })),
   },
 ];
+
+export const sourceName = (id) => SOURCES.find((s) => s.id === id)?.name;
 
 // The contexts of a config, in the switch's order: { id, source, name,
 // tabs }, a tab { id, source, kind (one of TAB_KINDS), name, … } (a team's
@@ -105,14 +117,15 @@ export const firstViewId = (tab) => `${tab.id}:first`;
 // columns), settingsPath (the view's own, under the project's), owners },
 // for `shown`, one of its tab's meta.views. Without one, the view whose
 // read learns the project's views and then reads the view `wanted` (the
-// one remembered, where the project still has it) or else the first: a
-// board with address.view null that hides nothing and has no settings of
-// its own (settingsPath null).
+// one remembered, where the project still has it) or else the first in
+// the order of its switch (switchOrder, the project's): a board with
+// address.view null that hides nothing and has no settings of its own
+// (settingsPath null).
 export function projectView(tab, shown, wanted = null) {
   const p = tab.entry;
   const common = { source: "github", tab, limit: p.limit, start: p.start, owners: p.owners };
   const address = (view) => ({ owner: p.owner, number: p.number, view });
-  if (!shown) return { ...common, id: firstViewId(tab), layout: "board", name: tab.name, address: address(null), wanted, hide: [], settingsPath: null };
+  if (!shown) return { ...common, id: firstViewId(tab), layout: "board", name: tab.name, address: address(null), wanted, switchOrder: p.switchOrder, hide: [], settingsPath: null };
   const settingsPath = [...p.settingsPath, "views", String(shown.number)];
   return { ...common, id: `${tab.id}:${shown.number}`, layout: shown.layout, name: shown.name, address: address(shown.number), hide: p.views[shown.number]?.hide ?? [], settingsPath };
 }

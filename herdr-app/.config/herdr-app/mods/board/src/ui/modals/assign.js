@@ -20,7 +20,7 @@ import { div } from "gpui-kit";
 import { itemLabel, report } from "../../shared.js";
 import { wordsMatch } from "../../select.js";
 import { assignAtOnce } from "../../actions/assign.js";
-import { filterMenuHead, filterMenuKey, menu, menuNote, menuWindow, openReadMenu } from "../helpers.js";
+import { LOADING, filterMenuHead, filterMenuKey, menu, menuNote, menuWindow, openReadMenu } from "../helpers.js";
 
 // The rows the filter leaves: { text, sub, person } ("Ich" carries its
 // name as `sub`; a person their login), each word of the filter in its
@@ -82,7 +82,7 @@ export const assignModal = {
     const m = b.modal;
     const rows = rowsOf(m);
     const { shown, ...win } = menuWindow(m, rows);
-    const message = !m.list ? "lädt …" : !rows.length ? "Niemand passt zum Filter" : null;
+    const message = !m.list ? LOADING : !rows.length ? "Niemand passt zum Filter" : null;
     return menu(t, {
       id: "assign",
       rowId: "assign-row",

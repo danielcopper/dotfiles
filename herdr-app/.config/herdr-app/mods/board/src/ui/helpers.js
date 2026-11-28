@@ -2,8 +2,8 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState } from "gpui-base";
-import { layout, notify, panes, settings, spaces } from "herdr";
-import { COPPER_HUES, MOD, cardType, firstLine } from "../shared.js";
+import { knownAgents, layout, notify, panes, settings, spaces } from "herdr";
+import { COPPER_HUES, MOD, andJoined, cardType, firstLine } from "../shared.js";
 import { AGENT_STATUS, placed } from "../sessions.js";
 import { layers } from "./layer.js";
 import { NOTE_TONES, chipBg, headBg, hueTone, namedTone, selectedBg, tint, toneColor, typeLineTone, typeTone } from "./tones.js";
@@ -70,6 +70,18 @@ export const machineName = (name) => name ?? "Dieser Rechner";
 // "auf <machine>", or "auf diesem Rechner" for this one.
 export const onMachine = (name) => (name ? `auf ${name}` : "auf diesem Rechner");
 
+// What the start dialog and the settings page say of a scan of the repo
+// folders on the machine `on` (reposScan), and of its agents.
+export const missingNote = (folder, on) => `Den Repo-Ordner ${folder} gibt es ${onMachine(on)} nicht`;
+export const unreadableNote = (folder, on) => `Der Repo-Ordner ${folder} ist ${onMachine(on)} nicht lesbar`;
+export const gitMissingNote = (on) => `git ist ${onMachine(on)} nicht installiert`;
+export const remotesNote = (unread, on) => `Die Remotes von ${andJoined(unread.map((u) => u.written))} sind ${onMachine(on)} nicht lesbar`;
+export const sameKeyNote = (group, on) => `„${group[0].key}“ liegt ${onMachine(on)} in ${andJoined(group.map((r) => r.written))}; bitte eines davon wählen`;
+export const reposUnreadable = (why, on) => `Repos ${onMachine(on)} nicht lesbar: ${why}`;
+export const agentsUnreadable = (on, e) => `Agents ${onMachine(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
+
+export const installedAgents = async (on) => (await knownAgents({ on })).filter((a) => a.installed);
+
 // Whether this copy of the board shows. The layer's copy (`isLayer`) shows
 // while the board layer shows the board. A copy in a tab shows while a
 // board pane is in the shown tab of the shown space, and no board layer
@@ -94,6 +106,8 @@ export const observesReleases = (el) => typeof el.on_window_mouse_up === "functi
 
 export const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
 export const spinner = () => div().frames(SPINNER_FRAMES, 150);
+export const LOADING = "lädt …";
+export const loadingLine = (t, text = LOADING) => h_flex().gap(8).text_size(12).text_color(t.muted).child(spinner()).child(text);
 
 // "<shown>/<total>" where the filter or "nur meine" hides some, else the
 // total.
@@ -553,15 +567,26 @@ export const foreignChip = (t) => toneChip(t, "fremd", COPPER_HUES.yellow);
 
 // A switch such as „nur meine“: on, on the theme's `selected` as a chosen
 // tab is, with the accent border of its own; not as a primary button
-// (solid), which it is not. „nur meine“ keeps its text and weight, so its
-// size never changes.
-export const toggleSwitch = (b, t, id, on, toggle) =>
+// (solid), which it is not; `focused` (the one keys turn) framed in the
+// foreground. „nur meine“ keeps its text and weight, so its size never
+// changes.
+export const toggleSwitch = (b, t, id, on, toggle, focused = false) =>
   h_flex().id(id).flex_none().gap(6).px(10).py(5).rounded(6).text_size(12).cursor_pointer()
-    .border_1().border_color(on ? t.accent : t.border).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
+    .border_1().border_color(focused ? t.foreground : on ? t.accent : t.border).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
     .hover((s) => s.bg(t.hover))
     .on_click((_e, cx) => {
       if (!b.modal) toggle(cx);
     });
+
+// A row of a menu of repos to show or hide (the repo menu, the settings
+// page's): ✓ where it shows, its name (`name`, drawn), `between` them, and
+// what it is.
+export const repoMenuRow = (t, r, name, between = []) => [
+  div().w(14).text_color(t.foreground).child(r.hidden ? "" : "✓"),
+  name,
+  ...between,
+  div().w(80).flex_none().text_size(11).text_color(t.dim).child(r.hidden ? "ausgeblendet" : "gezeigt"),
+];
 
 // The note below a list its limit cut, `text`, once the read is whole;
 // null for none.

@@ -20,7 +20,7 @@ import { div } from "gpui-kit";
 import { report } from "../../shared.js";
 import { rankByName } from "../../select.js";
 import { sprintDates, startRow } from "../../kinds/sprint.js";
-import { filterMenuHead, filterMenuKey, markedName, menu, menuNote, menuWindow, openReadMenu, toneChip } from "../helpers.js";
+import { LOADING, filterMenuHead, filterMenuKey, markedName, menu, menuNote, menuWindow, openReadMenu, toneChip } from "../helpers.js";
 import { NOTE_TONES } from "../tones.js";
 
 const sprintRowsOf = (m) => rankByName(m.list ?? [], m.filter);
@@ -67,7 +67,7 @@ export const sprintsModal = {
     const { shown, ...win } = menuWindow(m, rows);
     const year = new Date(Date.now()).getUTCFullYear();
     const empty = m.error ? null : m.list?.length ? "Kein Sprint passt zum Filter" : "Das Team hat keine Sprints";
-    const message = !m.list ? "lädt …" : !rows.length ? empty : null;
+    const message = !m.list ? LOADING : !rows.length ? empty : null;
     return menu(t, {
       id: "sprints",
       rowId: "sprint",

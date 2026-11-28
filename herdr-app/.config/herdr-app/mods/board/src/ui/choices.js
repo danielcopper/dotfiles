@@ -7,37 +7,43 @@
 // valueAside(m), the one beside it (null: none); take(b, row, cx), which
 // puts the field on that entry; fieldAfter(row), the field the dialog goes
 // on to once the list took `row` (by default it stays); closes (the dialog
-// ends once the list took a row or a press beside it closed it); the
+// ends before take runs, or as a press beside the list closes it); the
 // list's placeholder, none (said where the filter leaves no row), empty(m)
-// (said instead where no filter is typed), notes(m) (said under the rows),
+// (said instead where no filter is typed), loading(m) (whether the entries
+// are still read: the spinner instead), notes(m) (said under the rows),
 // width and anchor }. The open list is the dialog's m.list.
 
 import { div } from "gpui-kit";
 import { h_flex, Popup } from "gpui-base";
 import { rankByName } from "../select.js";
-import { fieldFrame, filterMenuHead, filterMenuKey, followMark, markedName, menuNote, menuPanel, menuWindow, wireFilter } from "./helpers.js";
+import { fieldFrame, filterMenuHead, filterMenuKey, followMark, loadingLine, markedName, menuNote, menuPanel, menuWindow, wireFilter } from "./helpers.js";
 
 export const LIST_HINT = "Tippen filtert · ↑ ↓ wählt · ↵ übernimmt · Esc schließt die Liste";
 export const choiceHint = (enter) => `← → wählt · Leertaste öffnet die Liste · ↵ ${enter} · Tab wechselt das Feld`;
 
 export function choiceBox(b, t, choices, field) {
   const m = b.modal;
-  const trigger = h_flex()
+  const trigger = choiceTrigger(t, field, choices[field].value(m), choices[field].valueAside?.(m), (cx) => {
+    m.field = field;
+    b.handle.focus();
+    openList(b, choices, field, cx);
+  });
+  return listPopup(b, t, field, choices[field].anchor, fieldFrame(t, m, field, trigger));
+}
+
+// What a choice field shows: `text`, `aside` beside it (null: none) and ▾;
+// a click runs open(cx).
+export const choiceTrigger = (t, field, text, aside, open) =>
+  h_flex()
     .id(`choice-${field}`)
     .flex_1()
     .min_w(0)
     .gap(6)
     .cursor_pointer()
-    .on_click((_e, cx) => {
-      m.field = field;
-      b.handle.focus();
-      openList(b, choices, field, cx);
-    })
-    .child(div().flex_1().min_w(0).truncate().child(choices[field].value(m)))
-    .when(Boolean(choices[field].valueAside?.(m)), (el) => el.child(div().flex_none().max_w(240).truncate().text_size(11).text_color(t.dim).child(choices[field].valueAside(m))))
+    .on_click((_e, cx) => open(cx))
+    .child(div().flex_1().min_w(0).truncate().child(text))
+    .when(Boolean(aside), (el) => el.child(div().flex_none().max_w(240).truncate().text_size(11).text_color(t.dim).child(aside ?? "")))
     .child(div().text_color(t.dim).child("▾"));
-  return listPopup(b, t, field, choices[field].anchor, fieldFrame(t, m, field, trigger));
-}
 
 // The frame of the choice `field`, its list under it while that list is
 // open and `here` (the open dialog is the field's own).
@@ -54,16 +60,19 @@ export function choiceKey(b, choices, k, cx) {
 function step(b, spec, by, cx) {
   const m = b.modal;
   if (m.busy) return;
-  const rows = spec.entries(m);
-  if (rows.length) {
-    const now = rows.findIndex((r) => r.id === spec.current(m));
-    // An entry the field is on but does not list (a chosen space that is
-    // gone, or on a machine whose spaces are not read) stands before the
-    // first.
-    const next = now < 0 ? (by > 0 ? 0 : rows.length - 1) : (now + by + rows.length) % rows.length;
-    spec.take(b, rows[next], cx);
-  }
+  const next = steppedEntry(spec.entries(m), spec.current(m), by);
+  if (next) spec.take(b, next, cx);
   cx.notify();
+}
+
+// The entry of `rows` ← (by -1) or → (1) goes to from the one whose id is
+// `current`, round; null in an empty list. An entry the field is on but
+// does not list (a chosen space that is gone, or on a machine whose spaces
+// are not read) stands before the first.
+export function steppedEntry(rows, current, by) {
+  if (!rows.length) return null;
+  const now = rows.findIndex((r) => r.id === current);
+  return rows[now < 0 ? (by > 0 ? 0 : rows.length - 1) : (now + by + rows.length) % rows.length];
 }
 
 export function openList(b, choices, field, cx) {
@@ -143,13 +152,18 @@ export function listKey(b, e, cx) {
   list.mark = row ? row.id : NOT_MOVED;
 }
 
+// Still open, the dialog would close as gone where what the take writes
+// takes its row off the page.
 function takeRow(b, row, cx) {
   const m = b.modal;
   if (!row) return;
   const { spec, choice } = m.list;
   m.list = null;
+  if (spec.closes) {
+    b.closeModal(cx);
+    return spec.take(b, row, cx);
+  }
   spec.take(b, row, cx);
-  if (spec.closes) return b.closeModal(cx);
   m.field = spec.fieldAfter?.(row) ?? choice;
   b.takeKeyboard();
   cx.notify();
@@ -179,7 +193,7 @@ function listPanel(b, t) {
       ...win,
       pick: (i, cx) => takeRow(b, rows[i], cx),
       foot: [
-        ...(rows.length ? [] : [menuNote(t, none, t.muted)]),
+        ...(rows.length ? [] : [spec.loading?.(m) ? loadingLine(t).px(8) : menuNote(t, none, t.muted)]),
         ...(spec.notes?.(m) ?? []).map((n) => menuNote(t, n, t.muted)),
       ],
     }));

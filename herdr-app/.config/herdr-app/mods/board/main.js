@@ -8,6 +8,7 @@
 //
 // views.json:
 // - refreshMinutes (3), see Calls below.
+// - language ("de"): the board's language, one of LANGUAGES (config.js).
 // - sources: what the board shows, in contexts by source; the top bar
 //   switches between the contexts and shows the tabs of one, its PR tab
 //   last.
@@ -15,7 +16,9 @@
 //     sections, limit? } }, a context per owner (a user or an
 //     organisation). A project is a tab with its views: { number, limit?
 //     (the most items a view reads, 1000), start?, views?: { "<number of
-//     the view>": { hide?: [column names] } } }, its tab's id its owner's
+//     the view>": { hide?: [column names] } }, switchOrder? (its views'
+//     order in the switch: "github", GitHub's, or their numbers, those
+//     named first: orderedViews in contexts.js) }, its tab's id its owner's
 //     and its number (projectTabId); its name, its views (in GitHub's
 //     order) and their layout, filter, column field, group field, sort
 //     keys and visible fields come from GitHub (githubProjectArgs), a
@@ -87,9 +90,13 @@
 // search (githubIssuesArgs: per issue its labels, assignees and the rest a
 // card reads, as on a project; about two points a page), at most as many as
 // full pages of its limit take, ten for the 1000 by default; and, once while
-// the board runs and again after `r`, one per 100 of the owner's repos
-// (githubIssueReposArgs, one point each), before the first page: whether the
-// owner is a user or an organisation names its search.
+// the board runs and again after `r`, one per 100 of the owner's repos with
+// issues (githubOwnerReposArgs with ISSUE_REPOS_QUERY, one point each),
+// before the first page: whether the owner is a user or an organisation
+// names its search. The settings page shares that read for an Issues tab's
+// repos; for a PR tab's it reads all the owner's repos but the archived
+// ones (OWNER_REPOS_QUERY, one point per 100), once each time it opens and
+// shows the context.
 // GitHub prices a request by its connections, each counted as full: the
 // list's per section one search, then per pull request of its limit (50
 // by default) its assignees, review requests, review threads, last commit
@@ -142,6 +149,13 @@
 // chosen in it (its repos, with one git call per repo for their remotes; none
 // without repoFolders), and one at the start for a repo with a checkout of its
 // own. Finding gh and az costs one sh call now and then (toolPaths says when).
+// The settings page (ui/settings/) costs, once while it shows, one sh call
+// when it opens (again after a change of the folders), as the start dialog's
+// Repo field, herdr's list of this machine's agents when its start shows,
+// and for a GitHub context with an Issues tab the owner's repos with issues
+// (the same read, kept while the board runs and read again after `r` on the
+// Issues tab), with a PR tab all the owner's repos but the archived ones
+// (read again each time the page opens).
 // The Claude Code sessions on this machine cost one sh call (their files and
 // ps), and one more where any of them runs (their task lists), each with its
 // log line: when the board starts, after a look that sees it come to show,
@@ -205,9 +219,12 @@
 // drawn), ui/band.js (which cards of a board column, or rows of a table or
 // an Issues tab, draw whole), ui/shapes/ (how a view's data is drawn and
 // worked: board, prs, sprint, backlog, table, issues, placeholder),
-// ui/modals/ (the dialogs:
-// start, status, columns, create, assign, commands, sprints, sessions,
-// repos, solo) and this one, the Board, which looks the shape up.
+// ui/settings/ (the settings page: index.js its state and topics, draw.js,
+// knobs.js the pieces of its rows, and a module per kind of topic: general,
+// start, repos, github, azure), ui/modals/ (the dialogs: start, status,
+// columns, create, assign, commands, sprints, sessions, repos, solo, and
+// setting.js: the settings page's setting, settingChoice and settingRepos)
+// and this one, the Board, which looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
@@ -675,7 +692,11 @@ const STALE_VIEW_START = "solange es dasteht, fehlt der Tab";
 const STALE_TEAM = "solange es dasteht, fehlt das Team";
 const STALE_AZURE = "es gilt nicht, der Rest von „sources.azure“ schon";
 const BLANK_CHECKOUT = "ist der Ordner des Repos (Text, nicht leer), etwa \"~/Repos/<Repo>\"";
-const TOP_KEYS = ["refreshMinutes", "start", "repoFolders", "repos", "sources"];
+const TOP_KEYS = ["refreshMinutes", "language", "start", "repoFolders", "repos", "sources"];
+
+export const LANGUAGES = [{ id: "de", name: "Deutsch" }];
+const LANGUAGE_DEFAULT = LANGUAGES[0].id;
+const LANGUAGE_TEXT = `„language“ ist ${LANGUAGES.map((l) => `"${l.id}" (${l.name})`).join(" oder ")}; Englisch folgt später`;
 // What an old views.json, with its views at the top, is told.
 const OLD_SHAPE = "views.json hat noch die alte Form: die Einträge von „views“ stehen jetzt unter „sources“, die von GitHub in " +
   "„sources.github.contexts“, die von Azure in „sources.azure“ mit „org“ und „contexts“ (Kopf von mods/board/src/main.js)";
@@ -744,6 +765,11 @@ function sectionsWithTones(sections) {
 // such a project is told; it is left out.
 const PROJECT_BEFORE = ["id", "name", "field", "filter", "priorityField", "hide"];
 const PROJECT_SHAPE = "{ \"number\" }, dazu „limit“, „start“ und je Ansicht „views“: { \"<Nummer der Ansicht>\": { \"hide\": [...] } }";
+export const GITHUB_ORDER = "github";
+const SWITCH_ORDER_TEXT = `„switchOrder“ ist "${GITHUB_ORDER}" (wie auf GitHub) oder eine Liste von Nummern der Ansichten, jede höchstens einmal, etwa [4, 1]`;
+const switchOrderOk = (v) =>
+  v === undefined || v === GITHUB_ORDER || (Array.isArray(v) && v.every((n) => Number.isInteger(n) && n >= 1) && new Set(v).size === v.length);
+
 const projectBefore = (keys) =>
   `${keys.map((k) => `„${k}“`).join(", ")} ${keys.length > 1 ? "stammen" : "stammt"} aus der Form vor den Ansichten von GitHub: ein Project ist jetzt ${PROJECT_SHAPE}; ` +
   "Name, Ansichten, Filter, Spalten und Priorität kommen von GitHub (Kopf von mods/board/src/main.js)";
@@ -779,11 +805,12 @@ function projectViewsProblems(views) {
 // the context's; `shared`: those sections).
 const ENTRY_KINDS = {
   project: {
-    keys: ["number", "limit", "views"],
+    keys: ["number", "limit", "views", "switchOrder"],
     before: PROJECT_BEFORE,
     problems(v) {
       const out = limitProblems(v.limit, BOARD_LIMIT);
       if (!(Number.isInteger(v.number) && v.number >= 1)) out.push("„number“ ist die Nummer des Projects, eine ganze Zahl ab 1");
+      if (!switchOrderOk(v.switchOrder)) out.push(SWITCH_ORDER_TEXT);
       return [...out, ...projectViewsProblems(v.views)];
     },
     name: "number",
@@ -792,7 +819,9 @@ const ENTRY_KINDS = {
     at: (v, j) => `Project ${j + 1}${Number.isInteger(v?.number) ? ` (${v.number})` : ""}`,
     id: (v, owner) => projectTabId(owner, v.number),
     settingsPath: (v, context) => [...context, "projects", String(v.number)],
-    defaults: (v, owner) => ({ owner, number: v.number, limit: v.limit ?? BOARD_LIMIT, start: v.start ?? {}, views: v.views ?? {} }),
+    defaults: (v, owner) => ({
+      owner, number: v.number, limit: v.limit ?? BOARD_LIMIT, start: v.start ?? {}, views: v.views ?? {}, switchOrder: v.switchOrder ?? GITHUB_ORDER,
+    }),
   },
   issues: {
     keys: ["id", "name", "limit", "hideRepos"],
@@ -942,6 +971,8 @@ function readGithub(raw) {
   return { github: contexts.length ? { contexts } : null, errors };
 }
 
+const SHARED_PRS_AT = "„sources.github.prs“";
+
 function sectionsProblems(sections) {
   if (!(Array.isArray(sections) && sections.length && sections.every((s) => isObject(s) && isText(s.name) && isText(s.query)))) {
     return ["„sections“ braucht Einträge mit „name“ und „query“"];
@@ -952,15 +983,17 @@ function sectionsProblems(sections) {
   ]);
 }
 
+export const sharedSectionsProblems = (sections) => sectionsProblems(sections).map((p) => `${SHARED_PRS_AT}: ${p}`);
+
 // sources.github.prs → { shared: { sections (each with its tone), limit
 // (each search's `first`) } or null, errors }.
 function readSharedPrs(raw) {
-  const at = "„sources.github.prs“";
+  const at = SHARED_PRS_AT;
   if (raw === undefined) return { shared: null, errors: [`${at} fehlt: die Abschnitte der PR-Tabs aller Kontexte, { \"sections\": [{ \"name\", \"query\" }] }`] };
   if (!isObject(raw)) return { shared: null, errors: [`${at} muss ein Objekt sein`] };
   const errors = [
     ...Object.keys(raw).filter((k) => !SHARED_PRS_KEYS.includes(k)).map((k) => `„sources.github.prs.${k}“ gibt es nicht`),
-    ...sectionsProblems(raw.sections).map((p) => `${at}: ${p}`),
+    ...sharedSectionsProblems(raw.sections),
     ...limitProblems(raw.limit, PAGE, "„sources.github.prs.limit“"),
   ];
   return errors.length ? { shared: null, errors } : { shared: { sections: sectionsWithTones(raw.sections), limit: raw.limit ?? PRS_LIMIT }, errors };
@@ -984,8 +1017,10 @@ const TEAM_VIEW_IDS = TEAM_VIEWS.map((v) => v.id);
 const TEAM_VIEWS_TEXT = TEAM_VIEW_IDS.map((v) => `"${v}"`).join(" und ");
 
 const REPO_FOLDERS_TEXT = "ist eine Liste aus mindestens einem Ordner (Text), jeder höchstens einmal, etwa [\"~/Repos\"]";
-const trimFolders = (v) => v.map((f) => f.replace(/(.)\/+$/, "$1"));
+export const trimFolder = (f) => f.replace(/(.)\/+$/, "$1");
+const trimFolders = (v) => v.map(trimFolder);
 const repoFoldersOk = (v) => v === undefined || (Array.isArray(v) && v.length > 0 && v.every(isText) && new Set(trimFolders(v)).size === v.length);
+export const repoFoldersProblems = (v) => (repoFoldersOk(v) ? [] : [`„repoFolders“ ${REPO_FOLDERS_TEXT}`]);
 
 const TEAM_KEYS = ["team", "views"];
 
@@ -999,6 +1034,35 @@ function teamProblems(t) {
     out.push(`„views“ ist eine Liste aus ${TEAM_VIEWS_TEXT}, jede höchstens einmal`);
   }
   return out;
+}
+
+// An Azure context's teams as readAzure takes them, `where` the context's
+// place in its words: { teams (those without problems), errors }.
+function readTeams(teams, where) {
+  if (teams === undefined) return { teams: [], errors: [] };
+  if (!Array.isArray(teams)) return { teams: [], errors: [`${where}: „teams“ ist eine Liste von Teams`] };
+  const taken = [];
+  const errors = [];
+  teams.forEach((t, j) => {
+    const at = `${where}, Team ${j + 1}${isText(t?.team) ? ` („${t.team}“)` : ""}`;
+    const problems = teamProblems(t);
+    if (!problems.length && taken.some((c) => c.team === t.team)) problems.push("gibt es schon");
+    if (problems.length) return errors.push(...problems.map((p) => `${at}: ${p}`));
+    taken.push(t);
+  });
+  return { teams: taken, errors };
+}
+
+export const teamsProblems = (teams, where) => readTeams(teams, where).errors;
+
+const azureWhere = (a, i) => `Azure-Kontext ${i + 1}${isText(a?.project) ? ` („${a.project}“)` : ""}`;
+
+// The place readAzure names for the context of `project` in `azure`
+// (sources.azure as views.json and this machine's file give it).
+export function azureContextWhere(azure, project) {
+  const list = azureContextList(azure);
+  const i = list.findIndex((c) => isObject(c) && c.project === project);
+  return azureWhere(list[i], i);
 }
 
 // The tabs of an Azure context: { id, source: "azure", kind: "team", name,
@@ -1024,6 +1088,8 @@ const AZURE_CONTEXT_KEYS = ["project", "teams"];
 // { project, team }, … } or { prs: { project } }.
 const beforeContexts = (entry) => isObject(entry) && (Object.hasOwn(entry, "team") || Object.hasOwn(entry, "prs"));
 const holdsBeforeContexts = (contexts) => Array.isArray(contexts) && contexts.some(beforeContexts);
+// The contexts of sources.azure that readAzure reads: those not of that form.
+const azureContextList = (raw) => (Array.isArray(raw?.contexts) ? raw.contexts.filter((c) => !beforeContexts(c)) : []);
 
 // sources.azure → { azure: { org, contexts: [{ project, tabs }] } or null,
 // errors }. Without a valid org (orgUrl) nothing of it is usable; a context
@@ -1034,39 +1100,36 @@ function readAzure(raw) {
     .map((k) => (k === "repoFolders" ? `„sources.azure.repoFolders“ gibt es nicht mehr: ${REPO_FOLDERS_PLACE}; ${STALE_AZURE}` : `„sources.azure.${k}“ gibt es nicht`));
   const org = orgUrl(raw.org);
   if (!org) errors.push("„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>");
-  const list = Array.isArray(raw.contexts) ? raw.contexts.filter((c) => !beforeContexts(c)) : [];
+  const list = azureContextList(raw);
   if (!list.length && !holdsBeforeContexts(raw.contexts)) {
     errors.push("„sources.azure.contexts“ braucht mindestens einen Kontext: { \"project\", \"teams\": [{ \"team\" }] }");
   }
   const contexts = [];
   list.forEach((a, i) => {
-    const where = `Azure-Kontext ${i + 1}${isText(a?.project) ? ` („${a.project}“)` : ""}`;
+    const where = azureWhere(a, i);
     const problems = contextProblems(a, list, AZURE_CONTEXT_KEYS, nameKeyAt(AZURE_CONTEXTS), "„project“ fehlt: der Name des Projekts in der Organisation");
     if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
-    if (a.teams !== undefined && !Array.isArray(a.teams)) errors.push(`${where}: „teams“ ist eine Liste von Teams`);
-    const tabs = [];
-    (Array.isArray(a.teams) ? a.teams : []).forEach((t, j) => {
-      const at = `${where}, Team ${j + 1}${isText(t?.team) ? ` („${t.team}“)` : ""}`;
-      const team = teamProblems(t);
-      if (!team.length && tabs.some((c) => c.team === t.team)) team.push("gibt es schon");
-      if (team.length) return errors.push(...team.map((p) => `${at}: ${p}`));
-      tabs.push(teamTab(t, a.project, org));
-    });
-    contexts.push({ project: a.project, tabs: [...tabs, prsTab(a.project, org)] });
+    const { teams, errors: teamErrors } = readTeams(a.teams, where);
+    errors.push(...teamErrors);
+    contexts.push({ project: a.project, tabs: [...teams.map((t) => teamTab(t, a.project, org)), prsTab(a.project, org)] });
   });
   return { azure: org && contexts.length ? { org, contexts } : null, errors };
 }
 
 // views.json as text (null: there is none) and this machine's settings as
 // read (`settingsRead`: { name, text }, text null for no file, or { name,
-// error }) → { config, errors, settings, origin, moving? }: config is {
-// refreshMinutes, start, repoFolders, repos, azure: { org, contexts } or
-// null, github: { contexts } or null }, settings those applied (null:
-// none), origin mergeSettings's, moving settingsForContexts's move where
-// the settings can move. A context or a tab with problems is left out and
-// each problem is listed; config is null only when nothing usable is left.
+// error }) → { config, errors, settings, origin, base, merged, refused?,
+// moving? }: config is { refreshMinutes, language, start, repoFolders,
+// repos, azure: { org, contexts } or null, github: { contexts } or null },
+// settings those applied (null: none), origin mergeSettings's, base
+// views.json as read, merged that with the settings applied over it (both
+// null where views.json is missing or no JSON), refused why the settings do
+// not apply (where readSettings read them, without the file's name),
+// moving settingsForContexts's move where the settings can move. A context
+// or a tab with problems is left out and each problem is listed; config is
+// null only when nothing usable is left.
 export function readConfig(text, settingsRead = null) {
-  const none = (error) => ({ config: null, errors: [error], settings: null, origin: mergeSettings(null, {}, nameKeyAt).origin });
+  const none = (error) => ({ config: null, errors: [error], settings: null, origin: mergeSettings(null, {}, nameKeyAt).origin, merged: null, base: null });
   if (text === null || text === undefined) return none(`${CONFIG_NAME}.json fehlt im Ordner der Mod`);
   let raw;
   try {
@@ -1074,23 +1137,25 @@ export function readConfig(text, settingsRead = null) {
   } catch (e) {
     return none(`${CONFIG_NAME}.json ist kein gültiges JSON: ${e.message}`);
   }
-  const alone = { ...validateConfig(raw), settings: null, origin: mergeSettings(raw, {}, nameKeyAt).origin };
+  const alone = { ...validateConfig(raw), settings: null, origin: mergeSettings(raw, {}, nameKeyAt).origin, merged: raw, base: raw };
   if (!settingsRead) return alone;
   const { name } = settingsRead;
   const named = (errors) => errors.map((e) => `${name}: ${e}`);
-  const unused = (errors) => ({ ...alone, errors: [...alone.errors, ...errors, settingsAlone(name)] });
+  const unused = (errors, refused = errors) => ({ ...alone, errors: [...alone.errors, ...errors, settingsAlone(name)], refused });
   if (settingsRead.error !== undefined) return unused([`${name} ließ sich nicht lesen: ${settingsRead.error}`]);
   const { settings, errors } = readSettings(settingsRead.text, name);
   if (!settings) return unused(errors);
   const moving = settingsForContexts(raw, settings);
-  if (moving?.problems) return unused(named(moving.problems));
-  if (moving) return { ...unused([`${name} hat noch die Form vor den Kontexten und ist nicht umgestellt; ${MOVE_AGAIN}`]), moving };
+  if (moving?.problems) return unused(named(moving.problems), moving.problems);
+  const notMoved = (subject) => `${subject} hat noch die Form vor den Kontexten und ist nicht umgestellt; ${MOVE_AGAIN}`;
+  if (moving) return { ...unused([notMoved(name)], [notMoved("die Datei")]), moving };
   const { settings: applied, errors: before } = withoutProjectsBefore(settings);
   const { merged, errors: unmatched, origin } = mergeSettings(raw, applied, nameKeyAt);
   const read = validateConfig(merged, origin);
   const added = read.errors.filter((e) => !alone.errors.includes(e));
-  if (added.length) return unused(named([...before, ...unmatched, ...added]));
-  return { ...read, errors: [...read.errors, ...named([...before, ...unmatched])], settings: applied, origin };
+  const problems = [...before, ...unmatched, ...added];
+  if (added.length) return unused(named(problems), problems);
+  return { ...read, errors: [...read.errors, ...named([...before, ...unmatched])], settings: applied, origin, merged, base: raw };
 }
 
 // This machine's settings of a project in the form before its views came
@@ -1137,11 +1202,16 @@ export function validateConfig(raw, origin = null) {
     errors.push("„refreshMinutes“ ist eine Zahl ab 1");
     refreshMinutes = 3;
   }
+  let language = raw.language ?? LANGUAGE_DEFAULT;
+  if (!LANGUAGES.some((l) => l.id === language)) {
+    errors.push(LANGUAGE_TEXT);
+    language = LANGUAGE_DEFAULT;
+  }
   const startErrors = startProblems(raw.start, "start");
   errors.push(...startErrors);
-  const foldersOk = repoFoldersOk(raw.repoFolders);
-  if (!foldersOk) errors.push(`„repoFolders“ ${REPO_FOLDERS_TEXT}`);
-  const repoFolders = foldersOk && raw.repoFolders ? trimFolders(raw.repoFolders) : [];
+  const folderProblems = repoFoldersProblems(raw.repoFolders);
+  errors.push(...folderProblems);
+  const repoFolders = !folderProblems.length && raw.repoFolders ? trimFolders(raw.repoFolders) : [];
   const repos = {};
   if (raw.repos !== undefined && !isObject(raw.repos)) errors.push("„repos“ muss ein Objekt sein");
   for (const [name, entry] of Object.entries(isObject(raw.repos) ? raw.repos : {})) {
@@ -1170,7 +1240,7 @@ export function validateConfig(raw, origin = null) {
   } else if (raw.sources !== undefined) errors.push("„sources“ muss ein Objekt sein");
   else if (!old) errors.push("„sources“ fehlt: „sources.azure“ oder „sources.github“");
   const start = startErrors.length ? {} : raw.start ?? {};
-  return { config: azure || github ? { refreshMinutes, start, repoFolders, repos, azure, github } : null, errors };
+  return { config: azure || github ? { refreshMinutes, language, start, repoFolders, repos, azure, github } : null, errors };
 }
 
 export const hidePath = (view) => [...view.settingsPath, "hide"];
@@ -1863,12 +1933,22 @@ export const PROJECT_PREFIX = "project:";
 export const projectKey = (id) => `${PROJECT_PREFIX}${id}`;
 export const goneProjects = (keys, tabs) => keys.filter((k) => k.startsWith(PROJECT_PREFIX) && !tabs.has(k.slice(PROJECT_PREFIX.length)));
 
+// A project's views (meta.views, GitHub's order) in the order of its
+// switch (`order`, its entry's switchOrder: GITHUB_ORDER or its own): those
+// it names first, in its order, then the rest in GitHub's.
+export function orderedViews(views, order) {
+  if (!Array.isArray(order)) return views;
+  const named = order.map((n) => views.find((v) => v.number === n)).filter(Boolean);
+  return [...named, ...views.filter((v) => !named.includes(v))];
+}
+
 // A project's tab, its views.json entry as `entry`: named as GitHub names
-// the project, its views GitHub's (their numbers) once the board knows
-// them.
+// the project, its views GitHub's (their numbers, in its switch's order)
+// once the board knows them.
 function projectTab(entry, known) {
   const meta = known.get(entry.id);
-  return { id: entry.id, source: "github", kind: "project", name: meta?.title ?? `Projekt ${entry.number}`, entry, meta, views: (meta?.views ?? []).map((v) => v.number) };
+  const views = orderedViews(meta?.views ?? [], entry.switchOrder).map((v) => v.number);
+  return { id: entry.id, source: "github", kind: "project", name: meta?.title ?? `Projekt ${entry.number}`, entry, meta, views };
 }
 
 // A PR tab: its entry is its view, as GitHub's "list".
@@ -1892,6 +1972,8 @@ export const SOURCES = [
     contexts: (config) => (config?.azure?.contexts ?? []).map((c) => ({ id: `azure:${c.project}`, name: c.project, tabs: c.tabs })),
   },
 ];
+
+export const sourceName = (id) => SOURCES.find((s) => s.id === id)?.name;
 
 // The contexts of a config, in the switch's order: { id, source, name,
 // tabs }, a tab { id, source, kind (one of TAB_KINDS), name, … } (a team's
@@ -1942,14 +2024,15 @@ export const firstViewId = (tab) => `${tab.id}:first`;
 // columns), settingsPath (the view's own, under the project's), owners },
 // for `shown`, one of its tab's meta.views. Without one, the view whose
 // read learns the project's views and then reads the view `wanted` (the
-// one remembered, where the project still has it) or else the first: a
-// board with address.view null that hides nothing and has no settings of
-// its own (settingsPath null).
+// one remembered, where the project still has it) or else the first in
+// the order of its switch (switchOrder, the project's): a board with
+// address.view null that hides nothing and has no settings of its own
+// (settingsPath null).
 export function projectView(tab, shown, wanted = null) {
   const p = tab.entry;
   const common = { source: "github", tab, limit: p.limit, start: p.start, owners: p.owners };
   const address = (view) => ({ owner: p.owner, number: p.number, view });
-  if (!shown) return { ...common, id: firstViewId(tab), layout: "board", name: tab.name, address: address(null), wanted, hide: [], settingsPath: null };
+  if (!shown) return { ...common, id: firstViewId(tab), layout: "board", name: tab.name, address: address(null), wanted, switchOrder: p.switchOrder, hide: [], settingsPath: null };
   const settingsPath = [...p.settingsPath, "views", String(shown.number)];
   return { ...common, id: `${tab.id}:${shown.number}`, layout: shown.layout, name: shown.name, address: address(shown.number), hide: p.views[shown.number]?.hide ?? [], settingsPath };
 }
@@ -2036,10 +2119,11 @@ export function shownContextMoves(contexts, get, complete) {
 // run means, and finding each program by the path the person's shell gives
 // on its machine.
 
-// How long gh may take, and az: an az run starts Python, and most ask Azure
-// a few times.
+// How long gh may take, az (an az run starts Python, and most ask Azure a
+// few times) and sh.
 export const GH_TIMEOUT = 30000;
 export const AZ_TIMEOUT = 60000;
+export const SH_TIMEOUT = 30000;
 
 // exec's words for a program that is not there, and for a timeout: herdr
 // stops a program at its timeout with "<program> took longer than <n> s
@@ -2474,10 +2558,11 @@ function azureParts(host, parts) {
   return [git === org ? parts[git + 1] : parts[git - 1], parts[git + 1]];
 }
 
-// A remote's URL → the key of its repo: "owner/repo" on GitHub,
-// "project/repo" on Azure DevOps (azureParts), "host/path" anywhere else;
-// null for a URL of no host, a local path.
-export function remoteKey(url) {
+// A remote's URL → its repo, { key, source }: "owner/repo" on GitHub
+// (source "github"), "project/repo" on Azure DevOps (azureParts; "azure"),
+// "host/path" anywhere else (null); null for a URL of no host, a local
+// path.
+export function remoteRepo(url) {
   const text = String(url ?? "").trim();
   const [, host, rest] = text.match(WITH_SCHEME) ?? text.match(SCP_LIKE) ?? [];
   if (!host) return null;
@@ -2485,24 +2570,28 @@ export function remoteKey(url) {
   const at = host.toLowerCase();
   if (at === AZURE_HOST || AZURE_SSH_HOSTS.includes(at) || OLD_AZURE_HOST.test(at)) {
     const [project, repo] = azureParts(at, parts);
-    return project && repo ? azureRepoKey(unescaped(project), unescaped(repo)) : null;
+    return project && repo ? { key: azureRepoKey(unescaped(project), unescaped(repo)), source: "azure" } : null;
   }
   if (parts.length < 2) return null;
-  return at === GITHUB_HOST ? `${parts[0]}/${parts[1]}` : `${at}/${parts.join("/")}`;
+  return at === GITHUB_HOST ? { key: `${parts[0]}/${parts[1]}`, source: "github" } : { key: `${at}/${parts.join("/")}`, source: null };
 }
+
+export const remoteKey = (url) => remoteRepo(url)?.key ?? null;
 
 const sameRepoKey = (a, b) => foldedName(a) === foldedName(b);
 const NO_GIT = 127;
 
 // REPOS_SCRIPT's answer for `folders` → { repos, missing, unreadable,
 // remotesUnread, gitMissing, withLineBreak }: repos [{ key, folder,
-// written }] by key, once per key of its origin and its upstream
-// (remoteKey), or by its folder's name where neither has one; folder where
-// it is on that machine, written that folder as views.json writes its repo
-// folder. remotesUnread: [{ written, status }] for each repo whose remotes
-// git did not read, with git's exit status; gitMissing where that is NO_GIT
-// for every repo found; withLineBreak the repos left out for a line break
-// in their path, as written.
+// written, source?, upstream? }] by key, once per key of its origin and its
+// upstream (remoteRepo, whose source a GitHub or Azure key has; upstream:
+// true where the key is the upstream's alone), or by its folder's name
+// where neither has one; folder where it is on that machine, written that
+// folder as views.json writes its repo folder. remotesUnread: [{ written,
+// status }] for each repo whose remotes git did not read, with git's exit
+// status; gitMissing where that is NO_GIT for every repo found;
+// withLineBreak the repos left out for a line break in their path, as
+// written.
 export function parseRepos(stdout, folders) {
   const repos = [];
   const missing = [];
@@ -2523,15 +2612,27 @@ export function parseRepos(stdout, folders) {
       const written = writtenIn(parent, folder);
       found++;
       if (git) remotesUnread.push({ written, status: Number(git) });
-      const keys = [origin, upstream].map(remoteKey).filter(Boolean);
-      for (const key of keys.length ? keys : [name]) {
-        if (!repos.some((r) => r.folder === folder && sameRepoKey(r.key, key))) repos.push({ key, folder, written });
+      const remotes = [origin, upstream].map((url, i) => ({ ...remoteRepo(url), upstream: i === 1 })).filter((x) => x.key);
+      for (const { key, source = null, upstream: up = false } of remotes.length ? remotes : [{ key: name }]) {
+        if (!repos.some((r) => r.folder === folder && sameRepoKey(r.key, key))) repos.push({ key, folder, written, ...(source && { source }), ...(up && { upstream: true }) });
       }
     } else if (fields[4]) withLineBreak.push(writtenIn(parent, fields.slice(4).join("\t")));
   }
   const gitMissing = found > 0 && remotesUnread.length === found && remotesUnread.every((u) => u.status === NO_GIT);
   return { repos: sortedByKey(repos), missing, unreadable, remotesUnread, gitMissing, withLineBreak };
 }
+
+// sh's output for `args` on the machine `on`, for the view `view` (null for
+// none) in the board's log as `kind`; a failure throws what said(code)
+// gives, else sh's first line of stderr.
+export async function shRun(args, on, view, kind, said = () => null) {
+  const r = await call("sh", args, on, SH_TIMEOUT, what(view, kind));
+  if (r.code !== 0) throw new BoardError(said(r.code) ?? (firstLine(r.stderr) || `sh endete mit ${r.code}`));
+  return r.stdout;
+}
+
+// The repos the folders hold on the machine `on` (REPOS_SCRIPT, parseRepos).
+export const reposScan = async (folders, on, view) => parseRepos(await shRun(reposArgs(folders), on, view, "repos"), folders);
 
 const writtenIn = (parent, folder) => `${parent.endsWith("/") ? parent : `${parent}/`}${folder.split("/").pop()}`;
 
@@ -5229,27 +5330,31 @@ export function parseGithubTable(json, view, errors, plan) {
   };
 }
 
-// An Issues tab's repos, as its repo menu offers them: the owner's own
-// with issues on, archived ones left out, by name, REPOS_PAGES pages of
-// PAGE at most; and whether the owner is a user or an organisation, which
-// its search names (issuesQuery).
+// The owner's own repos, archived ones left out, by name, REPOS_PAGES
+// pages of PAGE at most, and whether the owner is a user or an
+// organisation: ISSUE_REPOS_QUERY those with issues on, an Issues tab's, as
+// its repo menu offers them, whose search names the owner so (issuesQuery);
+// OWNER_REPOS_QUERY the same without `hasIssuesEnabled`, the repos the
+// settings page offers a PR tab.
 export const REPOS_PAGES = 10;
-export const ISSUE_REPOS_QUERY = `query($login: String!, $after: String) {
+const reposQuery = (only) => `query($login: String!, $after: String) {
   repositoryOwner(login: $login) {
     __typename
-    repositories(first: ${PAGE}, after: $after, ownerAffiliations: [OWNER], hasIssuesEnabled: true, isArchived: false, orderBy: { field: NAME, direction: ASC }) {
+    repositories(first: ${PAGE}, after: $after, ownerAffiliations: [OWNER], ${only}isArchived: false, orderBy: { field: NAME, direction: ASC }) {
       pageInfo { hasNextPage endCursor } nodes { nameWithOwner }
     }
   }
 }`;
+export const ISSUE_REPOS_QUERY = reposQuery("hasIssuesEnabled: true, ");
+export const OWNER_REPOS_QUERY = reposQuery("");
 
-export const githubIssueReposArgs = (owner, after = null) =>
-  ["api", "graphql", "-f", `query=${ISSUE_REPOS_QUERY}`, "-f", `login=${owner}`, ...(after ? ["-f", `after=${after}`] : [])];
+export const githubOwnerReposArgs = (owner, { query, after = null }) =>
+  ["api", "graphql", "-f", `query=${query}`, "-f", `login=${owner}`, ...(after ? ["-f", `after=${after}`] : [])];
 
-// gh's answer for githubIssueReposArgs (and its GraphQL errors) → { org
+// gh's answer for githubOwnerReposArgs (and its GraphQL errors) → { org
 // (the owner is an organisation), repos (their names with the owner), after
 // (the cursor of the next page, null for none) }.
-export function parseIssueRepos(json, owner, errors = []) {
+export function parseOwnerRepos(json, owner, errors = []) {
   const node = json?.data?.repositoryOwner;
   const repos = node?.repositories;
   if (!Array.isArray(repos?.nodes)) {
@@ -5313,7 +5418,7 @@ const NO_PLAN = { priority: null };
 // gh's answers for an Issues tab's view (githubIssuesArgs and its pages,
 // joined by addPage) → the issues shape's data (ui/shapes/issues.js): {
 // shape: "issues", meta: { owner, state, query }, repos (the owner's,
-// parseIssueRepos), rows (githubCard's cards in GitHub's order, each with
+// parseOwnerRepos), rows (githubCard's cards in GitHub's order, each with
 // its stateReason and updatedAt), readHidden (the repos turned off as the
 // read began), hideRepos, owners, total, limited, count, viewer }. A search
 // that stops at its cap says no more follow: a total above what came is cut
@@ -6097,13 +6202,13 @@ export function makeGithub(paths) {
   // A project's view, of whichever layout: the project with its views and
   // fields (githubProjectArgs), which the board learns (live.project); then,
   // of the view it shows (the view's own, or for the view that learns them
-  // the one it wants, else the first), its items' pages (readPages), read
-  // as its layout's plan says (planFor), a view of a layout the board does
-  // not draw reading none. Both reads are one load, so that the view's state,
-  // progress, error and saved data stay those of one read; the board, which
-  // knows what shows, names the view it goes on with. A board's move writes
-  // the card's column (one layout's data may stand in another's view until
-  // its read).
+  // the one it wants, else the first of its switch), its items' pages
+  // (readPages), read as its layout's plan says (planFor), a view of a
+  // layout the board does not draw reading none. Both reads are one load, so
+  // that the view's state, progress, error and saved data stay those of one
+  // read; the board, which knows what shows, names the view it goes on with.
+  // A board's move writes the card's column (one layout's data may stand in
+  // another's view until its read).
   const projectViews = {
     async load(view, { hiddenFor, live = NO_LIVE }) {
       // The hidden columns as the load starts: a change since reads again.
@@ -6112,7 +6217,7 @@ export function makeGithub(paths) {
       const project = parseGithubProject(head.json, view, head.errors);
       const meta = projectMeta(project);
       const { wanted = null } = view;
-      const number = view.address.view ?? (project.views.some((v) => v.number === wanted) ? wanted : project.views[0]?.number);
+      const number = view.address.view ?? (project.views.some((v) => v.number === wanted) ? wanted : orderedViews(project.views, view.switchOrder)[0]?.number);
       const shown = project.views.find((v) => v.number === number);
       if (!shown) {
         const why = view.address.view === null ? "hat keine Ansichten" : `hat keine Ansicht ${view.address.view} mehr`;
@@ -6137,12 +6242,12 @@ export function makeGithub(paths) {
   // An Issues tab's view: its owner's repos once while the board runs (`r`
   // drops them: forget), then its search's pages (readPages).
   const issueRepos = readMemo();
-  async function readIssueRepos(view) {
+  async function readOwnerRepos(view, query) {
     const read = { org: false, repos: [] };
     let after = null;
     for (let call = 1; call <= REPOS_PAGES; call++) {
-      const { json, errors } = await gh(paths, githubIssueReposArgs(view.owner, after), what(view, `repos-page-${call}`));
-      const page = parseIssueRepos(json, view.owner, errors);
+      const { json, errors } = await gh(paths, githubOwnerReposArgs(view.owner, { query, after }), what(view, `repos-page-${call}`));
+      const page = parseOwnerRepos(json, view.owner, errors);
       Object.assign(read, { org: page.org, repos: [...read.repos, ...page.repos] });
       after = page.after;
       if (!after) break;
@@ -6152,7 +6257,7 @@ export function makeGithub(paths) {
   const issueViews = {
     async load(view, { live = NO_LIVE }) {
       const hidden = [...view.hideRepos];
-      const { org, repos } = await issueRepos.get(foldedName(view.owner), () => readIssueRepos(view));
+      const { org, repos } = await issueRepos.get(foldedName(view.owner), () => readOwnerRepos(view, ISSUE_REPOS_QUERY));
       const query = issuesQuery(view, org, hidden, repos);
       const parse = (json, errors) => parseGithubIssues(json, view, { repos, hidden, query }, errors);
       const pageArgs = (next) => githubIssuesArgs(view, query, next.count, next.after);
@@ -6203,6 +6308,11 @@ export function makeGithub(paths) {
   return {
     site: "GitHub",
     forget: (view) => views[view.layout]?.forget?.(view),
+    // The settings page's lists of a context's repos: those its Issues tab
+    // reads (`issues`), the same read, or all the owner's but the archived
+    // ones (OWNER_REPOS_QUERY), read at each call.
+    ownerRepos: (owner, { issues }) =>
+      (issues ? issueRepos.get(foldedName(owner), () => readOwnerRepos({ owner }, ISSUE_REPOS_QUERY)) : readOwnerRepos({ owner }, OWNER_REPOS_QUERY)),
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
     related: {
       reads: (item) => item.kind === "issue" && Number.isInteger(item.number) && item.repo.includes("/"),
@@ -6867,6 +6977,18 @@ export const machineName = (name) => name ?? "Dieser Rechner";
 // "auf <machine>", or "auf diesem Rechner" for this one.
 export const onMachine = (name) => (name ? `auf ${name}` : "auf diesem Rechner");
 
+// What the start dialog and the settings page say of a scan of the repo
+// folders on the machine `on` (reposScan), and of its agents.
+export const missingNote = (folder, on) => `Den Repo-Ordner ${folder} gibt es ${onMachine(on)} nicht`;
+export const unreadableNote = (folder, on) => `Der Repo-Ordner ${folder} ist ${onMachine(on)} nicht lesbar`;
+export const gitMissingNote = (on) => `git ist ${onMachine(on)} nicht installiert`;
+export const remotesNote = (unread, on) => `Die Remotes von ${andJoined(unread.map((u) => u.written))} sind ${onMachine(on)} nicht lesbar`;
+export const sameKeyNote = (group, on) => `„${group[0].key}“ liegt ${onMachine(on)} in ${andJoined(group.map((r) => r.written))}; bitte eines davon wählen`;
+export const reposUnreadable = (why, on) => `Repos ${onMachine(on)} nicht lesbar: ${why}`;
+export const agentsUnreadable = (on, e) => `Agents ${onMachine(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
+
+export const installedAgents = async (on) => (await knownAgents({ on })).filter((a) => a.installed);
+
 // Whether this copy of the board shows. The layer's copy (`isLayer`) shows
 // while the board layer shows the board. A copy in a tab shows while a
 // board pane is in the shown tab of the shown space, and no board layer
@@ -6891,6 +7013,8 @@ export const observesReleases = (el) => typeof el.on_window_mouse_up === "functi
 
 export const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
 export const spinner = () => div().frames(SPINNER_FRAMES, 150);
+export const LOADING = "lädt …";
+export const loadingLine = (t, text = LOADING) => h_flex().gap(8).text_size(12).text_color(t.muted).child(spinner()).child(text);
 
 // "<shown>/<total>" where the filter or "nur meine" hides some, else the
 // total.
@@ -7350,15 +7474,26 @@ export const foreignChip = (t) => toneChip(t, "fremd", COPPER_HUES.yellow);
 
 // A switch such as „nur meine“: on, on the theme's `selected` as a chosen
 // tab is, with the accent border of its own; not as a primary button
-// (solid), which it is not. „nur meine“ keeps its text and weight, so its
-// size never changes.
-export const toggleSwitch = (b, t, id, on, toggle) =>
+// (solid), which it is not; `focused` (the one keys turn) framed in the
+// foreground. „nur meine“ keeps its text and weight, so its size never
+// changes.
+export const toggleSwitch = (b, t, id, on, toggle, focused = false) =>
   h_flex().id(id).flex_none().gap(6).px(10).py(5).rounded(6).text_size(12).cursor_pointer()
-    .border_1().border_color(on ? t.accent : t.border).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
+    .border_1().border_color(focused ? t.foreground : on ? t.accent : t.border).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
     .hover((s) => s.bg(t.hover))
     .on_click((_e, cx) => {
       if (!b.modal) toggle(cx);
     });
+
+// A row of a menu of repos to show or hide (the repo menu, the settings
+// page's): ✓ where it shows, its name (`name`, drawn), `between` them, and
+// what it is.
+export const repoMenuRow = (t, r, name, between = []) => [
+  div().w(14).text_color(t.foreground).child(r.hidden ? "" : "✓"),
+  name,
+  ...between,
+  div().w(80).flex_none().text_size(11).text_color(t.dim).child(r.hidden ? "ausgeblendet" : "gezeigt"),
+];
 
 // The note below a list its limit cut, `text`, once the read is whole;
 // null for none.
@@ -7943,7 +8078,7 @@ export const assignModal = {
     const m = b.modal;
     const rows = rowsOf(m);
     const { shown, ...win } = menuWindow(m, rows);
-    const message = !m.list ? "lädt …" : !rows.length ? "Niemand passt zum Filter" : null;
+    const message = !m.list ? LOADING : !rows.length ? "Niemand passt zum Filter" : null;
     return menu(t, {
       id: "assign",
       rowId: "assign-row",
@@ -8226,7 +8361,7 @@ export function relatedRows(item, entry) {
   const data = entry?.data;
   const description = { kind: "head", text: "BESCHREIBUNG" };
   if (!data) {
-    const why = entry?.error ? { kind: "note", text: entry.error, level: "error" } : { kind: "note", text: "lädt …", level: "info" };
+    const why = entry?.error ? { kind: "note", text: entry.error, level: "error" } : { kind: "note", text: LOADING, level: "info" };
     return [description, why, { kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
   }
   const lines = relatedLines(data);
@@ -8297,7 +8432,7 @@ export function levelParts(b, t, view, item, entry) {
   const chips = [stateChip(t, b.state(view.id).data, item.state, item.color)];
   if (item.kind !== "pr") return { chips };
   const note = (text, level) => detailNote(t, "level-note", text, level);
-  if (!entry?.data) return { chips, sections: [entry?.error ? note(entry.error, "error") : note("lädt …", "info")] };
+  if (!entry?.data) return { chips, sections: [entry?.error ? note(entry.error, "error") : note(LOADING, "info")] };
   const { checks, warnings } = entry.data.pr;
   return { chips, sections: [...(checks ? [checksSection(t, checks)] : []), ...(warnings ?? []).map((w) => note(w, "warning"))] };
 }
@@ -8368,6 +8503,1270 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
     ));
 }
 
+// ==== src/ui/choices.js ====
+
+// A dialog's choice fields (the start dialog's Repo, Agent, Rechner and
+// Öffnen in, the create dialog's Typ; the Issues tab's field „Repo:“ opens
+// its list as a dialog of its own, ui/modals/solo.js), from a table of the
+// dialog's, by field: { entries(m), each { id, name, aside (the texts at its
+// right: a space's folder, a repo's count) }; current(m), the id of the
+// entry the field is on; value(m), the text the field shows, and
+// valueAside(m), the one beside it (null: none); take(b, row, cx), which
+// puts the field on that entry; fieldAfter(row), the field the dialog goes
+// on to once the list took `row` (by default it stays); closes (the dialog
+// ends before take runs, or as a press beside the list closes it); the
+// list's placeholder, none (said where the filter leaves no row), empty(m)
+// (said instead where no filter is typed), loading(m) (whether the entries
+// are still read: the spinner instead), notes(m) (said under the rows),
+// width and anchor }. The open list is the dialog's m.list.
+
+export const LIST_HINT = "Tippen filtert · ↑ ↓ wählt · ↵ übernimmt · Esc schließt die Liste";
+export const choiceHint = (enter) => `← → wählt · Leertaste öffnet die Liste · ↵ ${enter} · Tab wechselt das Feld`;
+
+export function choiceBox(b, t, choices, field) {
+  const m = b.modal;
+  const trigger = choiceTrigger(t, field, choices[field].value(m), choices[field].valueAside?.(m), (cx) => {
+    m.field = field;
+    b.handle.focus();
+    openList(b, choices, field, cx);
+  });
+  return listPopup(b, t, field, choices[field].anchor, fieldFrame(t, m, field, trigger));
+}
+
+// What a choice field shows: `text`, `aside` beside it (null: none) and ▾;
+// a click runs open(cx).
+export const choiceTrigger = (t, field, text, aside, open) =>
+  h_flex()
+    .id(`choice-${field}`)
+    .flex_1()
+    .min_w(0)
+    .gap(6)
+    .cursor_pointer()
+    .on_click((_e, cx) => open(cx))
+    .child(div().flex_1().min_w(0).truncate().child(text))
+    .when(Boolean(aside), (el) => el.child(div().flex_none().max_w(240).truncate().text_size(11).text_color(t.dim).child(aside ?? "")))
+    .child(div().text_color(t.dim).child("▾"));
+
+// The frame of the choice `field`, its list under it while that list is
+// open and `here` (the open dialog is the field's own).
+export const listPopup = (b, t, field, anchor, frame, here = true) =>
+  Popup.new(`choice-${field}-list`, frame).anchor(anchor).when(here && b.modal?.list?.choice === field, (el) => el.content(listPanel(b, t)));
+
+export function choiceKey(b, choices, k, cx) {
+  const field = b.modal.field;
+  if (k === "space") return openList(b, choices, field, cx);
+  if (k === "h" || k === "left") return step(b, choices[field], -1, cx);
+  if (k === "l" || k === "right") return step(b, choices[field], 1, cx);
+}
+
+function step(b, spec, by, cx) {
+  const m = b.modal;
+  if (m.busy) return;
+  const next = steppedEntry(spec.entries(m), spec.current(m), by);
+  if (next) spec.take(b, next, cx);
+  cx.notify();
+}
+
+// The entry of `rows` ← (by -1) or → (1) goes to from the one whose id is
+// `current`, round; null in an empty list. An entry the field is on but
+// does not list (a chosen space that is gone, or on a machine whose spaces
+// are not read) stands before the first.
+export function steppedEntry(rows, current, by) {
+  if (!rows.length) return null;
+  const now = rows.findIndex((r) => r.id === current);
+  return rows[now < 0 ? (by > 0 ? 0 : rows.length - 1) : (now + by + rows.length) % rows.length];
+}
+
+export function openList(b, choices, field, cx) {
+  const m = b.modal;
+  const spec = choices[field];
+  if (m.busy || !spec) return;
+  const list = { choice: field, spec, field: "filter", mark: NOT_MOVED };
+  m.field = field;
+  m.list = list;
+  wireFilter(m, list, {
+    placeholder: spec.placeholder,
+    count: () => listRows(m).length,
+    startAt: () => {
+      list.mark = NOT_MOVED;
+      return markedAt(m, listRows(m));
+    },
+    pick: (_at, cx) => {
+      if (m.list === list) takeRow(b, syncedRows(m)[list.at], cx);
+    },
+  });
+  list.input.focus();
+  cx.notify();
+}
+
+export function closeList(b, cx) {
+  b.modal.list = null;
+  b.takeKeyboard();
+  cx.notify();
+}
+
+export function escapeList(b, cx) {
+  if (!b.modal.list) return false;
+  closeList(b, cx);
+  return true;
+}
+
+export const listKeyboard = (m) => m.list?.input ?? null;
+
+const listRows = (m) => rankByName(m.list.spec.entries(m), m.list.filter);
+
+// The list's mark (the id of the entry ↑ ↓ moved to) before they move it:
+// an entry's id may be null („Alle“ of the field „Repo:“).
+const NOT_MOVED = undefined;
+
+function markedAt(m, rows) {
+  const { list } = m;
+  const moved = list.mark === NOT_MOVED ? -1 : rows.findIndex((r) => r.id === list.mark);
+  if (moved >= 0) return moved;
+  if (!rows.length) return -1;
+  if (list.filter) return 0;
+  return rows.findIndex((r) => r.id === list.spec.current(m));
+}
+
+// Entries that come after the list opened (agents read, spaces herdr read)
+// move the mark to where markedAt puts it now.
+function syncedRows(m) {
+  const rows = listRows(m);
+  const at = markedAt(m, rows);
+  if (at !== m.list.at) {
+    m.list.at = at;
+    followMark(m.list, rows.length);
+  }
+  return rows;
+}
+
+// herdr hands the filter's Enter to its submit as well, which then finds
+// the list closed.
+export function listKey(b, e, cx) {
+  const list = b.modal.list;
+  const rows = syncedRows(b.modal);
+  if (e.key === "enter") {
+    cx.stop_propagation();
+    return takeRow(b, rows[list.at], cx);
+  }
+  if (!filterMenuKey(e, cx, list, rows.length)) return;
+  const row = rows[list.at];
+  list.mark = row ? row.id : NOT_MOVED;
+}
+
+// Still open, the dialog would close as gone where what the take writes
+// takes its row off the page.
+function takeRow(b, row, cx) {
+  const m = b.modal;
+  if (!row) return;
+  const { spec, choice } = m.list;
+  m.list = null;
+  if (spec.closes) {
+    b.closeModal(cx);
+    return spec.take(b, row, cx);
+  }
+  spec.take(b, row, cx);
+  m.field = spec.fieldAfter?.(row) ?? choice;
+  b.takeKeyboard();
+  cx.notify();
+}
+
+function listPanel(b, t) {
+  const m = b.modal;
+  const { spec } = m.list;
+  const rows = syncedRows(m);
+  const { shown, ...win } = menuWindow(m.list, rows);
+  const none = m.list.filter || !spec.empty ? spec.none : spec.empty(m);
+  return div()
+    .id("choice-list")
+    .mt(4)
+    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+    .child(menuPanel(t, {
+      id: "choice-list",
+      rowId: "choice-list-row",
+      width: spec.width,
+      title: null,
+      head: filterMenuHead(t, m.list),
+      digits: false,
+      rows: shown.map((r) => [
+        markedName(t, r.name, r.at),
+        ...(r.aside ?? []).filter(Boolean).map((text) => div().flex_none().max_w(160).truncate().text_size(11).text_color(t.dim).child(text)),
+      ]),
+      ...win,
+      pick: (i, cx) => takeRow(b, rows[i], cx),
+      foot: [
+        ...(rows.length ? [] : [spec.loading?.(m) ? loadingLine(t).px(8) : menuNote(t, none, t.muted)]),
+        ...(spec.notes?.(m) ?? []).map((n) => menuNote(t, n, t.muted)),
+      ],
+    }));
+}
+
+// A press beside the open list closes it.
+export const listShield = (b) =>
+  b.modal.list
+    ? div().id("choice-list-shield").absolute().inset_0().on_mouse_down("left", (_e, cx) => {
+      cx.stop_propagation();
+      const spec = b.modal?.list?.spec;
+      if (!spec) return;
+      if (spec.closes) b.closeModal(cx);
+      else closeList(b, cx);
+    })
+    : null;
+
+// ==== src/ui/settings/knobs.js ====
+
+// What the settings page's topics build their rows from (ui/settings/index.js):
+// rows, the writes, edits and choices of a knob, rows of switches, and the
+// small values they draw. A knob: { id, name, d (the dim lead before its
+// name: its place in its list, or a found row's platform or host), key (the
+// key it sets, as shown), path (its setting's: its origin, and what u
+// resets; none for one without), origin (shown in place of path's),
+// value(t, mono), mono (its value at 12 px, as a mono text is), warn, was
+// (a dim line; with wasMarked only while marked, editWas in its place while
+// edited), loading, top, stripe (a PR section's tone), go (Enter opens a
+// list), nav (false: it takes no keys), after(b, cx) (what follows a write
+// of its: a scan), add (its own add, its list under the field `field`),
+// blockAdd (its block's add: block), enter and remove ({ name, hint?,
+// run(b, cx) }), move ({ can(by), run(b, by, cx), which gives write's {
+// started, done }, and to(by), its row's id after the move where that is
+// not its own }) }, and the keys of a choice (choiceParts: side { hint,
+// step(b, by, cx) }, space, enter and field, its list's; a PR section takes
+// its side alone) or of a row of switches (switchKnob: side { hint, count
+// }, along which ← → move, space and enter, which turn the one they are
+// on, and extra(t, b, marked), the switches under the value).
+
+export const LATER = "folgt";
+export const WHOLE = "eine Änderung schreibt die ganze Liste in die Datei dieses Rechners";
+export const goneFromList = (name) => `„${name}“ steht nicht mehr so in der Liste; Esc verwirft die Änderung`;
+
+export const settingsOf = (b) => b.settingsPage;
+
+// ---- rows ----
+
+export const title = (text, key = null) => ({ row: "title", title: text, key });
+export const line = (text, tone = "muted", loading = false) => ({ row: "line", text, tone, loading });
+export const knobRow = (knob) => ({ row: "knob", knob });
+
+// A block of rows under its title, its add (where it has one) on each knob,
+// then the rows `after` it, the last row marked as its end.
+export function block(head, rows, add = null, after = []) {
+  const all = [head, ...rows, ...(add ? [{ row: "add", add }] : []), ...after];
+  for (const r of all) if (r.row === "knob") r.blockAdd = add;
+  all.at(-1).end = true;
+  return all;
+}
+
+// Marks the row `id` (a knob's or an add's), ← → on its switch `side`
+// where given; another mark starts on its first switch, without the last
+// change's problem.
+export function markRow(b, id, side = null) {
+  const state = settingsOf(b);
+  if (state.marked !== id) Object.assign(state, { marked: id, side: 0, problem: null });
+  if (side !== null) state.side = side;
+}
+
+// ---- values and where they come from ----
+
+export const baseAt = (b, path) => valueAt(b.configState.base, path, nameKeyAt);
+export const mergedAt = (b, path) => valueAt(b.configState.merged, path, nameKeyAt);
+
+export const originOf = (b, knob) => (knob.origin !== undefined ? knob.origin : knob.path ? b.origin(knob.path) : "");
+
+// What a knob set on this machine says of views.json's value (`base`, as
+// shown; null for none) in place of its own words `own`.
+export function machineWas(b, knob, base, own) {
+  if (originOf(b, knob) !== ORIGIN.machine) return own;
+  return base === null ? "views.json: keiner · u setzt auf den Standard zurück" : `views.json: ${base} · u setzt auf ${base} zurück`;
+}
+
+export const mono12 = (mono, text, color) => div().font_family(mono).text_size(12).text_color(color).child(text);
+export const muted = (t, text) => div().text_color(t.muted).child(text);
+
+// ---- writes ----
+
+export const NOT_STARTED = { started: false, done: Promise.resolve(false) };
+
+export function refuse(b, id, texts, cx) {
+  const state = settingsOf(b);
+  if (state) state.problem = { row: id, texts };
+  cx.notify();
+  return NOT_STARTED;
+}
+
+// Writes `changes` at once where views.json and this machine's file take
+// them (`checked`: Board.settingsChecked's, strict). Where they would not
+// apply, or the file cannot hold them (it is no JSON object, or holds a
+// value or a list where they need an object), the row `id` says why; where
+// the file is unread or does not apply, the banner does (changeSettings);
+// either way nothing is written. after(b, cx) once the file has them. →
+// changeSettings's { started, done }.
+export function write(b, id, changes, cx, after = null, checked = b.settingsChecked(changes, true)) {
+  if (checked.refused) return refuse(b, id, checked.refused, cx);
+  const state = settingsOf(b);
+  if (state) state.problem = null;
+  const { started, done } = b.changeSettings(changes, cx, null, checked);
+  if (after) {
+    cx.spawn(async (cx) => {
+      if (await done) after(b, cx);
+    });
+  }
+  return { started, done };
+}
+
+// `list` with its entry at `at` moved `by` places (1 on, -1 back); null where
+// that leaves the list.
+export function movedIn(list, at, by) {
+  const to = at + by;
+  if (at < 0 || at >= list.length || to < 0 || to >= list.length) return null;
+  const out = [...list];
+  [out[at], out[to]] = [out[to], out[at]];
+  return out;
+}
+
+export const withoutAt = (list, at) => list.filter((_, i) => i !== at);
+export const replacedAt = (list, at, value) => list.map((v, i) => (i === at ? value : v));
+
+// A list written whole, as views.json and this machine's file give it now:
+// the change change(list) makes of it ({ changes }; null for none), where
+// config.js takes the list as it stands (problems(value) names nothing; a
+// list not there is empty), else { refused: config.js's words }.
+export function wholeListChange(b, path, problems, change) {
+  const value = mergedAt(b, path);
+  const refused = problems(value);
+  if (refused.length) return { refused };
+  const next = change(value ?? []);
+  return next ? { changes: [[path, next]] } : null;
+}
+
+export function writeWholeList(b, id, path, problems, change, cx, after = null) {
+  const proposal = wholeListChange(b, path, problems, change);
+  if (!proposal) return NOT_STARTED;
+  return proposal.refused ? refuse(b, id, proposal.refused, cx) : write(b, id, proposal.changes, cx, after);
+}
+
+export function resetKnob(b, knob, cx) {
+  if (b.origin(knob.path) !== ORIGIN.machine) return b.say(`„${knob.name}“ steht nicht in der Datei dieses Rechners`, "info", cx);
+  write(b, knob.id, [[knob.path, undefined]], cx, knob.after ?? null);
+}
+
+// ---- edits ----
+
+// A text typed for a number, as the number it stands for; any other text
+// stays as typed, which config.js then names.
+const typed = (text, number) => {
+  const trimmed = text.trim();
+  return number && trimmed !== "" && Number.isFinite(Number(trimmed)) ? Number(trimmed) : trimmed;
+};
+
+// The edit of the knob `knob` in place (an add gives its id, and its name
+// where its row can go), the dialog "setting", its fields [{ id, value,
+// unit, width, placeholder }]: Enter saves what save(b, texts, cx) gives for
+// the texts by field: { changes, after? } to write, { refused } to stay and
+// say why (or to close, where its row is gone: dropRowDialog), { next(b, cx) } to
+// go on to another edit, or null to stay; Esc drops it.
+export function openEdit(b, knob, fields, save, cx) {
+  const state = settingsOf(b);
+  const m = { kind: "setting", topic: state.topic, row: knob.id, name: knob.name, field: fields[0].id, fields: fields.map((f) => f.id), inputs: {}, units: {}, widths: {}, error: null };
+  for (const f of fields) {
+    const input = InputState.new({ placeholder: f.placeholder ?? "" });
+    input.set_value(f.value ?? "");
+    wireTextField(b, m, input, f.id, (_e, cx) => submitEdit(b, m, save, cx));
+    m.units[f.id] = f.unit ?? null;
+    m.widths[f.id] = f.width ?? null;
+  }
+  b.modal = m;
+  state.problem = null;
+  b.takeKeyboard();
+  cx.notify();
+}
+
+function dropRowDialog(b, m, cx, refusal = null) {
+  const gone = `„${m.name}“ steht nicht mehr auf der Seite${m.kind === "setting" ? "; die Änderung ist verworfen" : ""}`;
+  b.closeModal(cx);
+  b.say(refusal ? `${refusal}; ${gone}` : gone, refusal ? "error" : "warning", cx);
+}
+
+// The page's dialog of a row (its edit, a choice's list, a PR tab's list of
+// repos: the dialogs with a `row`) closes where its row has left the page,
+// the banner saying so, after `refusal` (a refused write's words) where that
+// took the row away.
+export function dropGoneDialog(b, cx, refusal = null) {
+  const m = b.modal;
+  if (m?.row !== undefined && !b.settingsRowShown(m.row)) dropRowDialog(b, m, cx, refusal);
+}
+
+function submitEdit(b, m, save, cx) {
+  if (b.modal !== m) return;
+  const proposal = save(b, Object.fromEntries(m.fields.map((f) => [f, m.inputs[f].value()])), cx);
+  if (proposal?.next) return proposal.next(b, cx);
+  const checked = proposal?.changes ? b.settingsChecked(proposal.changes, true) : null;
+  const refused = proposal?.refused ?? checked?.refused;
+  if (refused && !b.settingsRowShown(m.row)) return dropRowDialog(b, m, cx);
+  if (!checked || refused) {
+    if (refused) m.error = refused;
+    return cx.notify();
+  }
+  b.closeModal(cx);
+  write(b, m.row, proposal.changes, cx, proposal.after ?? null, checked);
+}
+
+// Enter on `knob`: its value at `path` in a field.
+export const textEdit = (knob, path, { value, number = false, unit = null, width = null, placeholder = null }) => ({
+  name: "Ändern…",
+  hint: "ändern",
+  run: (b, cx) => openEdit(b, knob, [{ id: "value", value: value ?? "", unit, width, placeholder }], (_b, texts) => ({ changes: [[path, typed(texts.value, number)]], after: knob.after }), cx),
+});
+
+// ---- choices ----
+
+// The list of a choice (choices.js) under the field `field` of the row of
+// `knob` ({ id, name }), as the dialog "settingChoice", which a pick, Esc or
+// a press beside the list closes.
+export function openChoice(b, knob, field, spec, cx) {
+  b.modal = { kind: "settingChoice", topic: settingsOf(b).topic, row: knob.id, name: knob.name, field, list: null };
+  openList(b, { [field]: { anchor: "top_left", width: 300, none: "Nichts passt zum Filter", ...spec, closes: true } }, field, cx);
+}
+
+// A choice knob's keys over `entries()` ([{ id, name, aside }]): ← → take
+// the next at once (take(b, row, cx)), space and Enter open their list.
+export function choiceParts(knob, { field, entries, current, take, placeholder, loading = null, empty = null }) {
+  const open = (b, cx) =>
+    openChoice(b, knob, field, {
+      entries: () => entries(), current: () => current(), value: () => "", take, placeholder,
+      ...(loading && { loading }), ...(empty && { empty }),
+    }, cx);
+  return {
+    side: {
+      hint: "wählt",
+      step: (b, by, cx) => {
+        const next = steppedEntry(entries(), current(), by);
+        if (next) take(b, next, cx);
+      },
+    },
+    space: { name: "Liste öffnen", hint: "öffnet die Liste", run: open },
+    enter: { name: "Liste öffnen", hint: "ändern", run: open },
+    field,
+  };
+}
+
+// A choice knob's field (choiceBox's look), its list under it while open; a
+// click marks the knob and opens the list.
+export function choiceField(b, t, knob, text, aside = null, width = 240) {
+  const m = b.modal;
+  const trigger = choiceTrigger(t, knob.field, text, aside, (cx) => {
+    if (b.modal) return;
+    markRow(b, knob.id);
+    knob.space.run(b, cx);
+  });
+  const frame = fieldFrame(t, m?.kind === "settingChoice" ? m : {}, knob.field, trigger).w(width).flex_none();
+  return listPopup(b, t, knob.field, "top_left", frame, m?.kind === "settingChoice");
+}
+
+// ---- switches ----
+
+// Makes `knob` a row of switches, `items` [{ name, on }]: ← → move along
+// them, space and Enter turn the one they are on (turn(b, item, cx)), a
+// click marks the knob on one and turns it; `hint` names what a switch is,
+// `name` the menu's entry.
+export function switchKnob(knob, items, { hint, name }, turn) {
+  const turnAt = (b, at, cx) => {
+    if (!items[at]) return;
+    markRow(b, knob.id, at);
+    turn(b, items[at], cx);
+  };
+  knob.value ??= () => div();
+  knob.side = { hint, count: items.length };
+  knob.space = { name, hint: "ein/aus", run: (b, cx) => turnAt(b, settingsOf(b).side, cx) };
+  knob.enter = knob.space;
+  knob.extra = (t, b, marked) =>
+    items.length
+      ? h_flex().id(`${knob.id}-switches`).flex_wrap().gap(4).children(items.map((s, i) =>
+        toggleSwitch(b, t, `${knob.id}-switch-${i}`, s.on, (cx) => turnAt(b, i, cx), marked && i === settingsOf(b).side).child(s.name)))
+      : div();
+  return knob;
+}
+
+// ==== src/ui/settings/azure.js ====
+
+// The settings page's topic of an Azure context: its teams and its PR tab.
+
+// An organisation's name, the last part of its address (orgUrl).
+export const orgName = (url) => String(url ?? "").split("/").pop();
+
+export function azureRows(b, topic) {
+  const context = topic.context;
+  const project = context.name;
+  const org = orgName(b.config.azure.org);
+  const at = b.contexts().findIndex((c) => c.id === context.id) + 1;
+  const path = ["sources", "azure", "contexts", project, "teams"];
+  const listed = mergedAt(b, path);
+  const where = azureContextWhere(b.configState.merged?.sources?.azure, project);
+  const change = (b, id, edit, cx) => writeWholeList(b, id, path, (teams) => teamsProblems(teams, where), edit, cx);
+  const placeIn = (list, team) => list.findIndex((r) => isObject(r) && r.team === team);
+  const teams = context.tabs.filter((t) => t.kind === "team");
+  const knobs = teams.map((tab, i) => {
+    const place = Array.isArray(listed) ? placeIn(listed, tab.team) : -1;
+    const knob = { id: `team-${tab.id}`, name: tab.team, d: i + 1, key: "views", path, top: true };
+    const items = TEAM_VIEWS.map((v) => ({ name: v.name, on: tab.views.includes(v.id), id: v.id }));
+    switchKnob(knob, items, { hint: "Ansicht", name: "Ansicht ein/aus" }, (b, s, cx) => change(b, knob.id, (list) => {
+      const p = placeIn(list, tab.team);
+      const views = TEAM_VIEWS.map((v) => v.id).filter((id) => (id === s.id ? !s.on : tab.views.includes(id)));
+      return p < 0 ? null : replacedAt(list, p, { ...list[p], views });
+    }, cx));
+    knob.was = `Leertaste schaltet die Ansicht unter ← → · dieser Rechner setzt die Teams nur als ganze Liste: eine Änderung schreibt alle Teams von ${project}`;
+    knob.remove = { name: "Team entfernen", run: (b, cx) => change(b, knob.id, (list) => (placeIn(list, tab.team) < 0 ? null : withoutAt(list, placeIn(list, tab.team))), cx) };
+    knob.move = {
+      can: (by) => place >= 0 && Boolean(movedIn(listed, place, by)),
+      run: (b, by, cx) => change(b, knob.id, (list) => movedIn(list, placeIn(list, tab.team), by), cx),
+    };
+    return knobRow(knob);
+  });
+  const prs = context.tabs.find((t) => t.kind === "prs");
+  return [
+    { row: "head", path: `Azure · ${org} › ${project}`, title: project, small: `Azure-Projekt in ${org} · Kontext ${at} der Kopfzeile · Tabs: ${context.tabs.map((t) => t.name).join(", ")}` },
+    ...block(title(`TEAMS · ${teams.length}, je ein Tab, in dieser Reihenfolge`, path.join(".")), knobs, { id: "add-team", text: `Team hinzufügen … (liest die Teams von ${project} aus Azure)`, run: null, later: LATER }),
+    ...block(title("PR-TAB · der letzte Tab, kommt mit dem Projekt"), [
+      knobRow({ id: "azure-prs-name", name: "Name", nav: false, origin: ORIGIN.builtin, value: () => prs?.name ?? "" }),
+      knobRow({ id: "azure-prs-view", name: "Was er zeigt", nav: false, origin: "", value: (t) => muted(t, "PR-Ansicht folgt"), was: "Azures PR-Tabs lesen noch nichts; Abschnitte und Repos kommen hierher, sobald sie es tun" }),
+    ]),
+  ];
+}
+
+// ==== src/ui/settings/general.js ====
+
+// The settings page's topic "Allgemein": refreshMinutes, the language, and
+// the platforms' accounts.
+
+const languageName = (id) => LANGUAGES.find((l) => l.id === id)?.name ?? id;
+
+export const generalNote = (b) => `alle ${b.config.refreshMinutes} min · ${languageName(b.config.language)}`;
+
+export function generalRows(b) {
+  const c = b.config;
+  const refresh = { id: "refreshMinutes", name: "Neu laden alle", key: "refreshMinutes", path: ["refreshMinutes"], value: () => `${c.refreshMinutes} min` };
+  const base = baseAt(b, refresh.path);
+  refresh.was = machineWas(b, refresh, base === undefined ? null : `${base} min`, "eine gezeigte Ansicht liest so oft neu, und eine, die man wieder zeigt, wenn ihr letztes Lesen länger her ist");
+  refresh.enter = textEdit(refresh, refresh.path, { value: String(c.refreshMinutes), number: true, unit: "Minuten", width: 120 });
+  if (originOf(b, refresh) === ORIGIN.machine) refresh.editWas = `gilt: ${c.refreshMinutes} min (${ORIGIN.machine}) · ${refresh.was}`;
+  const language = { id: "language", name: "Sprache", key: "language", path: ["language"], was: "die Sprache des Boards: Tabs, Hinweise, Meldungen · Englisch folgt später" };
+  Object.assign(language, choiceParts(language, {
+    field: "setting-language",
+    entries: () => LANGUAGES.map((l) => ({ id: l.id, name: l.name })),
+    current: () => c.language,
+    take: (b, row, cx) => row.id !== c.language && write(b, language.id, [[language.path, row.id]], cx),
+    placeholder: "Filter: Sprache",
+  }));
+  language.value = (t) => choiceField(b, t, language, languageName(c.language), null, 200);
+  const rows = block(title("ALLGEMEIN"), [knobRow(refresh), knobRow(language)]);
+  const platforms = [];
+  if (c.azure || isObject(b.configState.merged?.sources?.azure)) {
+    const path = ["sources", "azure", "org"];
+    const org = { id: "org", name: "Azure-Organisation", key: path.join("."), path, mono: true, value: (t, mono) => mono12(mono, String(mergedAt(b, path) ?? ""), t.foreground) };
+    org.was = machineWas(b, org, baseAt(b, path) ?? null, "für alle Azure-Kontexte; ihre Projekte liest „Kontext hinzufügen“");
+    org.enter = textEdit(org, path, { value: String(mergedAt(b, path) ?? ""), placeholder: "https://dev.azure.com/<Organisation>" });
+    platforms.push(knobRow(org));
+  }
+  if (c.github) {
+    const login = Object.values(b.views).map((st) => st.data?.viewer).find(Boolean) ?? null;
+    platforms.push(knobRow({ id: "github", name: "GitHub", nav: false, origin: "", value: (t) => muted(t, login ? `das Konto, mit dem gh angemeldet ist: ${login}` : "das Konto, mit dem gh angemeldet ist; das Board hat es noch nicht gelesen") }));
+  }
+  if (platforms.length) rows.push(...block(title("PLATTFORMEN"), platforms));
+  return rows;
+}
+
+// ==== src/ui/settings/github.js ====
+
+// The settings page's topic of a GitHub context: its projects with their
+// views, its Issues tab, its PR tab and the PR sections all GitHub PR tabs
+// share.
+
+// The PR sections the page offers to add, each as views.json writes one
+// (OWN_SEARCH: one written by hand).
+export const PRESETS = [
+  { name: "Alle offenen", query: "is:pr is:open archived:false" },
+  { name: "Mir zugewiesen", query: "is:pr is:open archived:false assignee:@me" },
+  { name: "Niemandem zugewiesen", query: "is:pr is:open archived:false no:assignee" },
+];
+export const OWN_SEARCH = "eigene Suche";
+
+const LAYOUT_NAMES = { board: "Board", table: "Tabelle", roadmap: "Roadmap" };
+const ORDER_CHOICES = [{ id: GITHUB_ORDER, name: "wie auf GitHub" }, { id: "own", name: "eigene" }];
+const SECTION_TONE_NAMES = Object.keys(SECTION_TONES);
+const SECTIONS_PATH = ["sources", "github", "prs", "sections"];
+const SHARED_LIMIT_PATH = ["sources", "github", "prs", "limit"];
+
+const ownerKey = (owner, issues) => `${issues ? "issues" : "all"}:${foldedName(owner)}`;
+
+// The owner's repos: those its Issues tab reads (`issues`), or all but the
+// archived ones (OWNER_REPOS_QUERY).
+export function readOwner(b, owner, issues, cx) {
+  const owners = settingsOf(b).owners;
+  const key = ownerKey(owner, issues);
+  if (owners.has(key)) return;
+  const entry = { state: "loading", org: null, repos: [], error: null };
+  owners.set(key, entry);
+  cx.spawn(async (cx) => {
+    try {
+      const { org, repos } = await b.sources.github.ownerRepos(owner, { issues });
+      Object.assign(entry, { state: "ready", org, repos });
+    } catch (e) {
+      Object.assign(entry, { state: "error", error: report(e) });
+    }
+    cx.notify();
+  });
+}
+
+const NOT_ASKED = { state: "unasked", org: null, repos: [], error: null };
+const ownerOf = (b, owner, issues) => settingsOf(b).owners.get(ownerKey(owner, issues)) ?? NOT_ASKED;
+
+// The repos a GitHub tab of `owner` may show (readOwner's, `issues` as
+// there), then those `entry` turns off that are no longer the owner's; each
+// with its name (short where it is the owner's) and whether `entry` turns
+// it off.
+function ownerRepoList(b, owner, issues, entry) {
+  const repos = ownerOf(b, owner, issues).repos;
+  const gone = entry.hideRepos.filter((r) => !repos.some((o) => foldedName(o) === foldedName(r)));
+  return [...repos, ...gone].map((repo) => ({ repo, name: foldedName(repo.split("/")[0]) === foldedName(owner) ? repoShortName(repo) : repo, hidden: hidesRepo(entry, repo) }));
+}
+
+// A board view's column switches: its columns as its data has them (those
+// that can be hidden), then the hidden ones it does not have.
+function columnSwitches(b, view) {
+  const columns = (b.views[view.id]?.data?.columns ?? []).filter((c) => c.target);
+  const names = columns.map((c) => c.name);
+  return [
+    ...columns.map((c) => ({ name: c.name, on: !view.hide.includes(c.name), column: c })),
+    ...view.hide.filter((n) => !names.includes(n)).map((n) => ({ name: n, on: false, column: { name: n, target: true } })),
+  ];
+}
+
+function viewKnob(b, tab, view, meta, i, own) {
+  const path = hidePath(view);
+  const layout = LAYOUT_NAMES[meta.layout] ?? meta.layout;
+  const knob = { id: `view-${tab.id}-${meta.number}`, name: meta.name, d: i + 1, key: `views.${meta.number}.hide`, path, top: true };
+  knob.value = (t, mono) => h_flex().gap(6).items_center().child(chip(t, layout)).when(Boolean(meta.filter), (el) => el.child(div().text_size(12).text_color(t.muted).child("Filter")).child(mono12(mono, meta.filter, t.foreground)));
+  if (meta.layout === "board") {
+    switchKnob(knob, columnSwitches(b, view), { hint: "Spalte", name: "Spalte ein/aus" }, (b, s, cx) => write(b, knob.id, [[path, toggledHidden(view, s.column)]], cx));
+    const hidden = view.hide.join(", ");
+    knob.was = !b.views[view.id]?.data?.columns
+      ? "die Spalten zeigt das Board, sobald es die Ansicht gelesen hat"
+      : originOf(b, knob) === ORIGIN.machine
+        ? `${hidden ? `${hidden} ausgeblendet` : "keine ausgeblendet"} auf diesem Rechner · views.json: ${(baseAt(b, path) ?? []).join(", ") || "keine"} · u setzt zurück`
+        : hidden ? `${hidden} ausgeblendet` : "keine ausgeblendet";
+  } else {
+    knob.origin = "";
+    knob.was = meta.layout === "roadmap" ? "zeigt das Board als Tabelle: GitHubs API nennt keine Daten einer Roadmap" : "eine Tabelle blendet keine Spalten aus";
+  }
+  if (own) {
+    const numbers = tab.views;
+    const at = numbers.indexOf(meta.number);
+    const orderPath = [...tab.entry.settingsPath, "switchOrder"];
+    knob.move = { can: (by) => Boolean(movedIn(numbers, at, by)), run: (b, by, cx) => write(b, knob.id, [[orderPath, movedIn(numbers, at, by)]], cx) };
+  }
+  return knobRow(knob);
+}
+
+function projectRows(b, tab) {
+  const entry = tab.entry;
+  const own = Array.isArray(entry.switchOrder);
+  const path = [...entry.settingsPath, "switchOrder"];
+  const order = { id: `order-${tab.id}`, name: "Reihenfolge", key: "switchOrder", path, was: "„eigene“: J/K schiebt die markierte Ansicht; eine neue Ansicht von GitHub kommt ans Ende" };
+  Object.assign(order, choiceParts(order, {
+    field: `setting-order-${tab.id}`,
+    entries: () => ORDER_CHOICES,
+    current: () => (own ? "own" : GITHUB_ORDER),
+    take: (b, row, cx) => {
+      if ((row.id === "own") === own) return;
+      if (row.id === "own" && !tab.meta) return refuse(b, order.id, ["„eigene“ geht, sobald das Board die Ansichten des Projects gelesen hat"], cx);
+      write(b, order.id, [[path, row.id === "own" ? [...tab.views] : GITHUB_ORDER]], cx);
+    },
+    placeholder: "Filter: Reihenfolge",
+  }));
+  order.value = (t) => choiceField(b, t, order, own ? "eigene" : "wie auf GitHub", null, 200);
+  const views = orderedViews(tab.meta?.views ?? [], entry.switchOrder);
+  const knobs = views.map((meta, i) => viewKnob(b, tab, viewsOfTab(tab).find((v) => v.address?.view === meta.number), meta, i, own));
+  return block(
+    title(`${tab.name.toUpperCase()} · ANSICHTEN, in dieser Reihenfolge im Schalter v`, `projects.${entry.number}`),
+    [knobRow(order), ...(knobs.length ? knobs : [line("die Ansichten zeigt das Board, sobald es das Project gelesen hat")])],
+  );
+}
+
+function nameKnob(tab, entry) {
+  const knob = { id: `name-${tab.id}`, name: "Name", key: "name", path: [...entry.settingsPath, "name"], value: () => entry.name };
+  knob.enter = textEdit(knob, knob.path, { value: entry.name });
+  return knobRow(knob);
+}
+
+function issuesRows(b, tab, owner) {
+  const entry = tab.entry;
+  const read = ownerOf(b, owner, true);
+  const shown = { id: `repos-${tab.id}`, name: "Repos", key: "hideRepos", path: repoHidePath(entry), top: true, loading: read.state === "loading" };
+  const items = ownerRepoList(b, owner, true, entry).map((r) => ({ name: r.name, on: !r.hidden, repo: r.repo }));
+  switchKnob(shown, items, { hint: "Repo", name: "Repo ein/aus" }, (b, s, cx) => write(b, shown.id, [[shown.path, toggledRepos(entry.hideRepos, s.repo)]], cx));
+  shown.warn = read.state === "error" ? [read.error] : [];
+  shown.was = read.state === "ready" ? `${read.repos.length} Repos von ${owner} mit Issues, aus GitHub gelesen · ein ausgeschaltetes fehlt in der Suche · auch über R` : null;
+  const limit = { id: `limit-${tab.id}`, name: "Höchstens", key: "limit", path: [...entry.settingsPath, "limit"], value: () => `${entry.limit} Issues je Ansicht` };
+  limit.enter = textEdit(limit, limit.path, { value: String(entry.limit), number: true, unit: "Issues", width: 120 });
+  return block(title("ISSUES-TAB", "issues"), [nameKnob(tab, entry), knobRow(shown), knobRow(limit)]);
+}
+
+function prsTabRows(b, tab, owner) {
+  const entry = tab.view;
+  const read = ownerOf(b, owner, false);
+  const path = repoHidePath(entry);
+  const now = () => b.tabById(tab.id)?.view ?? entry;
+  const shown = { id: `repos-${tab.id}`, name: "Repos", key: "hideRepos", path, go: true, loading: read.state === "loading" };
+  const off = read.repos.filter((r) => hidesRepo(entry, r)).length;
+  shown.value = (t) => muted(t, read.state !== "ready" ? "" : off ? `${read.repos.length - off} von ${read.repos.length} Repos von ${owner} an` : `alle ${read.repos.length} Repos von ${owner} an`);
+  shown.warn = read.state === "error" ? [read.error] : [];
+  shown.was = "Enter öffnet die Liste wie R: ✓, gezeigt / ausgeblendet";
+  shown.enter = {
+    name: "Repos…",
+    hint: "Liste",
+    run: (b, cx) => b.openSettingRepos({
+      row: shown.id,
+      name: shown.name,
+      rows: () => ownerRepoList(b, owner, false, now()).map((r) => ({ id: r.repo, name: r.name, hidden: r.hidden })),
+      read: () => ownerOf(b, owner, false),
+      empty: `Keine Repos von ${owner}`,
+      toggle: (b, repo, cx) => write(b, shown.id, [[path, toggledRepos(now().hideRepos, repo)]], cx),
+    }, cx),
+  };
+  return block(title("PR-TAB · der letzte Tab", "prs"), [nameKnob(tab, entry), knobRow(shown)]);
+}
+
+function sectionRows(b, prsTab) {
+  const change = (b, id, edit, cx) => writeWholeList(b, id, SECTIONS_PATH, sharedSectionsProblems, edit, cx);
+  const origin = b.origin(SECTIONS_PATH);
+  const knobs = prsTab.view.sections.map((s, i) => {
+    // By its place: two sections may share a name.
+    const knob = { id: `section-${i}`, name: s.name, d: i + 1, key: "name · query · tone", path: SECTIONS_PATH, mono: true, stripe: SECTION_TONES[s.tone] };
+    knob.value = (t, mono) => h_flex().gap(6).items_center().child(mono12(mono, s.query, t.foreground)).child(toneChip(t, s.tone, SECTION_TONES[s.tone]));
+    knob.was = origin === ORIGIN.machine ? "u setzt alle Abschnitte auf views.json zurück" : WHOLE;
+    knob.wasMarked = true;
+    knob.enter = {
+      name: "Ändern…",
+      hint: "ändern",
+      run: (b, cx) => openEdit(b, knob, [{ id: "name", value: s.name, width: 200 }, { id: "query", value: s.query }], (b, texts) => {
+        const proposal = wholeListChange(b, SECTIONS_PATH, sharedSectionsProblems, (list) =>
+          (list[i]?.name === s.name && list[i]?.query === s.query ? replacedAt(list, i, { ...list[i], name: texts.name.trim(), query: texts.query.trim() }) : null));
+        return proposal ?? { refused: [goneFromList(s.name)] };
+      }, cx),
+    };
+    knob.side = {
+      ...choiceParts(knob, {
+        field: `setting-tone-${i}`,
+        entries: () => SECTION_TONE_NAMES.map((n) => ({ id: n, name: n })),
+        current: () => s.tone,
+        take: (b, row, cx) => row.id !== s.tone && change(b, knob.id, (list) => replacedAt(list, i, { ...list[i], tone: row.id }), cx),
+        placeholder: "Filter: Farbe",
+      }).side,
+      hint: "Farbe",
+    };
+    knob.remove = { name: "Abschnitt entfernen", run: (b, cx) => change(b, knob.id, (list) => withoutAt(list, i), cx) };
+    knob.move = {
+      can: (by) => Boolean(movedIn(prsTab.view.sections, i, by)),
+      run: (b, by, cx) => change(b, knob.id, (list) => movedIn(list, i, by), cx),
+      to: (by) => `section-${i + by}`,
+    };
+    return knobRow(knob);
+  });
+  const add = { id: "add-section", text: `Abschnitt hinzufügen … Vorlagen: ${[...PRESETS.map((p) => p.name), OWN_SEARCH].join(" · ")}`, field: "setting-presets" };
+  const ownSearch = (b, cx) =>
+    openEdit(b, { id: add.id, name: OWN_SEARCH }, [{ id: "name", placeholder: "Name", width: 200 }, { id: "query", placeholder: "Suche, etwa is:pr is:open archived:false" }], (b, texts) =>
+      wholeListChange(b, SECTIONS_PATH, sharedSectionsProblems, (list) => [...list, { name: texts.name.trim(), query: texts.query.trim() }]), cx);
+  add.run = (b, cx) =>
+    openChoice(b, { id: add.id, name: "Abschnitt hinzufügen" }, add.field, {
+      entries: () => [...PRESETS.map((p) => ({ id: p.name, name: p.name, aside: [p.query] })), { id: OWN_SEARCH, name: OWN_SEARCH }],
+      current: () => PRESETS[0].name,
+      value: () => "",
+      take: (b, row, cx) => {
+        const preset = PRESETS.find((p) => p.name === row.id);
+        if (preset) change(b, add.id, (list) => [...list, { ...preset }], cx);
+        else ownSearch(b, cx);
+      },
+      placeholder: "Filter: Vorlage",
+      width: 440,
+    }, cx);
+  const limit = { id: "prs-limit", name: "Je Suche höchstens", key: SHARED_LIMIT_PATH.join("."), path: SHARED_LIMIT_PATH, value: () => `${prsTab.view.limit} PRs` };
+  limit.enter = textEdit(limit, SHARED_LIMIT_PATH, { value: String(prsTab.view.limit), number: true, unit: "PRs", width: 120 });
+  return block(title("PR-ABSCHNITTE · für alle GitHub-PR-Tabs, in dieser Reihenfolge", SECTIONS_PATH.join(".")), knobs, add, [knobRow(limit)]);
+}
+
+export function githubRows(b, topic) {
+  const context = topic.context;
+  const owner = context.name;
+  const owned = [true, false].map((issues) => ownerOf(b, owner, issues)).find((r) => r.state === "ready");
+  const kind = !owned ? "GitHub-Konto" : owned.org ? "GitHub-Organisation" : "GitHub-Benutzer";
+  const at = b.contexts().findIndex((c) => c.id === context.id) + 1;
+  const projects = context.tabs.filter((t) => t.kind === "project");
+  const issues = context.tabs.find((t) => t.kind === "issues");
+  const prs = context.tabs.find((t) => t.kind === "view");
+  const projectKnobs = projects.map((tab, i) => knobRow({
+    id: `project-${tab.id}`, name: tab.name, d: i + 1, key: `projects.${tab.entry.number}`, nav: false, origin: "",
+    value: (t) => h_flex().gap(6).items_center().child(chip(t, `Project ${tab.entry.number}`)).child(div().child(tab.meta ? `${tab.meta.views.length} ${tab.meta.views.length === 1 ? "Ansicht" : "Ansichten"}, Name und Filter von GitHub` : "noch nicht gelesen")),
+  }));
+  return [
+    { row: "head", path: `GitHub › ${owner}`, title: owner, small: `${kind} · Kontext ${at} der Kopfzeile · Tabs: ${context.tabs.map((t) => t.name).join(", ")}` },
+    ...block(title(`PROJECTS · ${projects.length}, je ein Tab`, "projects"), projectKnobs, { id: "add-project", text: `Project hinzufügen … (liest die Projects von ${owner} aus GitHub)`, run: null, later: LATER }),
+    ...projects.flatMap((tab) => projectRows(b, tab)),
+    ...(issues ? issuesRows(b, issues, owner) : []),
+    ...(prs ? [...prsTabRows(b, prs, owner), ...sectionRows(b, prs)] : []),
+  ];
+}
+
+// What a GitHub context's topic reads while it shows: the owner's repos for
+// its Issues tab and for its PR tab, and the saved state of its projects'
+// views, whose columns their switches show.
+export function readGithubTopic(b, context, cx) {
+  if (context.tabs.some((t) => t.kind === "issues")) readOwner(b, context.name, true, cx);
+  if (context.tabs.some((t) => t.kind === "view")) readOwner(b, context.name, false, cx);
+  for (const tab of context.tabs.filter((t) => t.kind === "project")) viewsOfTab(tab).forEach((v) => b.restore(v));
+}
+
+// ==== src/ui/settings/repos.js ====
+
+// The settings page's topic "Repos auf diesem Rechner": the repo folders,
+// the exceptions, and the repos the folders hold, as the start dialog finds
+// them.
+
+const FOLDERS = ["repoFolders"];
+
+const NO_TAB = "der Startdialog bietet sie an, kein Tab zeigt ihre Issues oder PRs";
+
+const repoCount = (n) => `${n} ${n === 1 ? "Repo" : "Repos"}`;
+
+export function reposNote(b) {
+  const folders = b.config.repoFolders;
+  if (!folders.length) return "kein Ordner";
+  const scan = settingsOf(b)?.scan;
+  if (scan?.state === "error") return `${folders.length} Ordner · nicht lesbar`;
+  const missing = scan?.state === "ready" ? scan.found.missing.length : 0;
+  return `${folders.length} Ordner${missing ? ` · ${missing} ${missing === 1 ? "fehlt" : "fehlen"} hier` : ""}`;
+}
+
+export function scanFolders(b, cx) {
+  const folders = [...b.config.repoFolders];
+  const scan = { state: "loading", folders, found: null, error: null };
+  settingsOf(b).scan = scan;
+  if (!folders.length) return void Object.assign(scan, { state: "ready", found: parseRepos("", []) });
+  cx.spawn(async (cx) => {
+    try {
+      Object.assign(scan, { state: "ready", found: await reposScan(folders, null, null) });
+    } catch (e) {
+      Object.assign(scan, { state: "error", error: reposUnreadable(report(e), null) });
+    }
+    dropGoneDialog(b, cx);
+    cx.notify();
+  });
+}
+
+const rescan = (b, cx) => settingsOf(b) && scanFolders(b, cx);
+
+// The folder a repo found by a scan (parseRepos) lies in, as views.json
+// writes it.
+const folderHolding = (written) => written.slice(0, written.lastIndexOf("/"));
+
+// How many repo folders a scan found under each of `folders`.
+export function foundIn(repos, folders) {
+  const written = new Set(repos.filter((r) => r.folder !== null).map((r) => r.written));
+  return new Map(folders.map((f) => [f, [...written].filter((w) => folderHolding(w) === f).length]));
+}
+
+// The repos a scan found (and the exceptions: withExceptions), by what they
+// belong to: a context of `contexts` (a GitHub one by its owner, an Azure
+// one by its project, of the repo's source where its remote names one), then
+// those of no context with an owner or a project, by source (`other`: [{
+// source, repos }], GitHub's, Azure's, then those of none known), those of
+// another host by host (`hosts`: [{ host, repos }], each key without its
+// host), and those without a remote, by their folder's name (`bare`).
+export function foundByContext(repos, contexts) {
+  const own = contexts.map((c) => ({ context: c, repos: [] }));
+  const other = new Map();
+  const hosts = new Map();
+  const bare = [];
+  const add = (map, key, r) => map.set(key, [...(map.get(key) ?? []), r]);
+  for (const r of repos) {
+    const [first, ...rest] = r.key.split("/");
+    const mine = own.find((o) => (!r.source || o.context.source === r.source) && foldedName(o.context.name) === foldedName(first));
+    if (!rest.length) bare.push(r);
+    else if (mine) mine.repos.push(r);
+    else if (!r.source && first.includes(".")) add(hosts, first, { ...r, key: rest.join("/") });
+    else add(other, r.source ?? null, r);
+  }
+  const sources = [...SOURCES.map((s) => s.id), null].filter((s) => other.has(s));
+  return { own, other: sources.map((source) => ({ source, repos: other.get(source) })), hosts: [...hosts].map(([host, list]) => ({ host, repos: list })), bare };
+}
+
+// What the folders of `repos` hold besides them among `list`, per folder.
+export function alsoCarried(list, repos) {
+  const folders = new Map();
+  for (const o of list) {
+    if (o.folder === null || repos.includes(o) || !repos.some((r) => r.folder === o.folder)) continue;
+    folders.set(o.written, [...(folders.get(o.written) ?? []), o.key]);
+  }
+  return [...folders].map(([written, keys]) => `${written} trägt auch ${andJoined(keys)}`);
+}
+
+// A found repo's chip: `name`, then its folder where the folder is named
+// otherwise, or that its key is a folder's upstream.
+function chipText(r, name) {
+  const mark = r.upstream ? `upstream von ${r.written}` : r.written.split("/").pop() !== repoShortName(r.key) ? r.written : null;
+  return mark ? `${name} · ${mark}` : name;
+}
+
+const foundChips = (t, mono, texts) => h_flex().flex_wrap().gap_x(6).gap_y(4).children(texts.map((text) => chip(t, text).font_family(mono)));
+
+function folderKnobs(b) {
+  const shown = b.config.repoFolders;
+  const scan = settingsOf(b).scan;
+  const ready = scan?.state === "ready";
+  const count = ready && JSON.stringify(scan.folders) === JSON.stringify(shown) ? foundIn(scan.found.repos, shown) : null;
+  const change = (b, id, edit, cx) => writeWholeList(b, id, FOLDERS, repoFoldersProblems, edit, cx, rescan);
+  return shown.map((folder, i) => {
+    const knob = { id: `folder:${folder}`, name: folder, path: FOLDERS, after: rescan };
+    const missing = ready && scan.found.missing.includes(folder);
+    const unreadable = ready && scan.found.unreadable.includes(folder);
+    knob.warn = missing ? [missingNote(folder, null)] : unreadable ? [unreadableNote(folder, null)] : [];
+    knob.loading = scan?.state === "loading";
+    const n = count?.get(folder);
+    knob.value = (t) => (missing || unreadable || !count ? div() : muted(t, `${n} ${n === 1 ? "Git-Repo" : "Git-Repos"}`));
+    knob.was = originOf(b, knob) === ORIGIN.machine ? "x nimmt ihn heraus · u setzt die Liste auf views.json zurück" : `x nimmt ihn für diesen Rechner heraus; ${WHOLE}`;
+    knob.wasMarked = true;
+    knob.enter = {
+      name: "Ändern…",
+      hint: "ändern",
+      run: (b, cx) => openEdit(b, knob, [{ id: "value", value: folder }], (b, texts) => {
+        const proposal = wholeListChange(b, FOLDERS, repoFoldersProblems, (list) => {
+          const at = list.findIndex((f) => isText(f) && trimFolder(f) === folder);
+          return at < 0 ? null : replacedAt(list, at, texts.value.trim());
+        });
+        return proposal ? { ...proposal, after: rescan } : { refused: [goneFromList(folder)] };
+      }, cx),
+    };
+    knob.remove = { name: "Ordner entfernen", run: (b, cx) => change(b, knob.id, (list) => withoutAt(list, i), cx) };
+    knob.move = { can: (by) => Boolean(movedIn(shown, i, by)), run: (b, by, cx) => change(b, knob.id, (list) => movedIn(list, i, by), cx) };
+    return knobRow(knob);
+  });
+}
+
+function addFolder() {
+  const add = { id: "add-folder", text: "Ordner hinzufügen" };
+  add.run = (b, cx) => {
+    const now = wholeListChange(b, FOLDERS, repoFoldersProblems, (list) => list);
+    if (now?.refused) return refuse(b, add.id, now.refused, cx);
+    openEdit(b, { id: add.id }, [{ id: "value", placeholder: "Ordner, etwa ~/Repos" }], (b, texts) => ({ ...wholeListChange(b, FOLDERS, repoFoldersProblems, (list) => [...list, texts.value.trim()]), after: rescan }), cx);
+  };
+  return add;
+}
+
+// The repos with a folder of their own, and those this machine takes one
+// from (null), which u gives back.
+function exceptionRows(b) {
+  const own = (key, entry) => isText(entry.checkout) || (entry.checkout === null && b.origin(["repos", key, "checkout"]) === ORIGIN.machine);
+  return Object.entries(b.config.repos).filter(([key, entry]) => own(key, entry)).map(([key, entry]) => {
+    const path = ["repos", key, "checkout"];
+    const knob = { id: `exception-${key}`, name: key, key: "checkout", path, mono: true };
+    knob.value = (t, mono) => (entry.checkout === null ? muted(t, "auf diesem Rechner keine") : mono12(mono, entry.checkout, t.foreground));
+    knob.enter = textEdit(knob, path, { value: entry.checkout ?? "" });
+    knob.remove = { name: "Ausnahme entfernen", run: (b, cx) => write(b, knob.id, [[path, baseAt(b, path) === undefined ? undefined : null]], cx) };
+    return knobRow(knob);
+  });
+}
+
+function addException() {
+  const add = { id: "add-exception", text: "Ausnahme hinzufügen … (Repo, dann sein Ordner)" };
+  add.run = (b, cx) => openEdit(b, { id: add.id }, [{ id: "value", placeholder: "Repo mit Besitzer, etwa owner/repo" }], (_b, texts) => {
+    const key = texts.value.trim();
+    if (!key.includes("/")) return { refused: ["ein Repo mit Besitzer, etwa owner/repo"] };
+    const folder = { id: "value", placeholder: `Ordner von ${key}, etwa ~/Repos/${repoShortName(key)}` };
+    return { next: (b, cx) => openEdit(b, { id: add.id }, [folder], (_b, more) => ({ changes: [[["repos", key, "checkout"], more.value.trim()]] }), cx) };
+  }, cx);
+  return add;
+}
+
+function foundRows(b) {
+  const scan = settingsOf(b).scan;
+  if (!scan || scan.state === "loading") return block(title("GEFUNDEN"), [line(LOADING, "muted", true)]);
+  if (scan.state === "error") return block(title("GEFUNDEN"), [line(scan.error, "error")]);
+  const { found } = scan;
+  const list = withExceptions(found.repos, repoExceptions(b.config));
+  const contexts = b.contexts();
+  const { own, other, hosts, bare } = foundByContext(list, contexts);
+  const folders = new Set(found.repos.map((r) => r.written)).size;
+  const foundRow = (id, name, d, texts, was) => knobRow({ id, name, d, origin: "", nav: false, top: true, value: (t, mono) => foundChips(t, mono, texts), was });
+  const rows = own.map(({ context, repos }) => (repos.length
+    ? foundRow(`found-${context.id}`, context.name, sourceName(context.source), repos.map((r) => chipText(r, repoShortName(r.key))),
+      [`Kontext ${contexts.indexOf(context) + 1}`, repoCount(repos.length), ...alsoCarried(list, repos)].join(" · "))
+    : knobRow({ id: `found-${context.id}`, name: context.name, d: sourceName(context.source), origin: "", nav: false, value: (t) => muted(t, "keins auf diesem Rechner") })));
+  for (const { source, repos } of other) {
+    rows.push(foundRow(`found-other${source ? `-${source}` : ""}`, "ohne Kontext", sourceName(source), repos.map((r) => chipText(r, r.key)),
+      `${repoCount(repos.length)} · ${NO_TAB}`));
+  }
+  for (const { host, repos } of hosts) rows.push(foundRow(`found-${host}`, "ohne Kontext", host, repos.map((r) => chipText(r, r.key)), `${repoCount(repos.length)} · ${NO_TAB}`));
+  if (bare.length) rows.push(foundRow("found-bare", "ohne Remote", undefined, bare.map((r) => chipText(r, r.key)), "nur über die Namen ihrer Ordner"));
+  for (const group of sameKeyGroups(list)) {
+    const key = group[0].key;
+    const knob = {
+      id: `same-${key}`, name: "doppelt", origin: "", top: true, field: `setting-same-${key}`,
+      value: (t, mono) => foundChips(t, mono, group.map((r) => `${r.key} · ${r.written}`)),
+      warn: [sameKeyNote(group, null)], was: "a legt eine Ausnahme an: das Repo bekommt seinen Ordner fest zugewiesen",
+    };
+    knob.add = {
+      id: knob.id,
+      text: "Ausnahme anlegen",
+      run: (b, cx) => openChoice(b, { id: knob.id, name: key }, knob.field, {
+        entries: () => group.map((r) => ({ id: r.written, name: r.written })),
+        current: () => group[0].written,
+        value: () => "",
+        take: (b, row, cx) => write(b, knob.id, [[["repos", key, "checkout"], row.id]], cx),
+        placeholder: `Ordner von ${key}`,
+      }, cx),
+    };
+    rows.push(knobRow(knob));
+  }
+  const notes = found.gitMissing ? [gitMissingNote(null)] : found.remotesUnread.length ? [remotesNote(found.remotesUnread, null)] : [];
+  return block(title(`GEFUNDEN · ${folders} Ordner, ${repoCount(list.length)}, nach Kontext`), [...rows, ...notes.map((n) => line(n, "warning"))]);
+}
+
+export function reposRows(b) {
+  const head = { row: "head", path: "Repos auf diesem Rechner", title: "Repos auf diesem Rechner", small: "für alle Plattformen: wo der Startdialog ein Repo findet · gesucht wird eine Ebene unter jedem Ordner, zugeordnet über origin und upstream" };
+  const exceptions = exceptionRows(b);
+  return [
+    head,
+    ...block(title(`ORDNER · ${b.config.repoFolders.length}`, "repoFolders"), folderKnobs(b), addFolder()),
+    ...block(title("AUSNAHMEN · ein Repo mit eigenem Ordner", "repos.<Besitzer/Repo>.checkout"), exceptions.length ? exceptions : [line("keine: jedes Repo startet in seinem Ordner unter den Ordnern oben")], addException()),
+    ...foundRows(b),
+  ];
+}
+
+// ==== src/ui/settings/start.js ====
+
+// The settings page's topic "Start": what the start dialog proposes.
+
+export const startNote = (b) => [b.config.start.agent ?? "erster Agent", b.config.start.message || "ohne erste Nachricht"].join(" · ");
+
+export function readAgents(b, cx) {
+  const agents = { state: "loading", list: [], error: null };
+  settingsOf(b).agents = agents;
+  cx.spawn(async (cx) => {
+    try {
+      Object.assign(agents, { state: "ready", list: await installedAgents(null) });
+    } catch (e) {
+      Object.assign(agents, { state: "error", error: agentsUnreadable(null, e) });
+    }
+    cx.notify();
+  });
+}
+
+// The first item of the views read so far that is a pull request (`pr`)
+// or not, with a number: the example a start message is rendered for.
+function exampleItem(b, pr) {
+  for (const view of b.viewsNow()) {
+    const st = b.views[view.id];
+    if (!st?.data) continue;
+    const item = (b.shape(view).items?.(st.data) ?? []).find((i) => (i.kind === "pr") === pr && Number.isInteger(i.number));
+    if (item) return item;
+  }
+  return null;
+}
+
+export function startRows(b) {
+  const start = b.config.start;
+  const agents = settingsOf(b).agents ?? { state: "loading", list: [], error: null };
+  const agent = { id: "agent", name: "Agent", key: "agent", path: ["start", "agent"] };
+  Object.assign(agent, choiceParts(agent, {
+    field: "setting-agent",
+    entries: () => agents.list.map((a) => ({ id: a.key, name: a.key, aside: [a.name] })),
+    current: () => start.agent ?? null,
+    take: (b, row, cx) => row.id !== start.agent && write(b, agent.id, [[agent.path, row.id]], cx),
+    placeholder: "Filter: Name des Agents",
+    loading: () => agents.state === "loading",
+    empty: () => agents.error ?? "Kein Agent installiert",
+  }));
+  const named = agents.list.find((a) => a.key === start.agent)?.name ?? null;
+  agent.value = (t) => choiceField(b, t, agent, start.agent ?? "der erste installierte", named);
+  agent.warn = agents.state === "error" ? [agents.error] : start.agent && agents.state === "ready" && !named ? [`Agent „${start.agent}“ ist auf diesem Rechner nicht installiert`] : [];
+  agent.loading = agents.state === "loading";
+  const listed = machines().filter((m) => m.layout !== "unavailable").map((m) => m.name ?? null);
+  const machine = { id: "machine", name: "Rechner", key: "machine", path: ["start", "machine"] };
+  Object.assign(machine, choiceParts(machine, {
+    field: "setting-machine",
+    entries: () => (listed.includes(null) ? listed : [null, ...listed]).map((on) => ({ id: on, name: machineName(on) })),
+    current: () => start.machine ?? null,
+    take: (b, row, cx) => row.id !== (start.machine ?? null) && write(b, machine.id, [[machine.path, row.id]], cx),
+    placeholder: "Filter: Name des Rechners",
+  }));
+  machine.value = (t) => choiceField(b, t, machine, machineName(start.machine ?? null));
+  const message = (id, name, pr, what) => {
+    const path = ["start", id];
+    const knob = { id, name, key: id, path, mono: true, value: (t, mono) => (start[id] ? mono12(mono, start[id], t.foreground) : muted(t, "keine")) };
+    const item = exampleItem(b, pr);
+    knob.was = item ? `${what} · ${itemLabel(item)} → ${renderTemplate(start[id], templateVars(item))}` : what;
+    knob.enter = textEdit(knob, path, { value: start[id] ?? "" });
+    return knobRow(knob);
+  };
+  const vars = Object.keys(templateVars({ title: "" })).map((v) => `{${v}}`).join(" ");
+  return block(title("START", "start"), [
+    knobRow(agent), knobRow(machine),
+    message("message", "Erste Nachricht", false, "für Issues und Work Items"),
+    message("review", "Review-Nachricht", true, "für Pull Requests"),
+    line(`Platzhalter: ${vars}`),
+  ]);
+}
+
+// ==== src/ui/settings/index.js ====
+
+// The settings page (README, "herdr app"), in place of the board while
+// b.settingsPage is { topic (the shown topic's id), marked (the id of the
+// marked row, a knob's or an add's; null for the first), at (its place among
+// the rows that take keys, as last found: the mark stays there where its
+// row is gone), side (the switch ← → are on), problem ({ row, texts }: why
+// the last change of that row was not made), scan ({ state, folders, found,
+// error }: the repo folders as read), agents ({ state, list, error }: this
+// machine's installed agents), owners (by owner: its repos, those its
+// Issues tab reads or all but the archived ones, { state, org, repos, error
+// }: readOwner), knobMoves (the last J/K's series: moveKnob) }. A topic's
+// rows: its module here, from knobs.js's pieces; drawn: draw.js; its
+// actions: commands.js. What it reads, it reads once while it shows, what a
+// change of the config adds as that comes (followSettingsPage), never in a
+// render: Calls in the header of main.js.
+
+// What the hint line and the menu call a topic.
+export const TOPIC_WORD = "Kategorie";
+
+// The page's topics, in the order of its left side and its digits.
+export function settingsTopics(b) {
+  return [
+    ...b.contexts().map((context) => ({ id: `context:${context.id}`, kind: "context", name: context.name, note: context.tabs.map((t) => t.name).join(" · "), context })),
+    { id: "repos", kind: "repos", name: "Repos auf diesem Rechner", note: reposNote(b) },
+    { id: "start", kind: "start", name: "Start", note: startNote(b) },
+    { id: "general", kind: "general", name: "Allgemein", note: generalNote(b) },
+  ];
+}
+
+export const shownTopic = (b) => settingsTopics(b).find((t) => t.id === settingsOf(b).topic) ?? settingsTopics(b).at(-1);
+
+const TOPIC_ROWS = { general: generalRows, start: startRows, repos: reposRows, github: githubRows, azure: azureRows };
+
+export const topicRows = (b, topic) => TOPIC_ROWS[topic.kind === "context" ? topic.context.source : topic.kind](b, topic);
+
+export const navRows = (rows) => rows.filter((r) => (r.row === "knob" && r.knob.nav !== false) || (r.row === "add" && r.add.run));
+
+const settingsRowId = (r) => (r.row === "knob" ? r.knob.id : r.add.id);
+
+export const rowShown = (b, id) => topicRows(b, shownTopic(b)).some((r) => (r.row === "knob" || r.row === "add") && settingsRowId(r) === id);
+
+// The marked row among `nav` (null in none), its place kept.
+export function markedIn(b, nav) {
+  const state = settingsOf(b);
+  const found = nav.findIndex((r) => settingsRowId(r) === state.marked);
+  const at = found >= 0 ? found : Math.max(0, Math.min(state.at, nav.length - 1));
+  const row = nav[at] ?? null;
+  if (row) Object.assign(state, { marked: settingsRowId(row), at });
+  return row;
+}
+
+// The page's part of the situation (Board.situation): its state, its
+// topic, the marked row's knob (an add's: Enter adds) and the add it
+// reaches (its own, its block's, or the marked add itself).
+export function settingsSituation(b) {
+  const state = settingsOf(b);
+  if (!state) return { settingsPage: null, topic: null, knob: null, add: null };
+  const topic = shownTopic(b);
+  const row = markedIn(b, navRows(topicRows(b, topic)));
+  const knob = row?.row === "knob" ? row.knob : row ? { id: row.add.id, name: row.add.text, enter: { name: row.add.text, hint: "hinzufügen", run: row.add.run } } : null;
+  const add = row?.row === "add" ? row.add : row?.knob.add ?? row?.blockAdd ?? null;
+  return { settingsPage: state, topic, knob, add: add?.run ? add : null };
+}
+
+function readFor(b, topic, cx) {
+  const state = settingsOf(b);
+  if (topic.kind === "start" && !state.agents) readAgents(b, cx);
+  if (topic.kind === "context" && topic.context.source === "github") readGithubTopic(b, topic.context, cx);
+}
+
+// After the config changed while the page shows: a dialog whose row is gone
+// closes (dropGoneDialog, `refusal` as there) unless `keepDialogs` (a change
+// still to come says whether it is), and the shown topic reads what it has
+// not read yet of what it shows now.
+export function followSettingsPage(b, cx, { refusal = null, keepDialogs = false } = {}) {
+  if (!settingsOf(b)) return;
+  if (!keepDialogs) dropGoneDialog(b, cx, refusal);
+  readFor(b, shownTopic(b), cx);
+}
+
+// e: the page on the shown context, the repo folders read for the left
+// side's note, and each owner's repos but the archived ones
+// (OWNER_REPOS_QUERY) read again where it shows them.
+export function openSettingsPage(b, cx) {
+  const context = b.context();
+  b.settingsPage = { topic: null, marked: null, at: 0, side: 0, problem: null, scan: null, agents: null, owners: new Map(), knobMoves: null };
+  scanFolders(b, cx);
+  showSettingsTopic(b, context ? `context:${context.id}` : "general", cx);
+}
+
+export function showSettingsTopic(b, id, cx) {
+  Object.assign(settingsOf(b), { topic: id, marked: null, at: 0, side: 0, problem: null });
+  readFor(b, shownTopic(b), cx);
+  b.settingsScroll.scroll_to_item(0);
+  b.takeKeyboard();
+  cx.notify();
+}
+
+export function leaveSettingsPage(b, cx) {
+  b.settingsPage = null;
+  b.takeKeyboard();
+  cx.notify();
+}
+
+export function markKnob(b, id, cx) {
+  markRow(b, id);
+  cx.notify();
+}
+
+export function walkKnobs(b, by) {
+  const rows = topicRows(b, shownTopic(b));
+  const nav = navRows(rows);
+  if (!markedIn(b, nav)) return;
+  const at = Math.max(0, Math.min(settingsOf(b).at + by, nav.length - 1));
+  markRow(b, settingsRowId(nav[at]));
+  settingsOf(b).at = at;
+  b.settingsScroll.scroll_to_item(rows.indexOf(nav[at]));
+}
+
+export function sideKey(b, knob, by, cx) {
+  const side = knob?.side;
+  const state = settingsOf(b);
+  if (side?.step) side.step(b, by, cx);
+  else if (side?.count) state.side = (state.side + by + side.count) % side.count;
+}
+
+// J/K: the marked knob one place on or back in its list, the mark with it
+// at once where the write started. Moves of one entry one after the other,
+// each from where the last put the mark, are a series (knobMoves); where the
+// file does not take one and the mark is still where it put it, the mark
+// goes back to the row of the entry as the file holds it.
+export function moveKnob(b, knob, by, cx) {
+  if (!knob.move.can(by)) return;
+  const { started, done } = knob.move.run(b, by, cx);
+  if (!started) return;
+  const state = settingsOf(b);
+  const to = knob.move.to?.(by) ?? knob.id;
+  const series = state.knobMoves?.to === knob.id && state.knobMoves.pending ? state.knobMoves : { at: knob.id, pending: 0 };
+  Object.assign(series, { to, pending: series.pending + 1 });
+  state.knobMoves = series;
+  markRow(b, to);
+  cx.spawn(async (cx) => {
+    const moved = await done;
+    series.pending -= 1;
+    if (moved) series.at = to;
+    if (moved || settingsOf(b) !== state || state.marked !== to) return;
+    markRow(b, series.at);
+    cx.notify();
+  });
+}
+
 // ==== src/commands.js ====
 
 // The board's actions, their one home: the action table ACTIONS, which the
@@ -8392,11 +9791,14 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 //   first (Board.keptSituation);
 // - run(b, c, cx); aim(c) and gone(c) where it aims closer than its group
 //   (menuActions);
+// - screen: where it is, "board" (by default), "settings" (the settings
+//   page) or "both"; its key, its hint and its entry in the menu are there
+//   only;
 // - hint(c): its text on the hint line, null for none; hintKey: the key
-//   the hint line names (its key by default). The hint line names each key
-//   once (hintsOf), and neither the moves nor a key named elsewhere (where
-//   it acts, or only in the menu); README, "herdr app", lists those it
-//   leaves out.
+//   the hint line names (its key by default; hintKey(c) where that
+//   changes). The hint line names each key once (hintsOf), and neither the
+//   moves nor a key named elsewhere (where it acts, or only in the menu);
+//   README, "herdr app", lists those it leaves out.
 // An entry without run is a hint only: a core key the Board handles itself
 // (Tab, Esc).
 // `c` is the situation an action runs in (Board.situation): { b, view, st,
@@ -8410,7 +9812,10 @@ export function relatedSections(b, t, mono, view, item, entry, at) {
 // there, as a related item's line until a read brings it again), drilled
 // (whether the panel shows a related item rather than the board's selected
 // one), trail (the keys of the items on the panel's way down, the board's
-// selected one first) }.
+// selected one first), settingsPage (the settings page's state while it
+// shows, else null), topic, knob and add (its shown topic, the marked row's
+// knob and the add it reaches, null for none: settingsSituation in
+// ui/settings/index.js) }.
 
 // What a key event names (an action's key), or null for one no action has:
 // [ ] { } / and : as typed (with Shift, or with Control+Alt, as AltGr
@@ -8440,9 +9845,13 @@ const keyLabel = (key) => (key === "enter" ? "Enter" : key);
 // that item's heading.
 const held = (a, c) => a.group === "item" && Boolean(c.drilled);
 
+// Whether the action `a` is on the screen that shows: the settings page
+// while it shows, else the board.
+const onScreen = (a, c) => [c.settingsPage ? "settings" : "board", "both"].includes(a.screen ?? "board");
+
 // The action the key `name` runs now: the first in the table that has it
 // and takes it, and is not held; null for none.
-export const actionFor = (name, c) => ACTIONS.find((a) => a.run && a.key === name && !held(a, c) && (a.takes ?? a.when)(c)) ?? null;
+export const actionFor = (name, c) => ACTIONS.find((a) => a.run && a.key === name && onScreen(a, c) && !held(a, c) && (a.takes ?? a.when)(c)) ?? null;
 
 const nameOf = (a, c) => (typeof a.name === "function" ? a.name(c) : a.name);
 
@@ -8478,6 +9887,11 @@ const GROUPS = {
     gone: (c) => `Die Details von ${itemLabel(c.details)} sind nicht mehr offen`,
   },
   view: { title: (c) => c.view.name, aim: (c) => [c.view?.id], gone: (c) => `„${c.view.name}“ wird nicht mehr gezeigt` },
+  settings: {
+    title: (c) => (c.knob ? `Einstellungen · ${c.knob.name}` : "Einstellungen"),
+    aim: (c) => [c.topic?.id ?? null, c.knob?.id ?? null],
+    gone: (c) => (c.knob ? `„${c.knob.name}“ ist nicht mehr markiert` : "Die Einstellungen zeigen etwas anderes"),
+  },
   board: { title: () => "Board", aim: () => [], gone: () => "" },
 };
 
@@ -8489,7 +9903,7 @@ const GROUPS = {
 // ausblenden" at its column, and what its group aims at, and says, apart:
 // where that has gone, the menu says so first).
 export function menuActions(c) {
-  return ACTIONS.filter((a) => a.menu != null && a.when(c))
+  return ACTIONS.filter((a) => a.menu != null && onScreen(a, c) && a.when(c))
     .sort((x, y) => x.menu - y.menu)
     .map((a) => {
       const group = GROUPS[a.group];
@@ -8510,8 +9924,8 @@ export const groupAimOf = (a, c) => JSON.stringify(GROUPS[a.group].aim(c));
 // are the group "details", or the board) names its keys, and the other
 // part's hints stay for the keys it does not name.
 export function hintsOf(c) {
-  const shown = ACTIONS.filter((a) => a.hint && !held(a, c))
-    .map((a) => ({ a, key: a.hintKey ?? keyLabel(a.key), text: a.hint(c) }))
+  const shown = ACTIONS.filter((a) => a.hint && onScreen(a, c) && !held(a, c))
+    .map((a) => ({ a, key: (typeof a.hintKey === "function" ? a.hintKey(c) : a.hintKey) ?? keyLabel(a.key), text: a.hint(c) }))
     .filter((h) => h.text);
   const leads = (h) => (h.a.group === "details") === Boolean(c.panel);
   const named = new Set(shown.filter(leads).map((h) => h.key));
@@ -8619,6 +10033,65 @@ const moveAction = (id, key, by, name) => ({
   run: (b, c, cx) => c.shape.move(b, c.view, c.st, by, cx),
   ...(by < 0 ? { hint: (c) => (c.shape?.move ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
 });
+
+// The settings page's actions: a digit shows a topic; Enter, a, x, u and
+// J/K act on the marked row; j k, ← → and space (Board.settingsKey) have
+// their hints here.
+const onSettings = (c) => Boolean(c.settingsPage);
+const topicAt = (c, n) => (c.settingsPage ? settingsTopics(c.b)[n - 1] ?? null : null);
+const topicAction = (n) => ({
+  id: `topic-${n}`, group: "settings", screen: "settings", key: String(n), menu: 70 + n,
+  name: (c) => `${TOPIC_WORD} ${n}: ${topicAt(c, n).name}`,
+  when: (c) => Boolean(topicAt(c, n)) && topicAt(c, n).id !== c.topic?.id,
+  takes: onSettings,
+  run: (b, c, cx) => topicAt(c, n) && showSettingsTopic(b, topicAt(c, n).id, cx),
+  ...(n === 1 ? { hint: () => TOPIC_WORD, hintKey: (c) => `1–${Math.min(9, settingsTopics(c.b).length)}` } : {}),
+});
+const knobAction = (id, key, part, menu, fallback, hint) => ({
+  id, group: "settings", screen: "settings", key, menu,
+  name: (c) => c.knob?.[part]?.name ?? fallback,
+  when: (c) => onSettings(c) && Boolean(c.knob?.[part]),
+  run: (b, c, cx) => c.knob[part].run(b, cx),
+  hint: (c) => (c.knob?.[part] ? c.knob[part].hint ?? hint : null),
+});
+const SETTINGS_ACTIONS = [
+  { id: "settings-walk", screen: "settings", hint: () => "Eintrag", hintKey: "j k" },
+  { id: "settings-side", screen: "settings", hint: (c) => c.knob?.side?.hint ?? null, hintKey: "← →" },
+  { id: "settings-space", screen: "settings", hint: (c) => c.knob?.space?.hint ?? null, hintKey: "Leertaste" },
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(topicAction),
+  knobAction("settings-enter", "enter", "enter", 61, "Ändern…", "ändern"),
+  {
+    id: "settings-move-down", group: "settings", screen: "settings", key: "J", menu: 65, name: "Nach unten verschieben",
+    when: (c) => onSettings(c) && Boolean(c.knob?.move?.can(1)), takes: (c) => onSettings(c) && Boolean(c.knob?.move),
+    run: (b, c, cx) => moveKnob(b, c.knob, 1, cx),
+    hint: (c) => (c.knob?.move ? "verschieben" : null), hintKey: "J/K",
+  },
+  {
+    id: "settings-move-up", group: "settings", screen: "settings", key: "K", menu: 66, name: "Nach oben verschieben",
+    when: (c) => onSettings(c) && Boolean(c.knob?.move?.can(-1)), takes: (c) => onSettings(c) && Boolean(c.knob?.move),
+    run: (b, c, cx) => moveKnob(b, c.knob, -1, cx),
+  },
+  {
+    id: "settings-add", group: "settings", screen: "settings", key: "a", menu: 62,
+    name: (c) => c.add?.text.replace(/ ….*$/, "") ?? "Neu…",
+    when: (c) => onSettings(c) && Boolean(c.add),
+    run: (b, c, cx) => c.add.run(b, cx),
+    hint: (c) => (c.add ? "neu" : null),
+  },
+  knobAction("settings-remove", "x", "remove", 63, "Entfernen", "entfernen"),
+  {
+    id: "settings-reset", group: "settings", screen: "settings", key: "u", menu: 64, name: "Zurücksetzen",
+    when: (c) => onSettings(c) && Boolean(c.knob?.path) && c.b.origin(c.knob.path) === ORIGIN.machine,
+    takes: (c) => onSettings(c) && Boolean(c.knob?.path),
+    run: (b, c, cx) => resetKnob(b, c.knob, cx),
+    hint: (c) => (c.knob?.path ? "zurücksetzen" : null),
+  },
+  {
+    id: "settings-leave", group: "settings", screen: "settings", key: null, menu: 69, name: "Zum Board",
+    when: onSettings,
+    run: (b, c, cx) => leaveSettingsPage(b, cx),
+  },
+];
 
 export const ACTIONS = [
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(tabAction),
@@ -8801,12 +10274,19 @@ export const ACTIONS = [
     hint: () => "neu laden",
   },
   {
-    id: "commands", name: "Befehle", key: ":", bar: true,
+    id: "settings", group: "board", name: "Einstellungen", key: "e", menu: 29, bar: true,
+    when: (c) => Boolean(c.b.config),
+    run: (b, c, cx) => b.config && openSettingsPage(b, cx),
+  },
+  ...SETTINGS_ACTIONS,
+  {
+    id: "commands", name: "Befehle", key: ":", bar: true, screen: "both",
     when: () => true,
     run: (b, c, cx) => b.openCommands(cx),
     hint: () => "Befehle",
   },
   { id: "escape-hint", hint: (c) => (c.panel ? "zurück" : "schließen"), hintKey: "Esc" },
+  { id: "settings-escape-hint", screen: "settings", hint: () => "zum Board", hintKey: "Esc" },
 ];
 
 // ==== src/ui/modals/commands.js ====
@@ -8883,202 +10363,6 @@ export const commandsModal = {
     });
   },
 };
-
-// ==== src/ui/choices.js ====
-
-// A dialog's choice fields (the start dialog's Repo, Agent, Rechner and
-// Öffnen in, the create dialog's Typ; the Issues tab's field „Repo:“ opens
-// its list as a dialog of its own, ui/modals/solo.js), from a table of the
-// dialog's, by field: { entries(m), each { id, name, aside (the texts at its
-// right: a space's folder, a repo's count) }; current(m), the id of the
-// entry the field is on; value(m), the text the field shows, and
-// valueAside(m), the one beside it (null: none); take(b, row, cx), which
-// puts the field on that entry; fieldAfter(row), the field the dialog goes
-// on to once the list took `row` (by default it stays); closes (the dialog
-// ends once the list took a row or a press beside it closed it); the
-// list's placeholder, none (said where the filter leaves no row), empty(m)
-// (said instead where no filter is typed), notes(m) (said under the rows),
-// width and anchor }. The open list is the dialog's m.list.
-
-export const LIST_HINT = "Tippen filtert · ↑ ↓ wählt · ↵ übernimmt · Esc schließt die Liste";
-export const choiceHint = (enter) => `← → wählt · Leertaste öffnet die Liste · ↵ ${enter} · Tab wechselt das Feld`;
-
-export function choiceBox(b, t, choices, field) {
-  const m = b.modal;
-  const trigger = h_flex()
-    .id(`choice-${field}`)
-    .flex_1()
-    .min_w(0)
-    .gap(6)
-    .cursor_pointer()
-    .on_click((_e, cx) => {
-      m.field = field;
-      b.handle.focus();
-      openList(b, choices, field, cx);
-    })
-    .child(div().flex_1().min_w(0).truncate().child(choices[field].value(m)))
-    .when(Boolean(choices[field].valueAside?.(m)), (el) => el.child(div().flex_none().max_w(240).truncate().text_size(11).text_color(t.dim).child(choices[field].valueAside(m))))
-    .child(div().text_color(t.dim).child("▾"));
-  return listPopup(b, t, field, choices[field].anchor, fieldFrame(t, m, field, trigger));
-}
-
-// The frame of the choice `field`, its list under it while that list is
-// open and `here` (the open dialog is the field's own).
-export const listPopup = (b, t, field, anchor, frame, here = true) =>
-  Popup.new(`choice-${field}-list`, frame).anchor(anchor).when(here && b.modal?.list?.choice === field, (el) => el.content(listPanel(b, t)));
-
-export function choiceKey(b, choices, k, cx) {
-  const field = b.modal.field;
-  if (k === "space") return openList(b, choices, field, cx);
-  if (k === "h" || k === "left") return step(b, choices[field], -1, cx);
-  if (k === "l" || k === "right") return step(b, choices[field], 1, cx);
-}
-
-function step(b, spec, by, cx) {
-  const m = b.modal;
-  if (m.busy) return;
-  const rows = spec.entries(m);
-  if (rows.length) {
-    const now = rows.findIndex((r) => r.id === spec.current(m));
-    // An entry the field is on but does not list (a chosen space that is
-    // gone, or on a machine whose spaces are not read) stands before the
-    // first.
-    const next = now < 0 ? (by > 0 ? 0 : rows.length - 1) : (now + by + rows.length) % rows.length;
-    spec.take(b, rows[next], cx);
-  }
-  cx.notify();
-}
-
-export function openList(b, choices, field, cx) {
-  const m = b.modal;
-  const spec = choices[field];
-  if (m.busy || !spec) return;
-  const list = { choice: field, spec, field: "filter", mark: NOT_MOVED };
-  m.field = field;
-  m.list = list;
-  wireFilter(m, list, {
-    placeholder: spec.placeholder,
-    count: () => listRows(m).length,
-    startAt: () => {
-      list.mark = NOT_MOVED;
-      return markedAt(m, listRows(m));
-    },
-    pick: (_at, cx) => {
-      if (m.list === list) takeRow(b, syncedRows(m)[list.at], cx);
-    },
-  });
-  list.input.focus();
-  cx.notify();
-}
-
-export function closeList(b, cx) {
-  b.modal.list = null;
-  b.takeKeyboard();
-  cx.notify();
-}
-
-export function escapeList(b, cx) {
-  if (!b.modal.list) return false;
-  closeList(b, cx);
-  return true;
-}
-
-export const listKeyboard = (m) => m.list?.input ?? null;
-
-const listRows = (m) => rankByName(m.list.spec.entries(m), m.list.filter);
-
-// The list's mark (the id of the entry ↑ ↓ moved to) before they move it:
-// an entry's id may be null („Alle“ of the field „Repo:“).
-const NOT_MOVED = undefined;
-
-function markedAt(m, rows) {
-  const { list } = m;
-  const moved = list.mark === NOT_MOVED ? -1 : rows.findIndex((r) => r.id === list.mark);
-  if (moved >= 0) return moved;
-  if (!rows.length) return -1;
-  if (list.filter) return 0;
-  return rows.findIndex((r) => r.id === list.spec.current(m));
-}
-
-// Entries that come after the list opened (agents read, spaces herdr read)
-// move the mark to where markedAt puts it now.
-function syncedRows(m) {
-  const rows = listRows(m);
-  const at = markedAt(m, rows);
-  if (at !== m.list.at) {
-    m.list.at = at;
-    followMark(m.list, rows.length);
-  }
-  return rows;
-}
-
-// herdr hands the filter's Enter to its submit as well, which then finds
-// the list closed.
-export function listKey(b, e, cx) {
-  const list = b.modal.list;
-  const rows = syncedRows(b.modal);
-  if (e.key === "enter") {
-    cx.stop_propagation();
-    return takeRow(b, rows[list.at], cx);
-  }
-  if (!filterMenuKey(e, cx, list, rows.length)) return;
-  const row = rows[list.at];
-  list.mark = row ? row.id : NOT_MOVED;
-}
-
-function takeRow(b, row, cx) {
-  const m = b.modal;
-  if (!row) return;
-  const { spec, choice } = m.list;
-  m.list = null;
-  spec.take(b, row, cx);
-  if (spec.closes) return b.closeModal(cx);
-  m.field = spec.fieldAfter?.(row) ?? choice;
-  b.takeKeyboard();
-  cx.notify();
-}
-
-function listPanel(b, t) {
-  const m = b.modal;
-  const { spec } = m.list;
-  const rows = syncedRows(m);
-  const { shown, ...win } = menuWindow(m.list, rows);
-  const none = m.list.filter || !spec.empty ? spec.none : spec.empty(m);
-  return div()
-    .id("choice-list")
-    .mt(4)
-    .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-    .child(menuPanel(t, {
-      id: "choice-list",
-      rowId: "choice-list-row",
-      width: spec.width,
-      title: null,
-      head: filterMenuHead(t, m.list),
-      digits: false,
-      rows: shown.map((r) => [
-        markedName(t, r.name, r.at),
-        ...(r.aside ?? []).filter(Boolean).map((text) => div().flex_none().max_w(160).truncate().text_size(11).text_color(t.dim).child(text)),
-      ]),
-      ...win,
-      pick: (i, cx) => takeRow(b, rows[i], cx),
-      foot: [
-        ...(rows.length ? [] : [menuNote(t, none, t.muted)]),
-        ...(spec.notes?.(m) ?? []).map((n) => menuNote(t, n, t.muted)),
-      ],
-    }));
-}
-
-// A press beside the open list closes it.
-export const listShield = (b) =>
-  b.modal.list
-    ? div().id("choice-list-shield").absolute().inset_0().on_mouse_down("left", (_e, cx) => {
-      cx.stop_propagation();
-      const spec = b.modal?.list?.spec;
-      if (!spec) return;
-      if (spec.closes) b.closeModal(cx);
-      else closeList(b, cx);
-    })
-    : null;
 
 // ==== src/ui/modals/create.js ====
 
@@ -9253,17 +10537,100 @@ export const reposModal = {
       title: "Repos zeigen",
       at: m.at,
       pick: (i, cx) => toggleRepoAt(b, m, i, cx),
-      rows: menuRepos(b, m).map((r) => [
-        div().w(14).text_color(t.foreground).child(r.hidden ? "" : "✓"),
-        div().flex_1().min_w(0).truncate().text_color(r.hidden ? t.muted : t.foreground).child(r.name),
+      rows: menuRepos(b, m).map((r) => repoMenuRow(t, r, div().flex_1().min_w(0).truncate().text_color(r.hidden ? t.muted : t.foreground).child(r.name), [
         ...(r.foreign ? [foreignChip(t)] : []),
         div().flex_none().text_size(11).text_color(t.dim).child(r.held === null ? "" : shownOf(r.shown, r.held)),
-        div().w(80).flex_none().text_size(11).text_color(t.dim).child(r.hidden ? "ausgeblendet" : "gezeigt"),
-      ]),
+      ])),
     });
   },
 
   key: (b, e, cx) => menuKey(e, cx, b.modal, menuRepos(b, b.modal).length, (i, cx) => toggleRepoAt(b, b.modal, i, cx)),
+};
+
+// ==== src/ui/modals/setting.js ====
+
+// The settings page's dialogs (ui/settings/). "setting": the edit of a
+// knob in place, its fields drawn in the knob (openEdit). "settingChoice": a
+// choice's list under its field (choices.js), which a pick, Esc or a press
+// beside it closes, the dialog with it. "settingRepos": a PR tab's repos as
+// the repo menu shows them, all the owner's but the archived ones
+// (OWNER_REPOS_QUERY), with a filter as the command menu has one; Enter or a
+// click turns the marked one on or off and the list stays until Esc.
+
+export const settingModal = {
+  ofSettingsPage: true,
+  hint: (b) => [["Enter", "speichert"], ...(b.modal.fields.length > 1 ? [["Tab", "nächstes Feld"]] : []), ["Esc", "verwirft"]],
+  tab(b, back, cx) {
+    cycleField(b, b.modal.fields, back, cx);
+  },
+  key(b, e, cx) {
+    if (e.key === "tab") b.tabKey(Boolean(e.modifiers?.shift), cx);
+  },
+  render: () => null,
+};
+
+export const settingChoiceModal = {
+  ofSettingsPage: true,
+  keyboard: listKeyboard,
+  hint: LIST_HINT,
+  key: (b, e, cx) => listKey(b, e, cx),
+  render: (b) => listShield(b),
+};
+
+const shownRepos = (m) => rankByName(m.rows(), m.filter);
+
+function toggleRepoRow(b, m, at, cx) {
+  const repo = shownRepos(m)[at];
+  if (!repo) return;
+  m.at = at;
+  m.toggle(b, repo.id, cx);
+  cx.notify();
+}
+
+// Under the rows: the spinner while the repos are read, why they could not
+// be, or that there are none, or none the filter lets through.
+function repoListNote(t, m, shown) {
+  const read = m.read();
+  if (read.state === "loading") return [loadingLine(t).px(8)];
+  if (read.state === "error") return [menuNote(t, read.error, toneColor(t, NOTE_TONES.error))];
+  if (shown) return [];
+  return [menuNote(t, m.filter && m.rows().length ? "Kein Repo passt zum Filter" : m.empty, t.muted)];
+}
+
+export const settingReposModal = {
+  ofSettingsPage: true,
+  // row, name: its knob's; rows(): [{ id (the repo), name, hidden }] as
+  // they are now; read(): their read ({ state, error }); empty: what is said
+  // without any; toggle(b, repo, cx) turns one.
+  open(b, { row, name, rows, read, empty, toggle }, cx) {
+    const m = { kind: "settingRepos", row, name, rows, read, empty, toggle };
+    openFilterMenu(b, m, {
+      placeholder: "Filter: Name des Repos",
+      count: (m) => shownRepos(m).length,
+      startAt: (m) => (shownRepos(m).length ? 0 : -1),
+      pick: (i, cx) => toggleRepoRow(b, m, i, cx),
+    }, cx);
+  },
+
+  key: (b, e, cx) => filterMenuKey(e, cx, b.modal, shownRepos(b.modal).length),
+
+  render(b, t) {
+    const m = b.modal;
+    const repos = shownRepos(m);
+    const { shown, ...win } = menuWindow(m, repos);
+    return menu(t, {
+      id: "setting-repos",
+      rowId: "setting-repo",
+      width: 380,
+      title: "Repos zeigen",
+      head: filterMenuHead(t, m),
+      digits: false,
+      rows: shown.map((r) => repoMenuRow(t, r, markedName(t, r.name, r.at))),
+      ...win,
+      pick: (i, cx) => toggleRepoRow(b, m, i, cx),
+      foot: repoListNote(t, m, repos.length > 0),
+    });
+  },
 };
 
 // ==== src/ui/modals/sprints.js ====
@@ -9330,7 +10697,7 @@ export const sprintsModal = {
     const { shown, ...win } = menuWindow(m, rows);
     const year = new Date(Date.now()).getUTCFullYear();
     const empty = m.error ? null : m.list?.length ? "Kein Sprint passt zum Filter" : "Das Team hat keine Sprints";
-    const message = !m.list ? "lädt …" : !rows.length ? empty : null;
+    const message = !m.list ? LOADING : !rows.length ? empty : null;
     return menu(t, {
       id: "sprints",
       rowId: "sprint",
@@ -9357,7 +10724,6 @@ export const sprintsModal = {
 // agent chosen here, as a new tab in a space of that machine or in a new
 // space ("Öffnen in"), with a first message to edit.
 
-const SH_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
 // ms (1, 3 and 6 s after the start).
 const SESSION_CHECKS = [1000, 2000, 3000];
@@ -9382,7 +10748,7 @@ export const START_HINTS = {
   list: LIST_HINT,
 };
 
-const agentsPending = (m) => m.agentsError ?? "lädt …";
+const agentsPending = (m) => m.agentsError ?? LOADING;
 
 export const repoStoreKey = (view) => `repo:${view.id}`;
 const reposLoading = (on, folders, list) => ({ state: "loading", on, folders, list, missing: [], unreadable: [], remotesUnread: [], gitMissing: false, lost: null, sameKey: null, error: null });
@@ -9391,7 +10757,7 @@ const chosenRepo = (m) => m.repos.list.find((r) => repoId(r) === m.repoId) ?? nu
 
 function reposPending(m) {
   const { state, error, list } = m.repos;
-  if (state === "loading") return "lädt …";
+  if (state === "loading") return LOADING;
   if (state === "error") return error;
   return list.length ? "Repo wählen" : "Kein Repo gefunden";
 }
@@ -9462,18 +10828,15 @@ export function spacesNote({ on, layout }) {
 function reposNotes(m) {
   const { state, on, folders, list, missing, unreadable, remotesUnread, gitMissing, lost, sameKey } = m.repos;
   if (state !== "ready") return [];
-  const notes = [
-    ...missing.map((f) => `Den Repo-Ordner ${f} gibt es ${onMachine(on)} nicht`),
-    ...unreadable.map((f) => `Der Repo-Ordner ${f} ist ${onMachine(on)} nicht lesbar`),
-  ];
-  if (gitMissing) notes.push(`git ist ${onMachine(on)} nicht installiert`);
-  else if (remotesUnread.length) notes.push(`Die Remotes von ${andJoined(remotesUnread.map((u) => u.written))} sind ${onMachine(on)} nicht lesbar`);
+  const notes = [...missing.map((f) => missingNote(f, on)), ...unreadable.map((f) => unreadableNote(f, on))];
+  if (gitMissing) notes.push(gitMissingNote(on));
+  else if (remotesUnread.length) notes.push(remotesNote(remotesUnread, on));
   if (!folders.length) {
     notes.push(`Kein Repo-Ordner gesetzt: in ${CONFIG_NAME}.json oben „repoFolders“ eintragen, für alle Quellen, etwa "repoFolders": ["~/Repos"]`);
   } else if (!list.length) {
     notes.push(`In ${folders.join(", ")} liegt ${onMachine(on)} kein Git-Repo; die Ordner stehen unter „repoFolders“ in ${CONFIG_NAME}.json oder in den Einstellungen dieses Rechners`);
   }
-  if (sameKey) notes.push(`„${sameKey[0].key}“ liegt ${onMachine(on)} in ${andJoined(sameKey.map((r) => r.written))}; bitte eines davon wählen`);
+  if (sameKey) notes.push(sameKeyNote(sameKey, on));
   if (lost) notes.push(`„${lost}“ liegt ${onMachine(on)} in keinem Repo-Ordner; bitte ein Repo wählen`);
   return notes;
 }
@@ -9687,7 +11050,7 @@ function loadAgents(b, cx) {
   m.agentNote = null;
   cx.spawn(async (cx) => {
     try {
-      const agents = (await knownAgents({ on })).filter((a) => a.installed);
+      const agents = await installedAgents(on);
       if (!stillOpen(b, m) || m.machines[m.machine] !== on) return;
       m.agents = agents;
       const wanted = m.settings.agent;
@@ -9698,7 +11061,7 @@ function loadAgents(b, cx) {
       }
     } catch (e) {
       if (!stillOpen(b, m) || m.machines[m.machine] !== on) return;
-      m.agentsError = `Agents ${onMachine(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
+      m.agentsError = agentsUnreadable(on, e);
     }
     m.notes = [m.machineNote, m.agentNote].filter(Boolean);
     cx.notify();
@@ -9715,19 +11078,13 @@ function chooseMachine(b, machine, cx) {
   loadRepos(b, cx);
 }
 
-async function shOutput(m, args, on, kind, said = () => null) {
-  const r = await call("sh", args, on, SH_TIMEOUT, what(m.view, kind));
-  if (r.code !== 0) throw new BoardError(said(r.code) ?? (firstLine(r.stderr) || `sh endete mit ${r.code}`));
-  return r.stdout;
-}
-
 async function ownFolder(b, m, repo, on) {
   const gone = (code) => {
     if (code !== NO_FOLDER) return null;
     const path = ["repos", repo.key, "checkout"];
     return `Den Ordner ${repo.written} aus ${pathText(path)} (${b.origin(path)}) gibt es ${onMachine(on)} nicht; das Repo dort klonen oder den Ordner ändern`;
   };
-  const folder = lastLine(await shOutput(m, checkoutArgs(repo.written), on, "checkout", gone));
+  const folder = lastLine(await shRun(checkoutArgs(repo.written), on, m.view, "checkout", gone));
   if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
   return folder;
 }
@@ -9764,9 +11121,9 @@ function loadRepos(b, cx) {
     let found = null;
     let why = null;
     try {
-      found = parseRepos(await shOutput(m, reposArgs(folders), on, "repos"), folders);
+      found = await reposScan(folders, on, m.view);
     } catch (e) {
-      why = `Repos ${onMachine(on)} nicht lesbar: ${report(e)}`;
+      why = reposUnreadable(report(e), on);
     }
     if (b.modal?.repos !== repos) return;
     if (found) listed(found);
@@ -10112,11 +11469,11 @@ function soloEntries(b, view) {
   });
 }
 
-const soloChoices = (b) => ({
+const soloChoices = (b, view) => ({
   [SOLO_FIELD]: {
-    entries: (m) => soloEntries(b, m.view),
-    current: (m) => soloNow(b, m.view)?.chosen ?? null,
-    take: (b, row, cx) => b.setSoloRepo(b.modal.view, row.id, cx),
+    entries: () => soloEntries(b, view),
+    current: () => soloNow(b, view)?.chosen ?? null,
+    take: (b, row, cx) => b.setSoloRepo(view, row.id, cx),
     closes: true,
     placeholder: "Filter: Name des Repos",
     none: "Kein Repo passt zum Filter",
@@ -10147,7 +11504,7 @@ export function soloField(b, t, view, solo) {
 export const soloModal = {
   open(b, view, cx) {
     b.modal = { kind: "solo", view, field: SOLO_FIELD, list: null };
-    openList(b, soloChoices(b), SOLO_FIELD, cx);
+    openList(b, soloChoices(b, view), SOLO_FIELD, cx);
   },
 
   needsData: true,
@@ -10211,10 +11568,12 @@ export const statusModal = {
 // Optional: keys, the key bindings Board.bindKeys binds for it,
 // keyboard(m), the input that takes the keyboard before its fields
 // (Board.takeKeyboard), and hint, what the board's hint line says while it
-// is open in place of the board's keys. A new dialog is a module here and
-// its entry in MODALS.
+// is open in place of the board's keys (a text, or hint(b): a text or the
+// keys and what they do, [key, text] each); ofSettingsPage, a dialog of the
+// settings page, which closes as the page goes with an invalid views.json.
+// A new dialog is a module here and its entry in MODALS.
 
-export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal, sessions: sessionsModal, repos: reposModal, solo: soloModal };
+export const MODALS = { start: startModal, status: statusModal, columns: columnsModal, create: createModal, assign: assignModal, commands: commandsModal, sprints: sprintsModal, sessions: sessionsModal, repos: reposModal, solo: soloModal, setting: settingModal, settingChoice: settingChoiceModal, settingRepos: settingReposModal };
 
 // ==== src/ui/shapes/backlog.js ====
 
@@ -12391,6 +13750,175 @@ export function shownDescription(text, format) {
   return format === "html" ? keptHtml(raw) : keptMarkdown(raw);
 }
 
+// ==== src/ui/settings/draw.js ====
+
+// How the settings page draws (ui/settings/index.js): its top bar, its
+// topics on the left and the shown topic's rows on the right.
+
+const LABEL_W = 200;
+const ORIGIN_W = 100;
+const NAV_W = 220;
+
+function originChip(t, origin) {
+  if (!origin) return div();
+  if (origin === ORIGIN.machine) return toneChip(t, origin, "ansi6").flex_none();
+  if (origin === ORIGIN.base) return toneChip(t, origin, "muted").flex_none();
+  return div().text_size(11).text_color(t.dim).child(origin);
+}
+
+function navRow(b, t, topic, i, marked) {
+  return h_flex()
+    .id(`topic-${topic.id}`)
+    .items_start()
+    .gap(8)
+    .px(8)
+    .py(6)
+    .rounded(6)
+    .cursor_pointer()
+    .when(marked, (el) => el.bg(t.selected))
+    .hover((s) => s.bg(t.hover))
+    .on_click((_e, cx) => {
+      if (!b.modal) showSettingsTopic(b, topic.id, cx);
+    })
+    .child(div().w(14).flex_none().text_size(11).text_color(t.dim).child(i < 9 ? String(i + 1) : ""))
+    .child(v_flex().flex_1().min_w(0)
+      .child(div().truncate().when(marked, (el) => el.font_semibold()).child(topic.name))
+      .child(div().truncate().text_size(11).text_color(t.muted).child(topic.note)));
+}
+
+const addLine = (t, add, marked) =>
+  h_flex()
+    .gap(8)
+    .items_center()
+    .px(10)
+    .py(6)
+    .rounded(6)
+    .text_size(12)
+    .text_color(t.dim)
+    .when(marked, (el) => el.bg(t.selected))
+    .child(div().font_semibold().text_color(add.run ? t.foreground : t.dim).child("a"))
+    .child(div().child(add.text))
+    .when(Boolean(add.later), (el) => el.child(div().text_color(t.dim).child(`· ${add.later}`)));
+
+function topicNav(b, t, topics, shown) {
+  const heading = (id, text, first) => div().id(id).px(8).pt(first ? 4 : 8).pb(2).truncate().text_size(11).text_color(t.muted).child(text);
+  const kids = [];
+  let source = null;
+  topics.forEach((topic, i) => {
+    if (topic.kind === "context" && topic.context.source !== source) {
+      source = topic.context.source;
+      const name = sourceName(source);
+      kids.push(heading(`topic-head-${source}`, source === "azure" ? `${name} · ${orgName(b.config.azure.org)}` : name, !kids.length));
+    }
+    if (topic.kind !== "context" && source !== "") {
+      source = "";
+      kids.push(addLine(t, { text: "Kontext hinzufügen …", run: null, later: LATER }, false).id("add-context").px(8));
+      kids.push(div().id("topic-rule").h(1).mt(8).mb(4).bg(t.border));
+    }
+    kids.push(navRow(b, t, topic, i, topic.id === shown.id));
+  });
+  return v_flex().id("topics").w(NAV_W).flex_none().p(8).gap(2).bg(t.chrome).border_r(1).border_color(t.border).children(kids);
+}
+
+// The fields of the edit open in a knob or an add, each with its unit.
+function editor(t, m) {
+  const field = (id) => h_flex().gap(6).items_center().when(!m.widths[id], (el) => el.flex_1().min_w(0))
+    .child(fieldFrame(t, m, id, Input.new(m.inputs[id]).flex_1().text_size(12).text_color(t.foreground)).when(Boolean(m.widths[id]), (el) => el.w(m.widths[id])).when(!m.widths[id], (el) => el.flex_1().min_w(0)))
+    .when(Boolean(m.units[id]), (el) => el.child(div().text_size(12).text_color(t.muted).child(m.units[id])));
+  return h_flex().id("setting-editor").gap(8).items_center().children(m.fields.map(field));
+}
+
+const errorLines = (t, texts) => texts.map((text) => div().text_size(12).text_color(toneColor(t, NOTE_TONES.error)).child(text));
+
+// What the row `id` says why its change was not made: the open edit's
+// error, else the page's problem.
+function refusals(b, id) {
+  const m = b.modal;
+  if (m?.kind === "setting" && m.row === id) return m.error ?? [];
+  const problem = settingsOf(b).problem;
+  return problem?.row === id ? problem.texts : [];
+}
+
+function knobLine(b, t, mono, knob, marked) {
+  const m = b.modal;
+  const editing = m?.kind === "setting" && m.row === knob.id && m.topic === settingsOf(b).topic;
+  const was = editing ? knob.editWas ?? knob.was : knob.wasMarked && !marked ? null : knob.was;
+  const value = editing ? editor(t, m) : knob.value(t, mono);
+  return h_flex()
+    .id(`knob-${knob.id}`)
+    .gap(12)
+    .px(10)
+    .py(8)
+    .rounded(8)
+    .border_1()
+    .map(selectedLook(t, marked, t.border, t.background))
+    .map((el) => (knob.top ? el.items_start() : el.items_center()))
+    .on_click((_e, cx) => {
+      if (!b.modal) markKnob(b, knob.id, cx);
+    })
+    .when(Boolean(knob.stripe), (el) => el.child(div().w(2).self_stretch().flex_none().rounded(1).bg(toneColor(t, knob.stripe ?? "muted"))))
+    .child(v_flex().w(LABEL_W).flex_none().min_w(0)
+      .child(h_flex().gap(6).items_center().min_w(0)
+        .when(knob.d !== undefined, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(String(knob.d))))
+        .child(div().min_w(0).truncate().child(knob.name)))
+      .when(Boolean(knob.key), (el) => el.child(div().truncate().font_family(mono).text_size(11).text_color(t.dim).child(knob.key ?? ""))))
+    .child(v_flex().flex_1().min_w(0).gap(4)
+      .child(h_flex().gap(6).items_center().flex_wrap().min_w(0).text_size(knob.mono ? 12 : 13).child(value).when(Boolean(knob.loading), (el) => el.child(loadingLine(t))))
+      .when(Boolean(knob.extra), (el) => el.child(knob.extra?.(t, b, marked) ?? div()))
+      .children(errorLines(t, refusals(b, knob.id)))
+      .children((knob.warn ?? []).map((text) => div().text_size(12).text_color(toneColor(t, NOTE_TONES.warning)).child(text)))
+      .when(Boolean(was), (el) => el.child(div().text_size(11).text_color(t.dim).child(was ?? ""))))
+    .child(h_flex().w(ORIGIN_W).flex_none().child(originChip(t, originOf(b, knob))))
+    .child(div().w(12).flex_none().text_color(t.dim).child(knob.go ? "›" : ""));
+}
+
+function rowElement(b, t, mono, r, marked) {
+  if (r.row === "head") {
+    return v_flex().id("settings-head").px(18).py(14).gap(8).border_b(1).border_color(t.border)
+      .child(div().font_family(mono).text_size(11.5).text_color(t.muted).child(r.path))
+      .child(div().text_size(15).font_semibold().line_height("20px").child(r.title))
+      .child(div().text_size(12).text_color(t.muted).child(r.small));
+  }
+  const frame = (el) => el.px(18).pb(r.end ? 12 : 6).when(Boolean(r.end), (e) => e.border_b(1).border_color(t.border));
+  if (r.row === "title") {
+    return frame(h_flex().pt(12).gap(10).items_center().text_size(11).text_color(t.muted)
+      .child(div().child(r.title))
+      .when(Boolean(r.key), (el) => el.child(div().font_family(mono).text_color(t.dim).child(r.key ?? ""))));
+  }
+  if (r.row === "line") {
+    if (r.loading) return frame(loadingLine(t, r.text));
+    return frame(div().child(div().text_size(12).text_color(r.tone === "muted" ? t.muted : toneColor(t, NOTE_TONES[r.tone])).child(r.text)));
+  }
+  const choosing = b.modal?.kind === "settingChoice";
+  if (r.row === "add") {
+    const m = b.modal;
+    const shown = m?.kind === "setting" && m.row === r.add.id
+      ? v_flex().id(r.add.id).gap(4).px(10).py(6).child(editor(t, m)).children(errorLines(t, m.error ?? []))
+      : v_flex().id(r.add.id).gap(4).child(addLine(t, r.add, marked)).children(errorLines(t, refusals(b, r.add.id)).map((el) => el.px(10)));
+    return frame(div().child(r.add.field ? listPopup(b, t, r.add.field, "top_left", shown, choosing) : shown));
+  }
+  const line = knobLine(b, t, mono, r.knob, marked);
+  return frame(div().child(r.knob.add ? listPopup(b, t, r.knob.field, "top_left", line, choosing) : line));
+}
+
+// The page in place of the board's top bar and content: its own top bar
+// and body (the board's banner, hint line and dialogs go with them).
+export function drawSettingsPage(b, t, mono) {
+  const topic = shownTopic(b);
+  const rows = topicRows(b, topic);
+  const marked = markedIn(b, navRows(rows));
+  const top = v_flex().id("top-bar").flex_none().border_b(1).border_color(t.border).child(
+    h_flex().px(16).py(8).gap(12).items_center()
+      .child(div().flex_none().text_size(15).font_semibold().child("Einstellungen"))
+      .child(div().flex_none().text_size(12).text_color(t.muted).child(`${CONFIG_NAME}.json, darüber dieser Rechner: ${b.settingsName()}`)),
+  );
+  const pane = v_flex().id("settings-pane").flex_1().min_w(0).min_h(0).overflow_y_scrollbar().track_scroll(b.settingsScroll)
+    .children(rows.map((r) => rowElement(b, t, mono, r, r === marked)))
+    .child(div().h(12));
+  const body = h_flex().id("settings").flex_1().min_h(0).items_stretch().child(topicNav(b, t, settingsTopics(b), topic)).child(pane);
+  return { top, body };
+}
+
 // ==== src/main.js ====
 
 const TICK_MS = 30000;
@@ -12477,11 +14005,15 @@ export default class Board extends View {
     this.handle = cx.focus_handle();
     this.config = null;
     this.configErrors = [];
-    // views.json's text, this machine's settings file as last read, or as
-    // the board's latest change makes it ({ text } or { error }), what
-    // readConfig applied of it and its move of them, and the view kinds of
-    // the last valid config.
-    this.configState = { text: null, settingsRead: null, settings: null, origin: () => ORIGIN.builtin, moving: null, kinds: null };
+    // views.json's text; this machine's settings file as last read ({ text }
+    // or { error }), as the board's latest change makes it ({ text, outcome
+    // }; outcome: that change's write while it is queued, { refused }), or
+    // as read again after a refused write a change was made over (as read,
+    // with the latest such change's outcome, as its landing decides, and
+    // carriedRefusal, the first such refusal's words); what readConfig
+    // applied of it and its move of them; and the view kinds of the last
+    // valid config.
+    this.configState = { text: null, settingsRead: null, settings: null, origin: () => ORIGIN.builtin, merged: null, base: null, moving: null, kinds: null };
     this.settingsWrites = Promise.resolve();
     this.views = {}; // per view id, see state()
     this.prefetchWaits = false;
@@ -12509,6 +14041,10 @@ export default class Board extends View {
     // What each shape keeps per Board, by shape name (state(),
     // shapes/index.js).
     this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
+    // The settings page while it shows (ui/settings/index.js), and its
+    // scroll.
+    this.settingsPage = null;
+    this.settingsScroll = ScrollHandle.new();
     // What the related items' lines keep (ui/related.js), and the details
     // panel's keyboard while it has it (panelOf).
     this.relatedUi = relatedState();
@@ -12601,6 +14137,7 @@ export default class Board extends View {
   // carries the board's key context only while this holds.
   takesTab() {
     if (this.modal) return Boolean(MODALS[this.modal.kind].tab);
+    if (this.settingsPage) return false;
     return !this.filtering && this.panelTakes(this.detailsRoot());
   }
 
@@ -12790,8 +14327,15 @@ export default class Board extends View {
   takeConfig() {
     const c = this.configState;
     const read = c.settingsRead && { name: this.settingsName(), ...c.settingsRead };
-    ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin, moving: c.moving = null } = readConfig(c.text, read));
-    if (!this.config) return false;
+    ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin, merged: c.merged, base: c.base, moving: c.moving = null } = readConfig(c.text, read));
+    if (!this.config) {
+      this.settingsPage = null;
+      if (this.modal && MODALS[this.modal.kind].ofSettingsPage) {
+        this.modal = null;
+        this.handle.focus();
+      }
+      return false;
+    }
     this.takeKinds();
     this.moveShownSource();
     return true;
@@ -12856,32 +14400,49 @@ export default class Board extends View {
   }
 
   // `before`: { id, columns }, the shown columns of a view whose selection
-  // follows (reselectIn). Resolves to whether the file has the changes.
-  changeSettings(changes, cx, before = null) {
+  // follows (reselectIn); `checked`: settingsChecked's for the changes, made
+  // only where it gives the file's text, else the banner says why. → {
+  // started (whether the board took them, the write queued), done (resolves
+  // to whether the file has them; the banner says a write herdr refused) }.
+  changeSettings(changes, cx, before = null, checked = this.settingsChecked(changes)) {
+    if (checked.text === undefined) {
+      this.say(`Nicht geändert: ${checked.why ?? checked.refused.join("; ")}`, "error", cx);
+      return NOT_STARTED;
+    }
     const name = this.settingsName();
     const c = this.configState;
     const read = c.settingsRead;
-    const after = read && !("error" in read) ? settingsAfter(read.text, changes, name, nameKeyAt) : null;
-    const why = !read
-      ? `${name} ist noch nicht gelesen`
-      : "error" in read
-        ? `${name} ließ sich nicht lesen: ${read.error}`
-        : after.error ?? (c.settings ? null : settingsAlone(name));
-    if (why) {
-      this.say(`Nicht geändert: ${why}`, "error", cx);
-      return Promise.resolve(false);
-    }
-    const built = read.text;
-    c.settingsRead = { text: after.text };
+    const outcome = { refused: null };
+    c.settingsRead = { text: checked.text, outcome };
     this.takeConfig();
     this.followSettings(cx, before);
     cx.notify();
     const words = { refused: (why) => `${name} nicht gespeichert: ${why}`, stale: CHANGED_MEANWHILE };
-    return this.queueSettingsWrite((cx) => this.writeSettingsFile(this.changeStep(changes, built), words, cx), cx);
+    const done = this.queueSettingsWrite((cx) => this.writeSettingsFile(this.changeStep(changes, read.text), words, cx, { outcome, prior: read.outcome ?? null }), cx);
+    return { started: true, done };
   }
 
   changeSetting(path, value, cx, before = null) {
-    return this.changeSettings([[path, value]], cx, before);
+    return this.changeSettings([[path, value]], cx, before).done;
+  }
+
+  // This machine's file with `changes` ({ text }), or why it cannot have
+  // them ({ why }, which changeSettings says in the banner); `strict`, as
+  // the settings page writes, also refuses changes views.json and the file
+  // read with them would not apply, and a file that cannot take them: {
+  // refused }, readConfig's refused or settingsAfter's error.
+  settingsChecked(changes, strict = false) {
+    const name = this.settingsName();
+    const c = this.configState;
+    const read = c.settingsRead;
+    if (!read) return { why: `${name} ist noch nicht gelesen` };
+    if ("error" in read) return { why: `${name} ließ sich nicht lesen: ${read.error}` };
+    const after = settingsAfter(read.text, changes, name, nameKeyAt);
+    if (after.error) return strict ? { refused: [after.error] } : { why: after.error };
+    if (!c.settings) return { why: settingsAlone(name) };
+    if (!strict) return { text: after.text };
+    const r = readConfig(c.text, { name, text: after.text });
+    return r.settings ? { text: after.text } : { refused: r.refused };
   }
 
   // `built`: the file's text the changes were made over.
@@ -12913,14 +14474,31 @@ export default class Board extends View {
     return done;
   }
 
-  // The one writer of this machine's settings file; step(fresh) gives { text } or { why }.
-  async writeSettingsFile(step, words, cx) {
+  // The one writer of this machine's settings file; step(fresh) gives { text }
+  // or { why }. `outcome`: the write of a change ({ refused: the banner's
+  // words, once refused }), `prior` that of the change it was made over:
+  // where that one was refused, this one's own refusal says that cause. A
+  // write that lands takes the file's text for the board only where no
+  // change was made over it since; where one was, the page's dialogs whose
+  // rows are gone close as that one lands, after the words of the first
+  // refusal that left them open, or as it is refused, after its own. A
+  // change made while a refused write reads the file again is the
+  // exception: that read replaces it.
+  async writeSettingsFile(step, words, cx, { outcome = null, prior = null } = {}) {
     const file = this.settingsFile();
+    const c = this.configState;
+    const laterChange = () => Boolean(c.settingsRead?.outcome) && c.settingsRead.outcome !== outcome;
     const refused = async (why) => {
-      this.say(words.refused(why), "error", cx);
+      const said = prior?.refused ?? words.refused(why);
+      if (outcome) outcome.refused = said;
+      this.say(said, "error", cx);
+      const keepDialogs = laterChange();
+      const latest = c.settingsRead?.outcome;
+      const carried = c.settingsRead?.carriedRefusal;
       await this.readSettingsFile();
+      if (keepDialogs && latest) Object.assign(c.settingsRead, { outcome: latest, carriedRefusal: carried ?? said });
       this.takeConfig();
-      this.followSettings(cx);
+      this.followSettings(cx, null, { refusal: said, keepDialogs });
       cx.notify();
       return false;
     };
@@ -12940,9 +14518,12 @@ export default class Board extends View {
         return refused(staleRefusal(e) ? words.stale : firstLine(e?.message ?? e));
       }
     }
-    this.configState.settingsRead = { text: next.text };
-    this.takeConfig();
-    this.followSettings(cx);
+    if (!laterChange()) {
+      const refusal = c.settingsRead?.carriedRefusal ?? prior?.refused ?? null;
+      c.settingsRead = { text: next.text };
+      this.takeConfig();
+      this.followSettings(cx, null, { refusal });
+    }
     if (writes && words.done) this.say(words.done, "info", cx);
     cx.notify();
     return true;
@@ -12951,8 +14532,10 @@ export default class Board extends View {
   // After a settings change by the board: what of a view's settings its
   // shape draws from without a read (withView) shows at once; a view whose
   // hide changed shows it so and is read again, as is one whose query now
-  // leaves other repos out (readsAgain); `before` as in changeSettings.
-  followSettings(cx, before = null) {
+  // leaves other repos out (readsAgain); the settings page follows
+  // (followSettingsPage, `page` its { refusal, keepDialogs }); `before` as
+  // in changeSettings.
+  followSettings(cx, before = null, page = {}) {
     for (const view of this.viewsNow()) {
       const st = this.views[view.id];
       const settled = st?.data && SHAPES[st.data.shape].withView?.(st.data, view);
@@ -12970,6 +14553,7 @@ export default class Board extends View {
       // What a column holds comes from the query, which leaves hidden ones out.
       this.refresh(view, cx);
     }
+    followSettingsPage(this, cx, page);
   }
 
   // Settings that do not apply keep the stored entries for a later read.
@@ -12979,7 +14563,7 @@ export default class Board extends View {
     const { moves, drop } = storedHiddenMoves(this.viewsNow().filter((v) => v.source === "github"), entryOf, (path) => this.origin(path));
     for (const view of drop) store.remove(hiddenKey(view.id));
     if (!moves.length) return;
-    this.changeSettings(moves.map((m) => [hidePath(m.view), m.list]), cx).then((done) => {
+    this.changeSettings(moves.map((m) => [hidePath(m.view), m.list]), cx).done.then((done) => {
       if (done) for (const m of moves) store.remove(hiddenKey(m.view.id));
     });
   }
@@ -13002,6 +14586,7 @@ export default class Board extends View {
         await this.moveSettings(moving, settingsRead.text, cx);
         valid = Boolean(this.config);
       }
+      followSettingsPage(this, cx);
       this.paths.reset();
       for (const st of Object.values(this.views)) st.unavailable = false;
       cx.notify();
@@ -13978,6 +15563,7 @@ export default class Board extends View {
       related: this.readsRelated(details), sessions: details ? itemSessions(this.sessionsNow(), details).length : 0,
       panel, lines, line: panel?.line ?? null, picked: panel ? pickedLine(lines, panel.line) : null,
       drilled: levels.length > 0, trail: details ? [this.detailsRootOf(view).key, ...levels.map((l) => l.item.key)] : null,
+      ...settingsSituation(this),
     };
   }
 
@@ -14026,6 +15612,7 @@ export default class Board extends View {
     const g = this.afterG;
     this.afterG = false;
     if (this.modal) return this.modalKey(e, cx);
+    if (this.settingsPage) return this.settingsKey(e, cx);
     if (this.filtering) {
       if (k === "escape") {
         this.handle.focus();
@@ -14109,6 +15696,44 @@ export default class Board extends View {
     MODALS.repos.open(this, view, cx);
   }
 
+  // The settings page's list of a PR tab's repos (ui/modals/setting.js), in
+  // MODALS, which the page's modules cannot import: the command menu
+  // (ui/modals/commands.js) imports commands.js, which imports them.
+  openSettingRepos(list, cx) {
+    MODALS.settingRepos.open(this, list, cx);
+  }
+
+  // Whether the settings page's shown topic has the row `id`, for
+  // ui/settings/knobs.js, which ui/settings/index.js imports.
+  settingsRowShown(id) {
+    return rowShown(this, id);
+  }
+
+  // A key while the settings page shows and no dialog is open: Esc back to
+  // the board, j/k and the arrows up and down mark a knob, ← → and h/l step
+  // its value or move along its switches, space turns one or opens its
+  // list; the rest are the page's actions (commands.js).
+  settingsKey(e, cx) {
+    const k = e.key;
+    const mod = e.modifiers ?? {};
+    const done = () => {
+      cx.stop_propagation();
+      cx.notify();
+    };
+    if (k === "tab") return;
+    const c = this.situation();
+    if (k === "escape") return leaveSettingsPage(this, cx), done();
+    const bare = !(mod.control || mod.alt || mod.platform || mod.shift);
+    const dir = bare ? { j: 1, down: 1, k: -1, up: -1 }[k] : undefined;
+    if (dir) return walkKnobs(this, dir), done();
+    const side = bare ? { h: -1, left: -1, l: 1, right: 1 }[k] : undefined;
+    if (side) return sideKey(this, c.knob, side, cx), done();
+    if (bare && k === "space") return c.knob?.space?.run(this, cx), done();
+    const name = keyName(k, e.key_char ?? "", mod);
+    const action = name ? actionFor(name, c) : null;
+    if (action) return action.run(this, c, cx), done();
+  }
+
   // The command menu (ui/modals/commands.js): the actions that can run now,
   // on the selection the board keeps, as an action's key finds it.
   openCommands(cx) {
@@ -14172,10 +15797,16 @@ export default class Board extends View {
       .on_mouse_up("left", (_e, cx) => this.endDrag(cx))
       .on_hover((hovered, cx) => {
         if (!hovered) this.endDrag(cx);
-      })
-      .child(this.toolbar(t, view, st));
+      });
     if (releases) for (const button of OUTSIDE_BUTTONS) out = out.on_window_mouse_up(button, (e, cx) => this.releaseOutside(e, cx));
-    if (this.notice || this.configErrors.length) out = out.child(this.banner(t));
+    const banner = this.notice || this.configErrors.length;
+    if (this.settingsPage) {
+      const { top, body } = drawSettingsPage(this, t, mono);
+      out = out.child(top).when(Boolean(banner), (el) => el.child(this.banner(t))).child(body).child(this.hints(t));
+      return this.modal ? out.child(MODALS[this.modal.kind].render(this, t)) : out;
+    }
+    out = out.child(this.toolbar(t, view, st));
+    if (banner) out = out.child(this.banner(t));
     out = out
       .child(
         // h_flex centres its items; the content and the detail span the
@@ -14283,8 +15914,7 @@ export default class Board extends View {
       if (context.source !== source) {
         if (source) parts.push(div().id(`context-rule-${context.source}`).flex_none().self_stretch().w(1).my(4).mx(4).bg(t.border));
         source = context.source;
-        const name = SOURCES.find((s) => s.id === source).name;
-        parts.push(div().id(`context-source-${source}`).flex_none().pl(8).pr(4).text_size(11).text_color(t.dim).child(name));
+        parts.push(div().id(`context-source-${source}`).flex_none().pl(8).pr(4).text_size(11).text_color(t.dim).child(sourceName(source)));
       }
       parts.push(this.segment(t, "context", { id: context.id, label: context.name }, shown.id, pick));
     }
@@ -14515,8 +16145,10 @@ export default class Board extends View {
   // The hint line: the keys of what shows now, as the action table says
   // them (hintsOf), or the open dialog's hint where it has one.
   hints(t) {
-    const said = this.modal ? MODALS[this.modal.kind].hint : null;
-    const keys = said ? [] : hintsOf(this.situation());
+    const hint = this.modal ? MODALS[this.modal.kind].hint : null;
+    const told = typeof hint === "function" ? hint(this) : hint;
+    const said = typeof told === "string" ? told : null;
+    const keys = Array.isArray(told) ? told : said ? [] : hintsOf(this.situation());
     // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()

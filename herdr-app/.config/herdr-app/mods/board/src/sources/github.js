@@ -9,6 +9,7 @@ import { GH_TIMEOUT, call, what } from "../tools.js";
 import { repoOwnership } from "../kinds/list.js";
 import { GITHUB_COLORS, NO_VALUE, fromOf, groupsOf, orderEntry, readable, readByName, valueOf, viewOrder } from "../kinds/fields.js";
 import { kindOf } from "../kinds/index.js";
+import { orderedViews } from "../contexts.js";
 
 // A filter term on a project's field: GitHub's filters take the field's name
 // in lower case, spaces as dashes, and values in quotes (measured for
@@ -604,27 +605,31 @@ export function parseGithubTable(json, view, errors, plan) {
   };
 }
 
-// An Issues tab's repos, as its repo menu offers them: the owner's own
-// with issues on, archived ones left out, by name, REPOS_PAGES pages of
-// PAGE at most; and whether the owner is a user or an organisation, which
-// its search names (issuesQuery).
+// The owner's own repos, archived ones left out, by name, REPOS_PAGES
+// pages of PAGE at most, and whether the owner is a user or an
+// organisation: ISSUE_REPOS_QUERY those with issues on, an Issues tab's, as
+// its repo menu offers them, whose search names the owner so (issuesQuery);
+// OWNER_REPOS_QUERY the same without `hasIssuesEnabled`, the repos the
+// settings page offers a PR tab.
 export const REPOS_PAGES = 10;
-export const ISSUE_REPOS_QUERY = `query($login: String!, $after: String) {
+const reposQuery = (only) => `query($login: String!, $after: String) {
   repositoryOwner(login: $login) {
     __typename
-    repositories(first: ${PAGE}, after: $after, ownerAffiliations: [OWNER], hasIssuesEnabled: true, isArchived: false, orderBy: { field: NAME, direction: ASC }) {
+    repositories(first: ${PAGE}, after: $after, ownerAffiliations: [OWNER], ${only}isArchived: false, orderBy: { field: NAME, direction: ASC }) {
       pageInfo { hasNextPage endCursor } nodes { nameWithOwner }
     }
   }
 }`;
+export const ISSUE_REPOS_QUERY = reposQuery("hasIssuesEnabled: true, ");
+export const OWNER_REPOS_QUERY = reposQuery("");
 
-export const githubIssueReposArgs = (owner, after = null) =>
-  ["api", "graphql", "-f", `query=${ISSUE_REPOS_QUERY}`, "-f", `login=${owner}`, ...(after ? ["-f", `after=${after}`] : [])];
+export const githubOwnerReposArgs = (owner, { query, after = null }) =>
+  ["api", "graphql", "-f", `query=${query}`, "-f", `login=${owner}`, ...(after ? ["-f", `after=${after}`] : [])];
 
-// gh's answer for githubIssueReposArgs (and its GraphQL errors) → { org
+// gh's answer for githubOwnerReposArgs (and its GraphQL errors) → { org
 // (the owner is an organisation), repos (their names with the owner), after
 // (the cursor of the next page, null for none) }.
-export function parseIssueRepos(json, owner, errors = []) {
+export function parseOwnerRepos(json, owner, errors = []) {
   const node = json?.data?.repositoryOwner;
   const repos = node?.repositories;
   if (!Array.isArray(repos?.nodes)) {
@@ -688,7 +693,7 @@ const NO_PLAN = { priority: null };
 // gh's answers for an Issues tab's view (githubIssuesArgs and its pages,
 // joined by addPage) → the issues shape's data (ui/shapes/issues.js): {
 // shape: "issues", meta: { owner, state, query }, repos (the owner's,
-// parseIssueRepos), rows (githubCard's cards in GitHub's order, each with
+// parseOwnerRepos), rows (githubCard's cards in GitHub's order, each with
 // its stateReason and updatedAt), readHidden (the repos turned off as the
 // read began), hideRepos, owners, total, limited, count, viewer }. A search
 // that stops at its cap says no more follow: a total above what came is cut
@@ -1472,13 +1477,13 @@ export function makeGithub(paths) {
   // A project's view, of whichever layout: the project with its views and
   // fields (githubProjectArgs), which the board learns (live.project); then,
   // of the view it shows (the view's own, or for the view that learns them
-  // the one it wants, else the first), its items' pages (readPages), read
-  // as its layout's plan says (planFor), a view of a layout the board does
-  // not draw reading none. Both reads are one load, so that the view's state,
-  // progress, error and saved data stay those of one read; the board, which
-  // knows what shows, names the view it goes on with. A board's move writes
-  // the card's column (one layout's data may stand in another's view until
-  // its read).
+  // the one it wants, else the first of its switch), its items' pages
+  // (readPages), read as its layout's plan says (planFor), a view of a
+  // layout the board does not draw reading none. Both reads are one load, so
+  // that the view's state, progress, error and saved data stay those of one
+  // read; the board, which knows what shows, names the view it goes on with.
+  // A board's move writes the card's column (one layout's data may stand in
+  // another's view until its read).
   const projectViews = {
     async load(view, { hiddenFor, live = NO_LIVE }) {
       // The hidden columns as the load starts: a change since reads again.
@@ -1487,7 +1492,7 @@ export function makeGithub(paths) {
       const project = parseGithubProject(head.json, view, head.errors);
       const meta = projectMeta(project);
       const { wanted = null } = view;
-      const number = view.address.view ?? (project.views.some((v) => v.number === wanted) ? wanted : project.views[0]?.number);
+      const number = view.address.view ?? (project.views.some((v) => v.number === wanted) ? wanted : orderedViews(project.views, view.switchOrder)[0]?.number);
       const shown = project.views.find((v) => v.number === number);
       if (!shown) {
         const why = view.address.view === null ? "hat keine Ansichten" : `hat keine Ansicht ${view.address.view} mehr`;
@@ -1512,12 +1517,12 @@ export function makeGithub(paths) {
   // An Issues tab's view: its owner's repos once while the board runs (`r`
   // drops them: forget), then its search's pages (readPages).
   const issueRepos = readMemo();
-  async function readIssueRepos(view) {
+  async function readOwnerRepos(view, query) {
     const read = { org: false, repos: [] };
     let after = null;
     for (let call = 1; call <= REPOS_PAGES; call++) {
-      const { json, errors } = await gh(paths, githubIssueReposArgs(view.owner, after), what(view, `repos-page-${call}`));
-      const page = parseIssueRepos(json, view.owner, errors);
+      const { json, errors } = await gh(paths, githubOwnerReposArgs(view.owner, { query, after }), what(view, `repos-page-${call}`));
+      const page = parseOwnerRepos(json, view.owner, errors);
       Object.assign(read, { org: page.org, repos: [...read.repos, ...page.repos] });
       after = page.after;
       if (!after) break;
@@ -1527,7 +1532,7 @@ export function makeGithub(paths) {
   const issueViews = {
     async load(view, { live = NO_LIVE }) {
       const hidden = [...view.hideRepos];
-      const { org, repos } = await issueRepos.get(foldedName(view.owner), () => readIssueRepos(view));
+      const { org, repos } = await issueRepos.get(foldedName(view.owner), () => readOwnerRepos(view, ISSUE_REPOS_QUERY));
       const query = issuesQuery(view, org, hidden, repos);
       const parse = (json, errors) => parseGithubIssues(json, view, { repos, hidden, query }, errors);
       const pageArgs = (next) => githubIssuesArgs(view, query, next.count, next.after);
@@ -1578,6 +1583,11 @@ export function makeGithub(paths) {
   return {
     site: "GitHub",
     forget: (view) => views[view.layout]?.forget?.(view),
+    // The settings page's lists of a context's repos: those its Issues tab
+    // reads (`issues`), the same read, or all the owner's but the archived
+    // ones (OWNER_REPOS_QUERY), read at each call.
+    ownerRepos: (owner, { issues }) =>
+      (issues ? issueRepos.get(foldedName(owner), () => readOwnerRepos({ owner }, ISSUE_REPOS_QUERY)) : readOwnerRepos({ owner }, OWNER_REPOS_QUERY)),
     noViewer: "GitHub hat nicht gesagt, als wer gh angemeldet ist",
     related: {
       reads: (item) => item.kind === "issue" && Number.isInteger(item.number) && item.repo.includes("/"),

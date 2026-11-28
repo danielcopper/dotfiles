@@ -2,7 +2,7 @@
 // (its shape's repoSwitches), so a toggle shows at once.
 
 import { div } from "gpui-kit";
-import { foreignChip, menu, menuKey, shownOf } from "../helpers.js";
+import { foreignChip, menu, menuKey, repoMenuRow, shownOf } from "../helpers.js";
 
 function menuRepos(b, m) {
   const data = b.state(m.view.id).data;
@@ -34,13 +34,10 @@ export const reposModal = {
       title: "Repos zeigen",
       at: m.at,
       pick: (i, cx) => toggleRepoAt(b, m, i, cx),
-      rows: menuRepos(b, m).map((r) => [
-        div().w(14).text_color(t.foreground).child(r.hidden ? "" : "✓"),
-        div().flex_1().min_w(0).truncate().text_color(r.hidden ? t.muted : t.foreground).child(r.name),
+      rows: menuRepos(b, m).map((r) => repoMenuRow(t, r, div().flex_1().min_w(0).truncate().text_color(r.hidden ? t.muted : t.foreground).child(r.name), [
         ...(r.foreign ? [foreignChip(t)] : []),
         div().flex_none().text_size(11).text_color(t.dim).child(r.held === null ? "" : shownOf(r.shown, r.held)),
-        div().w(80).flex_none().text_size(11).text_color(t.dim).child(r.hidden ? "ausgeblendet" : "gezeigt"),
-      ]),
+      ])),
     });
   },
 

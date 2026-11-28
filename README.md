@@ -534,6 +534,64 @@ by that run. Which files of the package git tracks is set in the root
   of views `views.json` no longer has stay in the localStorage, and all of them
   do while the file does not apply. What else the board remembers, as above,
   stays in herdr's localStorage.
+  The settings page shows and changes this machine's settings: `e`, or
+  "Einstellungen" in the command menu, shows it in place of the board, `Esc`
+  goes back. On its left stands a topic per context, under its platform (Azure
+  with its organisation), "Kontext hinzufügen …" (to come, with the lists read
+  from Azure and GitHub), then "Repos auf diesem Rechner", "Start" and
+  "Allgemein", each with a line of what it holds; a digit (the hint line and
+  the menu call a topic "Kategorie") or a click shows one. On its right stand
+  the shown topic's knobs, each with the key it sets, where it sets one, and
+  where its value comes from ("views.json", "dieser Rechner", "Standard"):
+  `j/k` mark one, `Enter` edits a value in place (`Enter` saves it, `Esc` drops
+  the edit; Tab goes to the next field of a PR section's name and search), `←
+  →` step a choice (an agent, a machine, the language, a view order, a
+  section's tone) or move along a row of switches, which space turns, space
+  opens a choice's list, `a` adds to the marked knob's list, `x` takes the
+  marked entry out, `u` takes the value out of this machine's file, so that
+  `views.json`'s applies again, `J/K` move the marked entry in its list, and `:`
+  offers the page's actions. A change is checked as the board would read the
+  file with it: where it would not apply, the knob says why, in the words the
+  board uses for `views.json`, and where the file cannot hold it (it is no JSON
+  object, or holds a value or a list where the change needs an object), in those
+  it uses for this machine's file, and nothing is written; else it is written at
+  once, as above, and a write herdr refuses, a file the board could not read, or
+  a change while this machine's file does not apply, shows in the banner. An
+  edit, a choice's list or a PR tab's list of repos whose row has left the page
+  meanwhile closes, the banner saying so, after the refusal where a refused
+  write took the row away; an edit whose entry is no longer as it opened says
+  so and stays until `Esc`. A list without a name of its own per entry (the
+  repo folders, an Azure context's teams, the PR sections) is written whole, as
+  `views.json` and this machine's file give it, only where the board takes that
+  list as it stands, and the knob says so: a folder `views.json` adds later
+  reaches this machine only after `u`.
+  "Allgemein" holds `refreshMinutes`, `language` (the board's language; only
+  `"de"`, Deutsch, yet, English is to come), the Azure organisation and the
+  account gh is signed in as, once a read named it. "Start" holds `start`'s
+  agent and machine, from this machine's installed agents and herdr's machines,
+  and the first message and the review message, each with what it gives for an
+  item the board has read. "Repos auf diesem Rechner" holds `repoFolders`, read
+  as the page opens, each with how many git repositories it holds on this
+  machine or the start dialog's note that it is missing, the exceptions
+  (`repos.<owner/repo>.checkout`; `x` on one of `views.json`'s sets it to `null`
+  on this machine, `u` gives it back; `a` asks for the repo, then its folder),
+  and the repos the folders hold, as the start dialog finds them: a context's by
+  their names, then those of no context by platform, of another host and without
+  a remote, each with its folder where that is named otherwise, or the folder
+  whose upstream it is; a context's line names its folders that hold another
+  repo's key too. `a` on a repo in two folders makes one of them its folder. A
+  GitHub context holds its projects, each project's view order and, per board
+  view, its columns as switches (those its last read, or its saved state,
+  names), its Issues tab's name, repos (the owner's with issues, as the tab
+  reads them, as switches) and limit, its PR tab's name and repos (all of the
+  owner's but the archived ones, read again each time the page opens, in a list
+  opened with `Enter` like the repo menu), and the PR sections all GitHub PR
+  tabs share: added from "Alle offenen", "Mir zugewiesen" (`assignee:@me`),
+  "Niemandem zugewiesen" (`no:assignee`) or written by hand, and the searches'
+  limit. An Azure context holds its teams, each with its Sprint and Backlog as
+  switches, and its PR tab as it comes with the project. Adding a project, a
+  team or a context is to come. Reading costs what the header of
+  `mods/board/src/main.js` says under "Calls"; a render reads nothing.
   Each view keeps its last good read in herdr's localStorage (about 217 kB for a
   board of 300 cards; a table keeps its rows packed, each value that rows share
   once, so 1000 rows with a value of their own in every field take about 731 kB;
@@ -594,7 +652,9 @@ by that run. Which files of the package git tracks is set in the root
   took that away, or the action can no longer run on it, it says so instead.
   Ten rows show at a time: the window follows the mark, the mouse wheel moves
   it, and a thin mark at the right and "↓ N weitere" say there are more.
-  The menu names each other context of the first nine ("Kontext 2: …", `g2`);
+  The menu names each other context of the first nine ("Kontext 2: …", `g2`),
+  and "Einstellungen" (`e`, the settings page, above), which the hint line
+  leaves out;
   hiding the selected column and the column menu have no key and run from the
   menu alone. A letter key is the same with Caps Lock, and Shift makes it
   another key (`S` is no `s`). The hint line names the keys of what shows, and
@@ -648,13 +708,16 @@ by that run. Which files of the package git tracks is set in the root
   column (views.json may set which start hidden, per view; hiding or showing one
   writes this machine's settings, above), `o` opens the item in the browser.
   A GitHub project's tab is in `views.json` only its `number` (with, where
-  wanted, `limit`, `start` and per view the columns hidden at first, `views`: {
-  "<number of the view>": { "hide": [...] } }); its name, its views and their
+  wanted, `limit`, `start`, per view the columns hidden at first, `views`: {
+  "<number of the view>": { "hide": [...] } }, and `switchOrder`, the order of
+  its views in the switch: `"github"`, GitHub's, by default, or their numbers,
+  `[4, 1]`, those named first and the rest after them in GitHub's, so a view
+  that comes later on GitHub stands last); its name, its views and their
   filter, columns, groups (a board's swimlanes), sort and visible fields come
   from the project's saved views on GitHub. A project entry with the keys of the
   form before (`id`, `name`, `field`, `filter`, `priorityField`, `hide`) is left
   out, and the board says what it is now. The row below the tabs switches
-  between the project's views, in GitHub's order and by their names; `v` steps
+  between the project's views, named, in the order of `switchOrder`; `v` steps
   through them, a click picks one, and the board remembers the view shown per
   tab; at first it shows the first. Each read of a view reads the project's
   views and fields once, then that view's items by its filter, on GitHub's side

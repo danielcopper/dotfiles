@@ -5,20 +5,21 @@
 
 import { div } from "gpui-kit";
 import { h_flex, v_flex, Input, InputState, Textarea, TextareaState } from "gpui-base";
-import { knownAgents, machines, notify, run, spaces } from "herdr";
-import { BoardError, CONFIG_NAME, andJoined, boardLog, firstLine, itemLabel, lastLine, repoShortName, report } from "../../shared.js";
+import { machines, notify, run, spaces } from "herdr";
+import { BoardError, CONFIG_NAME, boardLog, itemLabel, lastLine, repoShortName, report } from "../../shared.js";
 import { repoExceptions, startSettings } from "../../config.js";
 import { pathText } from "../../settings.js";
-import { call, what } from "../../tools.js";
 import {
-  NO_FOLDER, azureRepoKey, checkoutArgs, parseRepos, preselectedSpace, renderTemplate, reposArgs, reposOfKey, sameKeyGroups, sessionName, spacesOn, startCommand,
+  NO_FOLDER, azureRepoKey, checkoutArgs, preselectedSpace, renderTemplate, reposOfKey, reposScan, sameKeyGroups, sessionName, shRun, spacesOn, startCommand,
   templateVars, withExceptions,
 } from "../../actions/start.js";
-import { backdrop, button, cycleField, fieldBox, fieldFrame, fieldLabel, machineName, onMachine, store, wireTextField } from "../helpers.js";
+import {
+  LOADING, agentsUnreadable, backdrop, button, cycleField, fieldBox, fieldFrame, fieldLabel, gitMissingNote, installedAgents, machineName, missingNote, onMachine, remotesNote,
+  reposUnreadable, sameKeyNote, store, unreadableNote, wireTextField,
+} from "../helpers.js";
 import { LIST_HINT, choiceBox, choiceHint, choiceKey, escapeList, listKey, listKeyboard, listShield } from "../choices.js";
 import { NOTE_TONES, toneColor } from "../tones.js";
 
-const SH_TIMEOUT = 30000;
 // How long watchSession waits before each check for a session it opened, in
 // ms (1, 3 and 6 s after the start).
 const SESSION_CHECKS = [1000, 2000, 3000];
@@ -43,7 +44,7 @@ export const START_HINTS = {
   list: LIST_HINT,
 };
 
-const agentsPending = (m) => m.agentsError ?? "lädt …";
+const agentsPending = (m) => m.agentsError ?? LOADING;
 
 export const repoStoreKey = (view) => `repo:${view.id}`;
 const reposLoading = (on, folders, list) => ({ state: "loading", on, folders, list, missing: [], unreadable: [], remotesUnread: [], gitMissing: false, lost: null, sameKey: null, error: null });
@@ -52,7 +53,7 @@ const chosenRepo = (m) => m.repos.list.find((r) => repoId(r) === m.repoId) ?? nu
 
 function reposPending(m) {
   const { state, error, list } = m.repos;
-  if (state === "loading") return "lädt …";
+  if (state === "loading") return LOADING;
   if (state === "error") return error;
   return list.length ? "Repo wählen" : "Kein Repo gefunden";
 }
@@ -123,18 +124,15 @@ export function spacesNote({ on, layout }) {
 function reposNotes(m) {
   const { state, on, folders, list, missing, unreadable, remotesUnread, gitMissing, lost, sameKey } = m.repos;
   if (state !== "ready") return [];
-  const notes = [
-    ...missing.map((f) => `Den Repo-Ordner ${f} gibt es ${onMachine(on)} nicht`),
-    ...unreadable.map((f) => `Der Repo-Ordner ${f} ist ${onMachine(on)} nicht lesbar`),
-  ];
-  if (gitMissing) notes.push(`git ist ${onMachine(on)} nicht installiert`);
-  else if (remotesUnread.length) notes.push(`Die Remotes von ${andJoined(remotesUnread.map((u) => u.written))} sind ${onMachine(on)} nicht lesbar`);
+  const notes = [...missing.map((f) => missingNote(f, on)), ...unreadable.map((f) => unreadableNote(f, on))];
+  if (gitMissing) notes.push(gitMissingNote(on));
+  else if (remotesUnread.length) notes.push(remotesNote(remotesUnread, on));
   if (!folders.length) {
     notes.push(`Kein Repo-Ordner gesetzt: in ${CONFIG_NAME}.json oben „repoFolders“ eintragen, für alle Quellen, etwa "repoFolders": ["~/Repos"]`);
   } else if (!list.length) {
     notes.push(`In ${folders.join(", ")} liegt ${onMachine(on)} kein Git-Repo; die Ordner stehen unter „repoFolders“ in ${CONFIG_NAME}.json oder in den Einstellungen dieses Rechners`);
   }
-  if (sameKey) notes.push(`„${sameKey[0].key}“ liegt ${onMachine(on)} in ${andJoined(sameKey.map((r) => r.written))}; bitte eines davon wählen`);
+  if (sameKey) notes.push(sameKeyNote(sameKey, on));
   if (lost) notes.push(`„${lost}“ liegt ${onMachine(on)} in keinem Repo-Ordner; bitte ein Repo wählen`);
   return notes;
 }
@@ -348,7 +346,7 @@ function loadAgents(b, cx) {
   m.agentNote = null;
   cx.spawn(async (cx) => {
     try {
-      const agents = (await knownAgents({ on })).filter((a) => a.installed);
+      const agents = await installedAgents(on);
       if (!stillOpen(b, m) || m.machines[m.machine] !== on) return;
       m.agents = agents;
       const wanted = m.settings.agent;
@@ -359,7 +357,7 @@ function loadAgents(b, cx) {
       }
     } catch (e) {
       if (!stillOpen(b, m) || m.machines[m.machine] !== on) return;
-      m.agentsError = `Agents ${onMachine(on)} nicht lesbar: ${firstLine(e?.message ?? e)}`;
+      m.agentsError = agentsUnreadable(on, e);
     }
     m.notes = [m.machineNote, m.agentNote].filter(Boolean);
     cx.notify();
@@ -376,19 +374,13 @@ function chooseMachine(b, machine, cx) {
   loadRepos(b, cx);
 }
 
-async function shOutput(m, args, on, kind, said = () => null) {
-  const r = await call("sh", args, on, SH_TIMEOUT, what(m.view, kind));
-  if (r.code !== 0) throw new BoardError(said(r.code) ?? (firstLine(r.stderr) || `sh endete mit ${r.code}`));
-  return r.stdout;
-}
-
 async function ownFolder(b, m, repo, on) {
   const gone = (code) => {
     if (code !== NO_FOLDER) return null;
     const path = ["repos", repo.key, "checkout"];
     return `Den Ordner ${repo.written} aus ${pathText(path)} (${b.origin(path)}) gibt es ${onMachine(on)} nicht; das Repo dort klonen oder den Ordner ändern`;
   };
-  const folder = lastLine(await shOutput(m, checkoutArgs(repo.written), on, "checkout", gone));
+  const folder = lastLine(await shRun(checkoutArgs(repo.written), on, m.view, "checkout", gone));
   if (!folder) throw new BoardError("Checkout-Ordner nicht gelesen");
   return folder;
 }
@@ -425,9 +417,9 @@ function loadRepos(b, cx) {
     let found = null;
     let why = null;
     try {
-      found = parseRepos(await shOutput(m, reposArgs(folders), on, "repos"), folders);
+      found = await reposScan(folders, on, m.view);
     } catch (e) {
-      why = `Repos ${onMachine(on)} nicht lesbar: ${report(e)}`;
+      why = reposUnreadable(report(e), on);
     }
     if (b.modal?.repos !== repos) return;
     if (found) listed(found);

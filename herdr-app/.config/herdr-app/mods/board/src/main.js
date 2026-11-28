@@ -6,6 +6,7 @@
 //
 // views.json:
 // - refreshMinutes (3), see Calls below.
+// - language ("de"): the board's language, one of LANGUAGES (config.js).
 // - sources: what the board shows, in contexts by source; the top bar
 //   switches between the contexts and shows the tabs of one, its PR tab
 //   last.
@@ -13,7 +14,9 @@
 //     sections, limit? } }, a context per owner (a user or an
 //     organisation). A project is a tab with its views: { number, limit?
 //     (the most items a view reads, 1000), start?, views?: { "<number of
-//     the view>": { hide?: [column names] } } }, its tab's id its owner's
+//     the view>": { hide?: [column names] } }, switchOrder? (its views'
+//     order in the switch: "github", GitHub's, or their numbers, those
+//     named first: orderedViews in contexts.js) }, its tab's id its owner's
 //     and its number (projectTabId); its name, its views (in GitHub's
 //     order) and their layout, filter, column field, group field, sort
 //     keys and visible fields come from GitHub (githubProjectArgs), a
@@ -85,9 +88,13 @@
 // search (githubIssuesArgs: per issue its labels, assignees and the rest a
 // card reads, as on a project; about two points a page), at most as many as
 // full pages of its limit take, ten for the 1000 by default; and, once while
-// the board runs and again after `r`, one per 100 of the owner's repos
-// (githubIssueReposArgs, one point each), before the first page: whether the
-// owner is a user or an organisation names its search.
+// the board runs and again after `r`, one per 100 of the owner's repos with
+// issues (githubOwnerReposArgs with ISSUE_REPOS_QUERY, one point each),
+// before the first page: whether the owner is a user or an organisation
+// names its search. The settings page shares that read for an Issues tab's
+// repos; for a PR tab's it reads all the owner's repos but the archived
+// ones (OWNER_REPOS_QUERY, one point per 100), once each time it opens and
+// shows the context.
 // GitHub prices a request by its connections, each counted as full: the
 // list's per section one search, then per pull request of its limit (50
 // by default) its assignees, review requests, review threads, last commit
@@ -140,6 +147,13 @@
 // chosen in it (its repos, with one git call per repo for their remotes; none
 // without repoFolders), and one at the start for a repo with a checkout of its
 // own. Finding gh and az costs one sh call now and then (toolPaths says when).
+// The settings page (ui/settings/) costs, once while it shows, one sh call
+// when it opens (again after a change of the folders), as the start dialog's
+// Repo field, herdr's list of this machine's agents when its start shows,
+// and for a GitHub context with an Issues tab the owner's repos with issues
+// (the same read, kept while the board runs and read again after `r` on the
+// Issues tab), with a PR tab all the owner's repos but the archived ones
+// (read again each time the page opens).
 // The Claude Code sessions on this machine cost one sh call (their files and
 // ps), and one more where any of them runs (their task lists), each with its
 // log line: when the board starts, after a look that sees it come to show,
@@ -203,14 +217,17 @@
 // drawn), ui/band.js (which cards of a board column, or rows of a table or
 // an Issues tab, draw whole), ui/shapes/ (how a view's data is drawn and
 // worked: board, prs, sprint, backlog, table, issues, placeholder),
-// ui/modals/ (the dialogs:
-// start, status, columns, create, assign, commands, sprints, sessions,
-// repos, solo) and this one, the Board, which looks the shape up.
+// ui/settings/ (the settings page: index.js its state and topics, draw.js,
+// knobs.js the pieces of its rows, and a module per kind of topic: general,
+// start, repos, github, azure), ui/modals/ (the dialogs: start, status,
+// columns, create, assign, commands, sprints, sessions, repos, solo, and
+// setting.js: the settings page's setting, settingChoice and settingRepos)
+// and this one, the Board, which looks the shape up.
 // Their data logic is plain exported functions, tested with a few UI paths
 // by tests/herdr-app/board.test.mjs with node.
 
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input } from "gpui-base";
+import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
 import { appHome, checking, exec, focused, home, layout, nextCommand, notify, panes, props, readTextFile, run, settings, spaces, terminals, theme, writeTextFile } from "herdr";
 import { MOD, CONFIG_NAME, andJoined, boardLog, cardType, errorText, firstLine, itemKey, itemLabel, lineKey, parentLabel, report, sameItem } from "./shared.js";
 import { MOVE_AGAIN, hidePath, nameKeyAt, readConfig, settingsAlone, settingsBeforeContexts, startSettings } from "./config.js";
@@ -220,7 +237,7 @@ import { readStoredFolds } from "./kinds/sprint.js";
 import { kindOf, viewKind } from "./kinds/index.js";
 import { matches, shows, navigate, columnOf, edgeOf, placeOf, selectionAfter } from "./select.js";
 import {
-  SOURCES, contextViews, contextsOf, firstContextOf, firstViewId, goneProjects, hasViews, tabViewName, pick, projectKey, tabView, viewOf, viewsOf, hasViewSwitch, shownContextMoves, shownIndex, stepIndex, tabViewAfter, tabViewKey, viewsOfTab,
+  contextViews, contextsOf, firstContextOf, firstViewId, goneProjects, hasViews, tabViewName, pick, projectKey, tabView, viewOf, viewsOf, hasViewSwitch, shownContextMoves, shownIndex, sourceName, stepIndex, tabViewAfter, tabViewKey, viewsOfTab,
 } from "./contexts.js";
 import { call, toolPaths, what } from "./tools.js";
 import { SAVED_MAX, UNSAVED, goneSaved, prefetchOrder, readLabels, readSaved, refreshDue, savedKey, savedText } from "./loading.js";
@@ -241,6 +258,9 @@ import { descriptionFolds, levelParts, lineShows, relatedSections, relatedState,
 import { actionFor, actionName, aimOf, groupAimOf, hintsOf, keyName, keyShown, startName } from "./commands.js";
 import { LINE_PX, keptScroll, restoreScroll, scrollBy, scrollPage, scrollToEnd } from "./scroll.js";
 import { shownDescription, webUrl } from "./description.js";
+import { followSettingsPage, leaveSettingsPage, rowShown, settingsSituation, sideKey, walkKnobs } from "./ui/settings/index.js";
+import { drawSettingsPage } from "./ui/settings/draw.js";
+import { NOT_STARTED } from "./ui/settings/knobs.js";
 export * from "./shared.js";
 export * from "./config.js";
 export * from "./settings.js";
@@ -301,6 +321,15 @@ export * from "./ui/modals/start.js";
 export * from "./ui/modals/sessions.js";
 export * from "./ui/modals/status.js";
 export * from "./ui/modals/solo.js";
+export * from "./ui/modals/setting.js";
+export * from "./ui/settings/knobs.js";
+export * from "./ui/settings/general.js";
+export * from "./ui/settings/start.js";
+export * from "./ui/settings/repos.js";
+export * from "./ui/settings/github.js";
+export * from "./ui/settings/azure.js";
+export * from "./ui/settings/index.js";
+export * from "./ui/settings/draw.js";
 
 const TICK_MS = 30000;
 export const PREFETCH_GAP_MS = 1500;
@@ -386,11 +415,15 @@ export default class Board extends View {
     this.handle = cx.focus_handle();
     this.config = null;
     this.configErrors = [];
-    // views.json's text, this machine's settings file as last read, or as
-    // the board's latest change makes it ({ text } or { error }), what
-    // readConfig applied of it and its move of them, and the view kinds of
-    // the last valid config.
-    this.configState = { text: null, settingsRead: null, settings: null, origin: () => ORIGIN.builtin, moving: null, kinds: null };
+    // views.json's text; this machine's settings file as last read ({ text }
+    // or { error }), as the board's latest change makes it ({ text, outcome
+    // }; outcome: that change's write while it is queued, { refused }), or
+    // as read again after a refused write a change was made over (as read,
+    // with the latest such change's outcome, as its landing decides, and
+    // carriedRefusal, the first such refusal's words); what readConfig
+    // applied of it and its move of them; and the view kinds of the last
+    // valid config.
+    this.configState = { text: null, settingsRead: null, settings: null, origin: () => ORIGIN.builtin, merged: null, base: null, moving: null, kinds: null };
     this.settingsWrites = Promise.resolve();
     this.views = {}; // per view id, see state()
     this.prefetchWaits = false;
@@ -418,6 +451,10 @@ export default class Board extends View {
     // What each shape keeps per Board, by shape name (state(),
     // shapes/index.js).
     this.shapeState = Object.fromEntries(Object.entries(SHAPES).map(([name, shape]) => [name, shape.state?.() ?? {}]));
+    // The settings page while it shows (ui/settings/index.js), and its
+    // scroll.
+    this.settingsPage = null;
+    this.settingsScroll = ScrollHandle.new();
     // What the related items' lines keep (ui/related.js), and the details
     // panel's keyboard while it has it (panelOf).
     this.relatedUi = relatedState();
@@ -510,6 +547,7 @@ export default class Board extends View {
   // carries the board's key context only while this holds.
   takesTab() {
     if (this.modal) return Boolean(MODALS[this.modal.kind].tab);
+    if (this.settingsPage) return false;
     return !this.filtering && this.panelTakes(this.detailsRoot());
   }
 
@@ -699,8 +737,15 @@ export default class Board extends View {
   takeConfig() {
     const c = this.configState;
     const read = c.settingsRead && { name: this.settingsName(), ...c.settingsRead };
-    ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin, moving: c.moving = null } = readConfig(c.text, read));
-    if (!this.config) return false;
+    ({ config: this.config, errors: this.configErrors, settings: c.settings, origin: c.origin, merged: c.merged, base: c.base, moving: c.moving = null } = readConfig(c.text, read));
+    if (!this.config) {
+      this.settingsPage = null;
+      if (this.modal && MODALS[this.modal.kind].ofSettingsPage) {
+        this.modal = null;
+        this.handle.focus();
+      }
+      return false;
+    }
     this.takeKinds();
     this.moveShownSource();
     return true;
@@ -765,32 +810,49 @@ export default class Board extends View {
   }
 
   // `before`: { id, columns }, the shown columns of a view whose selection
-  // follows (reselectIn). Resolves to whether the file has the changes.
-  changeSettings(changes, cx, before = null) {
+  // follows (reselectIn); `checked`: settingsChecked's for the changes, made
+  // only where it gives the file's text, else the banner says why. → {
+  // started (whether the board took them, the write queued), done (resolves
+  // to whether the file has them; the banner says a write herdr refused) }.
+  changeSettings(changes, cx, before = null, checked = this.settingsChecked(changes)) {
+    if (checked.text === undefined) {
+      this.say(`Nicht geändert: ${checked.why ?? checked.refused.join("; ")}`, "error", cx);
+      return NOT_STARTED;
+    }
     const name = this.settingsName();
     const c = this.configState;
     const read = c.settingsRead;
-    const after = read && !("error" in read) ? settingsAfter(read.text, changes, name, nameKeyAt) : null;
-    const why = !read
-      ? `${name} ist noch nicht gelesen`
-      : "error" in read
-        ? `${name} ließ sich nicht lesen: ${read.error}`
-        : after.error ?? (c.settings ? null : settingsAlone(name));
-    if (why) {
-      this.say(`Nicht geändert: ${why}`, "error", cx);
-      return Promise.resolve(false);
-    }
-    const built = read.text;
-    c.settingsRead = { text: after.text };
+    const outcome = { refused: null };
+    c.settingsRead = { text: checked.text, outcome };
     this.takeConfig();
     this.followSettings(cx, before);
     cx.notify();
     const words = { refused: (why) => `${name} nicht gespeichert: ${why}`, stale: CHANGED_MEANWHILE };
-    return this.queueSettingsWrite((cx) => this.writeSettingsFile(this.changeStep(changes, built), words, cx), cx);
+    const done = this.queueSettingsWrite((cx) => this.writeSettingsFile(this.changeStep(changes, read.text), words, cx, { outcome, prior: read.outcome ?? null }), cx);
+    return { started: true, done };
   }
 
   changeSetting(path, value, cx, before = null) {
-    return this.changeSettings([[path, value]], cx, before);
+    return this.changeSettings([[path, value]], cx, before).done;
+  }
+
+  // This machine's file with `changes` ({ text }), or why it cannot have
+  // them ({ why }, which changeSettings says in the banner); `strict`, as
+  // the settings page writes, also refuses changes views.json and the file
+  // read with them would not apply, and a file that cannot take them: {
+  // refused }, readConfig's refused or settingsAfter's error.
+  settingsChecked(changes, strict = false) {
+    const name = this.settingsName();
+    const c = this.configState;
+    const read = c.settingsRead;
+    if (!read) return { why: `${name} ist noch nicht gelesen` };
+    if ("error" in read) return { why: `${name} ließ sich nicht lesen: ${read.error}` };
+    const after = settingsAfter(read.text, changes, name, nameKeyAt);
+    if (after.error) return strict ? { refused: [after.error] } : { why: after.error };
+    if (!c.settings) return { why: settingsAlone(name) };
+    if (!strict) return { text: after.text };
+    const r = readConfig(c.text, { name, text: after.text });
+    return r.settings ? { text: after.text } : { refused: r.refused };
   }
 
   // `built`: the file's text the changes were made over.
@@ -822,14 +884,31 @@ export default class Board extends View {
     return done;
   }
 
-  // The one writer of this machine's settings file; step(fresh) gives { text } or { why }.
-  async writeSettingsFile(step, words, cx) {
+  // The one writer of this machine's settings file; step(fresh) gives { text }
+  // or { why }. `outcome`: the write of a change ({ refused: the banner's
+  // words, once refused }), `prior` that of the change it was made over:
+  // where that one was refused, this one's own refusal says that cause. A
+  // write that lands takes the file's text for the board only where no
+  // change was made over it since; where one was, the page's dialogs whose
+  // rows are gone close as that one lands, after the words of the first
+  // refusal that left them open, or as it is refused, after its own. A
+  // change made while a refused write reads the file again is the
+  // exception: that read replaces it.
+  async writeSettingsFile(step, words, cx, { outcome = null, prior = null } = {}) {
     const file = this.settingsFile();
+    const c = this.configState;
+    const laterChange = () => Boolean(c.settingsRead?.outcome) && c.settingsRead.outcome !== outcome;
     const refused = async (why) => {
-      this.say(words.refused(why), "error", cx);
+      const said = prior?.refused ?? words.refused(why);
+      if (outcome) outcome.refused = said;
+      this.say(said, "error", cx);
+      const keepDialogs = laterChange();
+      const latest = c.settingsRead?.outcome;
+      const carried = c.settingsRead?.carriedRefusal;
       await this.readSettingsFile();
+      if (keepDialogs && latest) Object.assign(c.settingsRead, { outcome: latest, carriedRefusal: carried ?? said });
       this.takeConfig();
-      this.followSettings(cx);
+      this.followSettings(cx, null, { refusal: said, keepDialogs });
       cx.notify();
       return false;
     };
@@ -849,9 +928,12 @@ export default class Board extends View {
         return refused(staleRefusal(e) ? words.stale : firstLine(e?.message ?? e));
       }
     }
-    this.configState.settingsRead = { text: next.text };
-    this.takeConfig();
-    this.followSettings(cx);
+    if (!laterChange()) {
+      const refusal = c.settingsRead?.carriedRefusal ?? prior?.refused ?? null;
+      c.settingsRead = { text: next.text };
+      this.takeConfig();
+      this.followSettings(cx, null, { refusal });
+    }
     if (writes && words.done) this.say(words.done, "info", cx);
     cx.notify();
     return true;
@@ -860,8 +942,10 @@ export default class Board extends View {
   // After a settings change by the board: what of a view's settings its
   // shape draws from without a read (withView) shows at once; a view whose
   // hide changed shows it so and is read again, as is one whose query now
-  // leaves other repos out (readsAgain); `before` as in changeSettings.
-  followSettings(cx, before = null) {
+  // leaves other repos out (readsAgain); the settings page follows
+  // (followSettingsPage, `page` its { refusal, keepDialogs }); `before` as
+  // in changeSettings.
+  followSettings(cx, before = null, page = {}) {
     for (const view of this.viewsNow()) {
       const st = this.views[view.id];
       const settled = st?.data && SHAPES[st.data.shape].withView?.(st.data, view);
@@ -879,6 +963,7 @@ export default class Board extends View {
       // What a column holds comes from the query, which leaves hidden ones out.
       this.refresh(view, cx);
     }
+    followSettingsPage(this, cx, page);
   }
 
   // Settings that do not apply keep the stored entries for a later read.
@@ -888,7 +973,7 @@ export default class Board extends View {
     const { moves, drop } = storedHiddenMoves(this.viewsNow().filter((v) => v.source === "github"), entryOf, (path) => this.origin(path));
     for (const view of drop) store.remove(hiddenKey(view.id));
     if (!moves.length) return;
-    this.changeSettings(moves.map((m) => [hidePath(m.view), m.list]), cx).then((done) => {
+    this.changeSettings(moves.map((m) => [hidePath(m.view), m.list]), cx).done.then((done) => {
       if (done) for (const m of moves) store.remove(hiddenKey(m.view.id));
     });
   }
@@ -911,6 +996,7 @@ export default class Board extends View {
         await this.moveSettings(moving, settingsRead.text, cx);
         valid = Boolean(this.config);
       }
+      followSettingsPage(this, cx);
       this.paths.reset();
       for (const st of Object.values(this.views)) st.unavailable = false;
       cx.notify();
@@ -1887,6 +1973,7 @@ export default class Board extends View {
       related: this.readsRelated(details), sessions: details ? itemSessions(this.sessionsNow(), details).length : 0,
       panel, lines, line: panel?.line ?? null, picked: panel ? pickedLine(lines, panel.line) : null,
       drilled: levels.length > 0, trail: details ? [this.detailsRootOf(view).key, ...levels.map((l) => l.item.key)] : null,
+      ...settingsSituation(this),
     };
   }
 
@@ -1935,6 +2022,7 @@ export default class Board extends View {
     const g = this.afterG;
     this.afterG = false;
     if (this.modal) return this.modalKey(e, cx);
+    if (this.settingsPage) return this.settingsKey(e, cx);
     if (this.filtering) {
       if (k === "escape") {
         this.handle.focus();
@@ -2018,6 +2106,44 @@ export default class Board extends View {
     MODALS.repos.open(this, view, cx);
   }
 
+  // The settings page's list of a PR tab's repos (ui/modals/setting.js), in
+  // MODALS, which the page's modules cannot import: the command menu
+  // (ui/modals/commands.js) imports commands.js, which imports them.
+  openSettingRepos(list, cx) {
+    MODALS.settingRepos.open(this, list, cx);
+  }
+
+  // Whether the settings page's shown topic has the row `id`, for
+  // ui/settings/knobs.js, which ui/settings/index.js imports.
+  settingsRowShown(id) {
+    return rowShown(this, id);
+  }
+
+  // A key while the settings page shows and no dialog is open: Esc back to
+  // the board, j/k and the arrows up and down mark a knob, ← → and h/l step
+  // its value or move along its switches, space turns one or opens its
+  // list; the rest are the page's actions (commands.js).
+  settingsKey(e, cx) {
+    const k = e.key;
+    const mod = e.modifiers ?? {};
+    const done = () => {
+      cx.stop_propagation();
+      cx.notify();
+    };
+    if (k === "tab") return;
+    const c = this.situation();
+    if (k === "escape") return leaveSettingsPage(this, cx), done();
+    const bare = !(mod.control || mod.alt || mod.platform || mod.shift);
+    const dir = bare ? { j: 1, down: 1, k: -1, up: -1 }[k] : undefined;
+    if (dir) return walkKnobs(this, dir), done();
+    const side = bare ? { h: -1, left: -1, l: 1, right: 1 }[k] : undefined;
+    if (side) return sideKey(this, c.knob, side, cx), done();
+    if (bare && k === "space") return c.knob?.space?.run(this, cx), done();
+    const name = keyName(k, e.key_char ?? "", mod);
+    const action = name ? actionFor(name, c) : null;
+    if (action) return action.run(this, c, cx), done();
+  }
+
   // The command menu (ui/modals/commands.js): the actions that can run now,
   // on the selection the board keeps, as an action's key finds it.
   openCommands(cx) {
@@ -2081,10 +2207,16 @@ export default class Board extends View {
       .on_mouse_up("left", (_e, cx) => this.endDrag(cx))
       .on_hover((hovered, cx) => {
         if (!hovered) this.endDrag(cx);
-      })
-      .child(this.toolbar(t, view, st));
+      });
     if (releases) for (const button of OUTSIDE_BUTTONS) out = out.on_window_mouse_up(button, (e, cx) => this.releaseOutside(e, cx));
-    if (this.notice || this.configErrors.length) out = out.child(this.banner(t));
+    const banner = this.notice || this.configErrors.length;
+    if (this.settingsPage) {
+      const { top, body } = drawSettingsPage(this, t, mono);
+      out = out.child(top).when(Boolean(banner), (el) => el.child(this.banner(t))).child(body).child(this.hints(t));
+      return this.modal ? out.child(MODALS[this.modal.kind].render(this, t)) : out;
+    }
+    out = out.child(this.toolbar(t, view, st));
+    if (banner) out = out.child(this.banner(t));
     out = out
       .child(
         // h_flex centres its items; the content and the detail span the
@@ -2192,8 +2324,7 @@ export default class Board extends View {
       if (context.source !== source) {
         if (source) parts.push(div().id(`context-rule-${context.source}`).flex_none().self_stretch().w(1).my(4).mx(4).bg(t.border));
         source = context.source;
-        const name = SOURCES.find((s) => s.id === source).name;
-        parts.push(div().id(`context-source-${source}`).flex_none().pl(8).pr(4).text_size(11).text_color(t.dim).child(name));
+        parts.push(div().id(`context-source-${source}`).flex_none().pl(8).pr(4).text_size(11).text_color(t.dim).child(sourceName(source)));
       }
       parts.push(this.segment(t, "context", { id: context.id, label: context.name }, shown.id, pick));
     }
@@ -2424,8 +2555,10 @@ export default class Board extends View {
   // The hint line: the keys of what shows now, as the action table says
   // them (hintsOf), or the open dialog's hint where it has one.
   hints(t) {
-    const said = this.modal ? MODALS[this.modal.kind].hint : null;
-    const keys = said ? [] : hintsOf(this.situation());
+    const hint = this.modal ? MODALS[this.modal.kind].hint : null;
+    const told = typeof hint === "function" ? hint(this) : hint;
+    const said = typeof told === "string" ? told : null;
+    const keys = Array.isArray(told) ? told : said ? [] : hintsOf(this.situation());
     // On a narrow screen the line wraps rather than cut keys off.
     return h_flex()
       .flex_none()

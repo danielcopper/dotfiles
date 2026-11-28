@@ -22,7 +22,11 @@ const STALE_VIEW_START = "solange es dasteht, fehlt der Tab";
 const STALE_TEAM = "solange es dasteht, fehlt das Team";
 const STALE_AZURE = "es gilt nicht, der Rest von „sources.azure“ schon";
 const BLANK_CHECKOUT = "ist der Ordner des Repos (Text, nicht leer), etwa \"~/Repos/<Repo>\"";
-const TOP_KEYS = ["refreshMinutes", "start", "repoFolders", "repos", "sources"];
+const TOP_KEYS = ["refreshMinutes", "language", "start", "repoFolders", "repos", "sources"];
+
+export const LANGUAGES = [{ id: "de", name: "Deutsch" }];
+const LANGUAGE_DEFAULT = LANGUAGES[0].id;
+const LANGUAGE_TEXT = `„language“ ist ${LANGUAGES.map((l) => `"${l.id}" (${l.name})`).join(" oder ")}; Englisch folgt später`;
 // What an old views.json, with its views at the top, is told.
 const OLD_SHAPE = "views.json hat noch die alte Form: die Einträge von „views“ stehen jetzt unter „sources“, die von GitHub in " +
   "„sources.github.contexts“, die von Azure in „sources.azure“ mit „org“ und „contexts“ (Kopf von mods/board/src/main.js)";
@@ -91,6 +95,11 @@ function sectionsWithTones(sections) {
 // such a project is told; it is left out.
 const PROJECT_BEFORE = ["id", "name", "field", "filter", "priorityField", "hide"];
 const PROJECT_SHAPE = "{ \"number\" }, dazu „limit“, „start“ und je Ansicht „views“: { \"<Nummer der Ansicht>\": { \"hide\": [...] } }";
+export const GITHUB_ORDER = "github";
+const SWITCH_ORDER_TEXT = `„switchOrder“ ist "${GITHUB_ORDER}" (wie auf GitHub) oder eine Liste von Nummern der Ansichten, jede höchstens einmal, etwa [4, 1]`;
+const switchOrderOk = (v) =>
+  v === undefined || v === GITHUB_ORDER || (Array.isArray(v) && v.every((n) => Number.isInteger(n) && n >= 1) && new Set(v).size === v.length);
+
 const projectBefore = (keys) =>
   `${keys.map((k) => `„${k}“`).join(", ")} ${keys.length > 1 ? "stammen" : "stammt"} aus der Form vor den Ansichten von GitHub: ein Project ist jetzt ${PROJECT_SHAPE}; ` +
   "Name, Ansichten, Filter, Spalten und Priorität kommen von GitHub (Kopf von mods/board/src/main.js)";
@@ -126,11 +135,12 @@ function projectViewsProblems(views) {
 // the context's; `shared`: those sections).
 const ENTRY_KINDS = {
   project: {
-    keys: ["number", "limit", "views"],
+    keys: ["number", "limit", "views", "switchOrder"],
     before: PROJECT_BEFORE,
     problems(v) {
       const out = limitProblems(v.limit, BOARD_LIMIT);
       if (!(Number.isInteger(v.number) && v.number >= 1)) out.push("„number“ ist die Nummer des Projects, eine ganze Zahl ab 1");
+      if (!switchOrderOk(v.switchOrder)) out.push(SWITCH_ORDER_TEXT);
       return [...out, ...projectViewsProblems(v.views)];
     },
     name: "number",
@@ -139,7 +149,9 @@ const ENTRY_KINDS = {
     at: (v, j) => `Project ${j + 1}${Number.isInteger(v?.number) ? ` (${v.number})` : ""}`,
     id: (v, owner) => projectTabId(owner, v.number),
     settingsPath: (v, context) => [...context, "projects", String(v.number)],
-    defaults: (v, owner) => ({ owner, number: v.number, limit: v.limit ?? BOARD_LIMIT, start: v.start ?? {}, views: v.views ?? {} }),
+    defaults: (v, owner) => ({
+      owner, number: v.number, limit: v.limit ?? BOARD_LIMIT, start: v.start ?? {}, views: v.views ?? {}, switchOrder: v.switchOrder ?? GITHUB_ORDER,
+    }),
   },
   issues: {
     keys: ["id", "name", "limit", "hideRepos"],
@@ -289,6 +301,8 @@ function readGithub(raw) {
   return { github: contexts.length ? { contexts } : null, errors };
 }
 
+const SHARED_PRS_AT = "„sources.github.prs“";
+
 function sectionsProblems(sections) {
   if (!(Array.isArray(sections) && sections.length && sections.every((s) => isObject(s) && isText(s.name) && isText(s.query)))) {
     return ["„sections“ braucht Einträge mit „name“ und „query“"];
@@ -299,15 +313,17 @@ function sectionsProblems(sections) {
   ]);
 }
 
+export const sharedSectionsProblems = (sections) => sectionsProblems(sections).map((p) => `${SHARED_PRS_AT}: ${p}`);
+
 // sources.github.prs → { shared: { sections (each with its tone), limit
 // (each search's `first`) } or null, errors }.
 function readSharedPrs(raw) {
-  const at = "„sources.github.prs“";
+  const at = SHARED_PRS_AT;
   if (raw === undefined) return { shared: null, errors: [`${at} fehlt: die Abschnitte der PR-Tabs aller Kontexte, { \"sections\": [{ \"name\", \"query\" }] }`] };
   if (!isObject(raw)) return { shared: null, errors: [`${at} muss ein Objekt sein`] };
   const errors = [
     ...Object.keys(raw).filter((k) => !SHARED_PRS_KEYS.includes(k)).map((k) => `„sources.github.prs.${k}“ gibt es nicht`),
-    ...sectionsProblems(raw.sections).map((p) => `${at}: ${p}`),
+    ...sharedSectionsProblems(raw.sections),
     ...limitProblems(raw.limit, PAGE, "„sources.github.prs.limit“"),
   ];
   return errors.length ? { shared: null, errors } : { shared: { sections: sectionsWithTones(raw.sections), limit: raw.limit ?? PRS_LIMIT }, errors };
@@ -331,8 +347,10 @@ const TEAM_VIEW_IDS = TEAM_VIEWS.map((v) => v.id);
 const TEAM_VIEWS_TEXT = TEAM_VIEW_IDS.map((v) => `"${v}"`).join(" und ");
 
 const REPO_FOLDERS_TEXT = "ist eine Liste aus mindestens einem Ordner (Text), jeder höchstens einmal, etwa [\"~/Repos\"]";
-const trimFolders = (v) => v.map((f) => f.replace(/(.)\/+$/, "$1"));
+export const trimFolder = (f) => f.replace(/(.)\/+$/, "$1");
+const trimFolders = (v) => v.map(trimFolder);
 const repoFoldersOk = (v) => v === undefined || (Array.isArray(v) && v.length > 0 && v.every(isText) && new Set(trimFolders(v)).size === v.length);
+export const repoFoldersProblems = (v) => (repoFoldersOk(v) ? [] : [`„repoFolders“ ${REPO_FOLDERS_TEXT}`]);
 
 const TEAM_KEYS = ["team", "views"];
 
@@ -346,6 +364,35 @@ function teamProblems(t) {
     out.push(`„views“ ist eine Liste aus ${TEAM_VIEWS_TEXT}, jede höchstens einmal`);
   }
   return out;
+}
+
+// An Azure context's teams as readAzure takes them, `where` the context's
+// place in its words: { teams (those without problems), errors }.
+function readTeams(teams, where) {
+  if (teams === undefined) return { teams: [], errors: [] };
+  if (!Array.isArray(teams)) return { teams: [], errors: [`${where}: „teams“ ist eine Liste von Teams`] };
+  const taken = [];
+  const errors = [];
+  teams.forEach((t, j) => {
+    const at = `${where}, Team ${j + 1}${isText(t?.team) ? ` („${t.team}“)` : ""}`;
+    const problems = teamProblems(t);
+    if (!problems.length && taken.some((c) => c.team === t.team)) problems.push("gibt es schon");
+    if (problems.length) return errors.push(...problems.map((p) => `${at}: ${p}`));
+    taken.push(t);
+  });
+  return { teams: taken, errors };
+}
+
+export const teamsProblems = (teams, where) => readTeams(teams, where).errors;
+
+const azureWhere = (a, i) => `Azure-Kontext ${i + 1}${isText(a?.project) ? ` („${a.project}“)` : ""}`;
+
+// The place readAzure names for the context of `project` in `azure`
+// (sources.azure as views.json and this machine's file give it).
+export function azureContextWhere(azure, project) {
+  const list = azureContextList(azure);
+  const i = list.findIndex((c) => isObject(c) && c.project === project);
+  return azureWhere(list[i], i);
 }
 
 // The tabs of an Azure context: { id, source: "azure", kind: "team", name,
@@ -371,6 +418,8 @@ const AZURE_CONTEXT_KEYS = ["project", "teams"];
 // { project, team }, … } or { prs: { project } }.
 const beforeContexts = (entry) => isObject(entry) && (Object.hasOwn(entry, "team") || Object.hasOwn(entry, "prs"));
 const holdsBeforeContexts = (contexts) => Array.isArray(contexts) && contexts.some(beforeContexts);
+// The contexts of sources.azure that readAzure reads: those not of that form.
+const azureContextList = (raw) => (Array.isArray(raw?.contexts) ? raw.contexts.filter((c) => !beforeContexts(c)) : []);
 
 // sources.azure → { azure: { org, contexts: [{ project, tabs }] } or null,
 // errors }. Without a valid org (orgUrl) nothing of it is usable; a context
@@ -381,39 +430,36 @@ function readAzure(raw) {
     .map((k) => (k === "repoFolders" ? `„sources.azure.repoFolders“ gibt es nicht mehr: ${REPO_FOLDERS_PLACE}; ${STALE_AZURE}` : `„sources.azure.${k}“ gibt es nicht`));
   const org = orgUrl(raw.org);
   if (!org) errors.push("„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>");
-  const list = Array.isArray(raw.contexts) ? raw.contexts.filter((c) => !beforeContexts(c)) : [];
+  const list = azureContextList(raw);
   if (!list.length && !holdsBeforeContexts(raw.contexts)) {
     errors.push("„sources.azure.contexts“ braucht mindestens einen Kontext: { \"project\", \"teams\": [{ \"team\" }] }");
   }
   const contexts = [];
   list.forEach((a, i) => {
-    const where = `Azure-Kontext ${i + 1}${isText(a?.project) ? ` („${a.project}“)` : ""}`;
+    const where = azureWhere(a, i);
     const problems = contextProblems(a, list, AZURE_CONTEXT_KEYS, nameKeyAt(AZURE_CONTEXTS), "„project“ fehlt: der Name des Projekts in der Organisation");
     if (problems.length) return errors.push(...problems.map((p) => `${where}: ${p}`));
-    if (a.teams !== undefined && !Array.isArray(a.teams)) errors.push(`${where}: „teams“ ist eine Liste von Teams`);
-    const tabs = [];
-    (Array.isArray(a.teams) ? a.teams : []).forEach((t, j) => {
-      const at = `${where}, Team ${j + 1}${isText(t?.team) ? ` („${t.team}“)` : ""}`;
-      const team = teamProblems(t);
-      if (!team.length && tabs.some((c) => c.team === t.team)) team.push("gibt es schon");
-      if (team.length) return errors.push(...team.map((p) => `${at}: ${p}`));
-      tabs.push(teamTab(t, a.project, org));
-    });
-    contexts.push({ project: a.project, tabs: [...tabs, prsTab(a.project, org)] });
+    const { teams, errors: teamErrors } = readTeams(a.teams, where);
+    errors.push(...teamErrors);
+    contexts.push({ project: a.project, tabs: [...teams.map((t) => teamTab(t, a.project, org)), prsTab(a.project, org)] });
   });
   return { azure: org && contexts.length ? { org, contexts } : null, errors };
 }
 
 // views.json as text (null: there is none) and this machine's settings as
 // read (`settingsRead`: { name, text }, text null for no file, or { name,
-// error }) → { config, errors, settings, origin, moving? }: config is {
-// refreshMinutes, start, repoFolders, repos, azure: { org, contexts } or
-// null, github: { contexts } or null }, settings those applied (null:
-// none), origin mergeSettings's, moving settingsForContexts's move where
-// the settings can move. A context or a tab with problems is left out and
-// each problem is listed; config is null only when nothing usable is left.
+// error }) → { config, errors, settings, origin, base, merged, refused?,
+// moving? }: config is { refreshMinutes, language, start, repoFolders,
+// repos, azure: { org, contexts } or null, github: { contexts } or null },
+// settings those applied (null: none), origin mergeSettings's, base
+// views.json as read, merged that with the settings applied over it (both
+// null where views.json is missing or no JSON), refused why the settings do
+// not apply (where readSettings read them, without the file's name),
+// moving settingsForContexts's move where the settings can move. A context
+// or a tab with problems is left out and each problem is listed; config is
+// null only when nothing usable is left.
 export function readConfig(text, settingsRead = null) {
-  const none = (error) => ({ config: null, errors: [error], settings: null, origin: mergeSettings(null, {}, nameKeyAt).origin });
+  const none = (error) => ({ config: null, errors: [error], settings: null, origin: mergeSettings(null, {}, nameKeyAt).origin, merged: null, base: null });
   if (text === null || text === undefined) return none(`${CONFIG_NAME}.json fehlt im Ordner der Mod`);
   let raw;
   try {
@@ -421,23 +467,25 @@ export function readConfig(text, settingsRead = null) {
   } catch (e) {
     return none(`${CONFIG_NAME}.json ist kein gültiges JSON: ${e.message}`);
   }
-  const alone = { ...validateConfig(raw), settings: null, origin: mergeSettings(raw, {}, nameKeyAt).origin };
+  const alone = { ...validateConfig(raw), settings: null, origin: mergeSettings(raw, {}, nameKeyAt).origin, merged: raw, base: raw };
   if (!settingsRead) return alone;
   const { name } = settingsRead;
   const named = (errors) => errors.map((e) => `${name}: ${e}`);
-  const unused = (errors) => ({ ...alone, errors: [...alone.errors, ...errors, settingsAlone(name)] });
+  const unused = (errors, refused = errors) => ({ ...alone, errors: [...alone.errors, ...errors, settingsAlone(name)], refused });
   if (settingsRead.error !== undefined) return unused([`${name} ließ sich nicht lesen: ${settingsRead.error}`]);
   const { settings, errors } = readSettings(settingsRead.text, name);
   if (!settings) return unused(errors);
   const moving = settingsForContexts(raw, settings);
-  if (moving?.problems) return unused(named(moving.problems));
-  if (moving) return { ...unused([`${name} hat noch die Form vor den Kontexten und ist nicht umgestellt; ${MOVE_AGAIN}`]), moving };
+  if (moving?.problems) return unused(named(moving.problems), moving.problems);
+  const notMoved = (subject) => `${subject} hat noch die Form vor den Kontexten und ist nicht umgestellt; ${MOVE_AGAIN}`;
+  if (moving) return { ...unused([notMoved(name)], [notMoved("die Datei")]), moving };
   const { settings: applied, errors: before } = withoutProjectsBefore(settings);
   const { merged, errors: unmatched, origin } = mergeSettings(raw, applied, nameKeyAt);
   const read = validateConfig(merged, origin);
   const added = read.errors.filter((e) => !alone.errors.includes(e));
-  if (added.length) return unused(named([...before, ...unmatched, ...added]));
-  return { ...read, errors: [...read.errors, ...named([...before, ...unmatched])], settings: applied, origin };
+  const problems = [...before, ...unmatched, ...added];
+  if (added.length) return unused(named(problems), problems);
+  return { ...read, errors: [...read.errors, ...named([...before, ...unmatched])], settings: applied, origin, merged, base: raw };
 }
 
 // This machine's settings of a project in the form before its views came
@@ -484,11 +532,16 @@ export function validateConfig(raw, origin = null) {
     errors.push("„refreshMinutes“ ist eine Zahl ab 1");
     refreshMinutes = 3;
   }
+  let language = raw.language ?? LANGUAGE_DEFAULT;
+  if (!LANGUAGES.some((l) => l.id === language)) {
+    errors.push(LANGUAGE_TEXT);
+    language = LANGUAGE_DEFAULT;
+  }
   const startErrors = startProblems(raw.start, "start");
   errors.push(...startErrors);
-  const foldersOk = repoFoldersOk(raw.repoFolders);
-  if (!foldersOk) errors.push(`„repoFolders“ ${REPO_FOLDERS_TEXT}`);
-  const repoFolders = foldersOk && raw.repoFolders ? trimFolders(raw.repoFolders) : [];
+  const folderProblems = repoFoldersProblems(raw.repoFolders);
+  errors.push(...folderProblems);
+  const repoFolders = !folderProblems.length && raw.repoFolders ? trimFolders(raw.repoFolders) : [];
   const repos = {};
   if (raw.repos !== undefined && !isObject(raw.repos)) errors.push("„repos“ muss ein Objekt sein");
   for (const [name, entry] of Object.entries(isObject(raw.repos) ? raw.repos : {})) {
@@ -517,7 +570,7 @@ export function validateConfig(raw, origin = null) {
   } else if (raw.sources !== undefined) errors.push("„sources“ muss ein Objekt sein");
   else if (!old) errors.push("„sources“ fehlt: „sources.azure“ oder „sources.github“");
   const start = startErrors.length ? {} : raw.start ?? {};
-  return { config: azure || github ? { refreshMinutes, start, repoFolders, repos, azure, github } : null, errors };
+  return { config: azure || github ? { refreshMinutes, language, start, repoFolders, repos, azure, github } : null, errors };
 }
 
 export const hidePath = (view) => [...view.settingsPath, "hide"];

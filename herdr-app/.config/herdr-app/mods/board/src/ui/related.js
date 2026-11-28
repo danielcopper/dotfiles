@@ -38,7 +38,7 @@ import { itemLabel } from "../shared.js";
 import { prsHead, relatedLines, subIssuesHead } from "../related.js";
 import { stateDone } from "../kinds/states.js";
 import { LINE_PX, motionOf, offsetOf, revealSpan, scrollBy, spanShows, spanStarts, thumbOf } from "../scroll.js";
-import { FRAME, checksSection, chip, detailNote, sectionTitle, selectedLook, stateChip, thumbLook, unzoomed, wheelMove } from "./helpers.js";
+import { FRAME, LOADING, checksSection, chip, detailNote, sectionTitle, selectedLook, stateChip, thumbLook, unzoomed, wheelMove } from "./helpers.js";
 import { NOTE_TONES, toneColor } from "./tones.js";
 
 export const FOLDED_H = 12 * LINE_PX;
@@ -100,7 +100,7 @@ export function relatedRows(item, entry) {
   const data = entry?.data;
   const description = { kind: "head", text: "BESCHREIBUNG" };
   if (!data) {
-    const why = entry?.error ? { kind: "note", text: entry.error, level: "error" } : { kind: "note", text: "lädt …", level: "info" };
+    const why = entry?.error ? { kind: "note", text: entry.error, level: "error" } : { kind: "note", text: LOADING, level: "info" };
     return [description, why, { kind: "head", text: subIssuesHead(item, { cut: false }) }, why];
   }
   const lines = relatedLines(data);
@@ -171,7 +171,7 @@ export function levelParts(b, t, view, item, entry) {
   const chips = [stateChip(t, b.state(view.id).data, item.state, item.color)];
   if (item.kind !== "pr") return { chips };
   const note = (text, level) => detailNote(t, "level-note", text, level);
-  if (!entry?.data) return { chips, sections: [entry?.error ? note(entry.error, "error") : note("lädt …", "info")] };
+  if (!entry?.data) return { chips, sections: [entry?.error ? note(entry.error, "error") : note(LOADING, "info")] };
   const { checks, warnings } = entry.data.pr;
   return { chips, sections: [...(checks ? [checksSection(t, checks)] : []), ...(warnings ?? []).map((w) => note(w, "warning"))] };
 }

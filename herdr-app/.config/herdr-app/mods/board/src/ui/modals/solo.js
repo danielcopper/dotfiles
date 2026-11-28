@@ -37,11 +37,11 @@ function soloEntries(b, view) {
   });
 }
 
-const soloChoices = (b) => ({
+const soloChoices = (b, view) => ({
   [SOLO_FIELD]: {
-    entries: (m) => soloEntries(b, m.view),
-    current: (m) => soloNow(b, m.view)?.chosen ?? null,
-    take: (b, row, cx) => b.setSoloRepo(b.modal.view, row.id, cx),
+    entries: () => soloEntries(b, view),
+    current: () => soloNow(b, view)?.chosen ?? null,
+    take: (b, row, cx) => b.setSoloRepo(view, row.id, cx),
     closes: true,
     placeholder: "Filter: Name des Repos",
     none: "Kein Repo passt zum Filter",
@@ -72,7 +72,7 @@ export function soloField(b, t, view, solo) {
 export const soloModal = {
   open(b, view, cx) {
     b.modal = { kind: "solo", view, field: SOLO_FIELD, list: null };
-    openList(b, soloChoices(b), SOLO_FIELD, cx);
+    openList(b, soloChoices(b, view), SOLO_FIELD, cx);
   },
 
   needsData: true,

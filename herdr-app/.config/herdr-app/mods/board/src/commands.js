@@ -20,11 +20,14 @@
 //   first (Board.keptSituation);
 // - run(b, c, cx); aim(c) and gone(c) where it aims closer than its group
 //   (menuActions);
+// - screen: where it is, "board" (by default), "settings" (the settings
+//   page) or "both"; its key, its hint and its entry in the menu are there
+//   only;
 // - hint(c): its text on the hint line, null for none; hintKey: the key
-//   the hint line names (its key by default). The hint line names each key
-//   once (hintsOf), and neither the moves nor a key named elsewhere (where
-//   it acts, or only in the menu); README, "herdr app", lists those it
-//   leaves out.
+//   the hint line names (its key by default; hintKey(c) where that
+//   changes). The hint line names each key once (hintsOf), and neither the
+//   moves nor a key named elsewhere (where it acts, or only in the menu);
+//   README, "herdr app", lists those it leaves out.
 // An entry without run is a hint only: a core key the Board handles itself
 // (Tab, Esc).
 // `c` is the situation an action runs in (Board.situation): { b, view, st,
@@ -38,13 +41,19 @@
 // there, as a related item's line until a read brings it again), drilled
 // (whether the panel shows a related item rather than the board's selected
 // one), trail (the keys of the items on the panel's way down, the board's
-// selected one first) }.
+// selected one first), settingsPage (the settings page's state while it
+// shows, else null), topic, knob and add (its shown topic, the marked row's
+// knob and the add it reaches, null for none: settingsSituation in
+// ui/settings/index.js) }.
 
 import { cardType, itemLabel } from "./shared.js";
+import { ORIGIN } from "./settings.js";
 import { hasViewSwitch, shownIndex, tabViewAfter, tabViewName, viewSwitchHint } from "./contexts.js";
 import { lineIndex } from "./related.js";
 import { placed, secondEnter } from "./sessions.js";
 import { descriptionFolds } from "./ui/related.js";
+import { TOPIC_WORD, leaveSettingsPage, moveKnob, openSettingsPage, settingsTopics, showSettingsTopic } from "./ui/settings/index.js";
+import { resetKnob } from "./ui/settings/knobs.js";
 import { sprintIs } from "./kinds/sprint.js";
 
 // What a key event names (an action's key), or null for one no action has:
@@ -75,9 +84,13 @@ const keyLabel = (key) => (key === "enter" ? "Enter" : key);
 // that item's heading.
 const held = (a, c) => a.group === "item" && Boolean(c.drilled);
 
+// Whether the action `a` is on the screen that shows: the settings page
+// while it shows, else the board.
+const onScreen = (a, c) => [c.settingsPage ? "settings" : "board", "both"].includes(a.screen ?? "board");
+
 // The action the key `name` runs now: the first in the table that has it
 // and takes it, and is not held; null for none.
-export const actionFor = (name, c) => ACTIONS.find((a) => a.run && a.key === name && !held(a, c) && (a.takes ?? a.when)(c)) ?? null;
+export const actionFor = (name, c) => ACTIONS.find((a) => a.run && a.key === name && onScreen(a, c) && !held(a, c) && (a.takes ?? a.when)(c)) ?? null;
 
 const nameOf = (a, c) => (typeof a.name === "function" ? a.name(c) : a.name);
 
@@ -113,6 +126,11 @@ const GROUPS = {
     gone: (c) => `Die Details von ${itemLabel(c.details)} sind nicht mehr offen`,
   },
   view: { title: (c) => c.view.name, aim: (c) => [c.view?.id], gone: (c) => `„${c.view.name}“ wird nicht mehr gezeigt` },
+  settings: {
+    title: (c) => (c.knob ? `Einstellungen · ${c.knob.name}` : "Einstellungen"),
+    aim: (c) => [c.topic?.id ?? null, c.knob?.id ?? null],
+    gone: (c) => (c.knob ? `„${c.knob.name}“ ist nicht mehr markiert` : "Die Einstellungen zeigen etwas anderes"),
+  },
   board: { title: () => "Board", aim: () => [], gone: () => "" },
 };
 
@@ -124,7 +142,7 @@ const GROUPS = {
 // ausblenden" at its column, and what its group aims at, and says, apart:
 // where that has gone, the menu says so first).
 export function menuActions(c) {
-  return ACTIONS.filter((a) => a.menu != null && a.when(c))
+  return ACTIONS.filter((a) => a.menu != null && onScreen(a, c) && a.when(c))
     .sort((x, y) => x.menu - y.menu)
     .map((a) => {
       const group = GROUPS[a.group];
@@ -145,8 +163,8 @@ export const groupAimOf = (a, c) => JSON.stringify(GROUPS[a.group].aim(c));
 // are the group "details", or the board) names its keys, and the other
 // part's hints stay for the keys it does not name.
 export function hintsOf(c) {
-  const shown = ACTIONS.filter((a) => a.hint && !held(a, c))
-    .map((a) => ({ a, key: a.hintKey ?? keyLabel(a.key), text: a.hint(c) }))
+  const shown = ACTIONS.filter((a) => a.hint && onScreen(a, c) && !held(a, c))
+    .map((a) => ({ a, key: (typeof a.hintKey === "function" ? a.hintKey(c) : a.hintKey) ?? keyLabel(a.key), text: a.hint(c) }))
     .filter((h) => h.text);
   const leads = (h) => (h.a.group === "details") === Boolean(c.panel);
   const named = new Set(shown.filter(leads).map((h) => h.key));
@@ -254,6 +272,65 @@ const moveAction = (id, key, by, name) => ({
   run: (b, c, cx) => c.shape.move(b, c.view, c.st, by, cx),
   ...(by < 0 ? { hint: (c) => (c.shape?.move ? c.shape.moveHint ?? "verschieben" : null), hintKey: "H/L" } : {}),
 });
+
+// The settings page's actions: a digit shows a topic; Enter, a, x, u and
+// J/K act on the marked row; j k, ← → and space (Board.settingsKey) have
+// their hints here.
+const onSettings = (c) => Boolean(c.settingsPage);
+const topicAt = (c, n) => (c.settingsPage ? settingsTopics(c.b)[n - 1] ?? null : null);
+const topicAction = (n) => ({
+  id: `topic-${n}`, group: "settings", screen: "settings", key: String(n), menu: 70 + n,
+  name: (c) => `${TOPIC_WORD} ${n}: ${topicAt(c, n).name}`,
+  when: (c) => Boolean(topicAt(c, n)) && topicAt(c, n).id !== c.topic?.id,
+  takes: onSettings,
+  run: (b, c, cx) => topicAt(c, n) && showSettingsTopic(b, topicAt(c, n).id, cx),
+  ...(n === 1 ? { hint: () => TOPIC_WORD, hintKey: (c) => `1–${Math.min(9, settingsTopics(c.b).length)}` } : {}),
+});
+const knobAction = (id, key, part, menu, fallback, hint) => ({
+  id, group: "settings", screen: "settings", key, menu,
+  name: (c) => c.knob?.[part]?.name ?? fallback,
+  when: (c) => onSettings(c) && Boolean(c.knob?.[part]),
+  run: (b, c, cx) => c.knob[part].run(b, cx),
+  hint: (c) => (c.knob?.[part] ? c.knob[part].hint ?? hint : null),
+});
+const SETTINGS_ACTIONS = [
+  { id: "settings-walk", screen: "settings", hint: () => "Eintrag", hintKey: "j k" },
+  { id: "settings-side", screen: "settings", hint: (c) => c.knob?.side?.hint ?? null, hintKey: "← →" },
+  { id: "settings-space", screen: "settings", hint: (c) => c.knob?.space?.hint ?? null, hintKey: "Leertaste" },
+  ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(topicAction),
+  knobAction("settings-enter", "enter", "enter", 61, "Ändern…", "ändern"),
+  {
+    id: "settings-move-down", group: "settings", screen: "settings", key: "J", menu: 65, name: "Nach unten verschieben",
+    when: (c) => onSettings(c) && Boolean(c.knob?.move?.can(1)), takes: (c) => onSettings(c) && Boolean(c.knob?.move),
+    run: (b, c, cx) => moveKnob(b, c.knob, 1, cx),
+    hint: (c) => (c.knob?.move ? "verschieben" : null), hintKey: "J/K",
+  },
+  {
+    id: "settings-move-up", group: "settings", screen: "settings", key: "K", menu: 66, name: "Nach oben verschieben",
+    when: (c) => onSettings(c) && Boolean(c.knob?.move?.can(-1)), takes: (c) => onSettings(c) && Boolean(c.knob?.move),
+    run: (b, c, cx) => moveKnob(b, c.knob, -1, cx),
+  },
+  {
+    id: "settings-add", group: "settings", screen: "settings", key: "a", menu: 62,
+    name: (c) => c.add?.text.replace(/ ….*$/, "") ?? "Neu…",
+    when: (c) => onSettings(c) && Boolean(c.add),
+    run: (b, c, cx) => c.add.run(b, cx),
+    hint: (c) => (c.add ? "neu" : null),
+  },
+  knobAction("settings-remove", "x", "remove", 63, "Entfernen", "entfernen"),
+  {
+    id: "settings-reset", group: "settings", screen: "settings", key: "u", menu: 64, name: "Zurücksetzen",
+    when: (c) => onSettings(c) && Boolean(c.knob?.path) && c.b.origin(c.knob.path) === ORIGIN.machine,
+    takes: (c) => onSettings(c) && Boolean(c.knob?.path),
+    run: (b, c, cx) => resetKnob(b, c.knob, cx),
+    hint: (c) => (c.knob?.path ? "zurücksetzen" : null),
+  },
+  {
+    id: "settings-leave", group: "settings", screen: "settings", key: null, menu: 69, name: "Zum Board",
+    when: onSettings,
+    run: (b, c, cx) => leaveSettingsPage(b, cx),
+  },
+];
 
 export const ACTIONS = [
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(tabAction),
@@ -436,10 +513,17 @@ export const ACTIONS = [
     hint: () => "neu laden",
   },
   {
-    id: "commands", name: "Befehle", key: ":", bar: true,
+    id: "settings", group: "board", name: "Einstellungen", key: "e", menu: 29, bar: true,
+    when: (c) => Boolean(c.b.config),
+    run: (b, c, cx) => b.config && openSettingsPage(b, cx),
+  },
+  ...SETTINGS_ACTIONS,
+  {
+    id: "commands", name: "Befehle", key: ":", bar: true, screen: "both",
     when: () => true,
     run: (b, c, cx) => b.openCommands(cx),
     hint: () => "Befehle",
   },
   { id: "escape-hint", hint: (c) => (c.panel ? "zurück" : "schließen"), hintKey: "Esc" },
+  { id: "settings-escape-hint", screen: "settings", hint: () => "zum Board", hintKey: "Esc" },
 ];

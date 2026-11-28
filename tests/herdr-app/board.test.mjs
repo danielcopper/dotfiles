@@ -676,7 +676,7 @@ test("a GitHub context's tabs as views.json gives them: a project of the context
   const [a, b, p] = config.github.contexts[0].tabs;
   assert.deepEqual(a, {
     entryKind: "project", start: { message: "m" }, id: "github:project:o/3", source: "github", settingsPath: ["sources", "github", "contexts", "o", "projects", "3"],
-    owner: "o", number: 3, limit: 200, views: { 2: { hide: ["Done"] } }, owners: { tabOwner: "o", otherOwners: [] },
+    owner: "o", number: 3, limit: 200, views: { 2: { hide: ["Done"] } }, switchOrder: "github", owners: { tabOwner: "o", otherOwners: [] },
   });
   assert.deepEqual([b.id, b.number, b.limit, b.views, b.start], ["github:project:o/4", 4, 1000, {}, {}]);
   assert.deepEqual(p, {
@@ -3292,11 +3292,11 @@ for (const [shell, at] of [["sh", "sh"], ["dash", dash]]) {
     assert.deepEqual(board.parseRepos(r.stdout, folders), {
       repos: [
         { key: "c d", folder: `${lists}/a b/c d`, written: "~/lists/a b/c d" },
-        { key: "Example Project/beta", folder: `${lists}/repos/beta`, written: "~/lists/repos/beta" },
+        { key: "Example Project/beta", folder: `${lists}/repos/beta`, written: "~/lists/repos/beta", source: "azure" },
         { key: "plain", folder: `${lists}/repos/plain`, written: "~/lists/repos/plain" },
-        { key: "sample-org/alpha", folder: `${lists}/repos/alpha`, written: "~/lists/repos/alpha" },
-        { key: "sample-user/alpha", folder: `${lists}/repos/alpha`, written: "~/lists/repos/alpha" },
-        { key: "sample-user/alpha", folder: `${lists}/other/alpha`, written: `${home}/lists/other/alpha` },
+        { key: "sample-org/alpha", folder: `${lists}/repos/alpha`, written: "~/lists/repos/alpha", source: "github", upstream: true },
+        { key: "sample-user/alpha", folder: `${lists}/repos/alpha`, written: "~/lists/repos/alpha", source: "github" },
+        { key: "sample-user/alpha", folder: `${lists}/other/alpha`, written: `${home}/lists/other/alpha`, source: "github" },
       ],
       missing: ["~/lists/none"],
       unreadable: [],
@@ -3553,7 +3553,7 @@ const OPEN_ISSUES = `${ISSUES_TAB}:open`;
 const CLOSED_ISSUES = `${ISSUES_TAB}:closed`;
 const issueTabs = (config = issuesConfig()) => githubTabs(board.readConfig(config).config);
 const issuesView = (state = "open", config = issuesConfig()) => board.viewsOf(board.readConfig(config).config, knownGet()).find((v) => v.id === `${ISSUES_TAB}:${state}`);
-const ISSUE_REPOS = () => board.parseIssueRepos(json("github-issue-repos.json"), "sample-user");
+const ISSUE_REPOS = () => board.parseOwnerRepos(json("github-issue-repos.json"), "sample-user");
 // The fixture's open (or closed) issues as the view reads them, the repos
 // `hidden` left out of its search.
 const issuesData = (state = "open", { hidden = [], view = issuesView(state), name = state === "open" ? "github-issues.json" : "github-issues-closed.json" } = {}) =>
@@ -15530,7 +15530,7 @@ test("UI: `:` opens the command menu over a GitHub card: what can run on the car
   assert.deepEqual(entries, [
     ["Details zeigen", "Enter"], ["Status ändern…", "s"], ["Zuweisen…", "a"], ["Nach links verschieben", "H"], ["Nach rechts verschieben", "L"], ["Im Browser öffnen", "o"],
     ["Spalte ausblenden: Ready", null], ["Spalten…", null],
-    ["Nur meine an", "m"], ["Filter", "/"], ["Neu laden", "r"], ["Tab 2: Other", "2"], ["Tab 3: PRs", "3"], ["Nächster Tab", "]"], ["Vorheriger Tab", "["],
+    ["Nur meine an", "m"], ["Filter", "/"], ["Neu laden", "r"], ["Einstellungen", "e"], ["Tab 2: Other", "2"], ["Tab 3: PRs", "3"], ["Nächster Tab", "]"], ["Vorheriger Tab", "["],
     ["Kontext 2: Example Project", "g2"], ["Nächster Kontext", "}"], ["Vorheriger Kontext", "{"],
   ]);
   assert.deepEqual(menuHeads(b), ["Issue tender#3004 · feat(api): page through long lists", "Mine", "Board"], "the window's ten rows: three groups");
@@ -15568,7 +15568,7 @@ test("UI: the command menu on a Sprint: on a story its fold and no move, on a ta
   assert.deepEqual(entries.map(([name, key]) => `${name}${key ? ` (${key})` : ""}`), [
     "Details zeigen (Enter)", "Status ändern… (s)", "Zuweisen… (a)", "Im Browser öffnen (o)", "Story zu-/aufklappen (z)",
     "Sprint wählen…", "Ansicht wechseln: Backlog (v)",
-    "Nur meine an (m)", "Filter (/)", "Neu laden (r)", "Tab 2: PRs (2)", "Nächster Tab (])", "Vorheriger Tab ([)",
+    "Nur meine an (m)", "Filter (/)", "Neu laden (r)", "Einstellungen (e)", "Tab 2: PRs (2)", "Nächster Tab (])", "Vorheriger Tab ([)",
     "Kontext 1: sample-user (g1)", "Nächster Kontext (})", "Vorheriger Kontext ({)",
   ]);
   assert.deepEqual(menuHeads(sprint.b), ["User Story AB#301 · Import the sample catalogue", "Sprint", "Board"]);
@@ -15595,7 +15595,7 @@ test("UI: the command menu on a Sprint: on a story its fold and no move, on a ta
   const coming = await bootBoard({ stored: { context: AZURE_CONTEXT } });
   await press(coming.b, coming.cx, "2");
   assert.deepEqual((await openMenu(coming.b, coming.cx)).map(([name]) => name), [
-    "Nur meine an", "Filter", "Neu laden", "Tab 1: Example Team", "Nächster Tab", "Vorheriger Tab", "Kontext 1: sample-user", "Nächster Kontext", "Vorheriger Kontext",
+    "Nur meine an", "Filter", "Neu laden", "Einstellungen", "Tab 1: Example Team", "Nächster Tab", "Vorheriger Tab", "Kontext 1: sample-user", "Nächster Kontext", "Vorheriger Kontext",
   ]);
   const broken = await bootBoard({ config: "{" });
   assert.deepEqual(await openMenu(broken.b, broken.cx), [["Filter", "/"], ["Neu laden", "r"]], "no valid views.json: only the filter and a reload");
@@ -15634,7 +15634,7 @@ test("UI: typing in the command menu narrows it, best first, each group after it
   const runs = byId(b.render(), "command-0").kids[0].kids.map((k) => [texts(k)[0], k.with.text_color[0]]);
   assert.deepEqual(runs, [["Zuw", "#accent"], ["eisen…", "#fg"]]);
   b.modal.input.type("ne");
-  assert.deepEqual(menuEntries(b).slice(0, 7).map(([name]) => name), ["Neu laden", "Nur meine an", "Nächster Tab", "Nächster Kontext", "Kontext 2: Example Project", "Vorheriger Kontext", "Nach links verschieben"],
+  assert.deepEqual(menuEntries(b).slice(0, 8).map(([name]) => name), ["Neu laden", "Nur meine an", "Nächster Tab", "Nächster Kontext", "Kontext 2: Example Project", "Einstellungen", "Vorheriger Kontext", "Nach links verschieben"],
     "the board's best first, then the rest of its group, then the next group's best");
   b.modal.input.type("qqq");
   assert.deepEqual([menuEntries(b), b.modal.at], [[], -1]);
@@ -15675,28 +15675,28 @@ test("UI: the command menu shows ten rows, its window follows the mark and the m
   host.theme = () => ({ muted: "#muted" });
   await openMenu(b, cx);
   const count = menuEntries(b).length;
-  assert.equal(count, 18);
+  assert.equal(count, 19);
   const drawn = () => byId(b.render(), "commands-rows").kids.map((k) => k.with.id[0]).filter((id) => id.startsWith("command-"));
   const wheel = (y) => cx.call((own) => byId(b.render(), "commands-rows").with.on_scroll_wheel[0]({ delta: { x: 0, y } }, own));
   assert.deepEqual(drawn(), Array.from({ length: 10 }, (_, i) => `command-${i}`));
   const thumb = () => byId(b.render(), "commands-thumb");
-  assert.deepEqual([thumb().with.top[0], thumb().with.h[0], thumb().styles.includes("absolute"), thumb().with.bg[0]], ["0.00%", "55.56%", true, "#muted"]);
-  assert.deepEqual(texts(byId(b.render(), "commands-below")), ["↓ 8 weitere"]);
+  assert.deepEqual([thumb().with.top[0], thumb().with.h[0], thumb().styles.includes("absolute"), thumb().with.bg[0]], ["0.00%", "52.63%", true, "#muted"]);
+  assert.deepEqual(texts(byId(b.render(), "commands-below")), ["↓ 9 weitere"]);
   wheel(-27);
   assert.equal(b.modal.top, 0, "less than a row's 28 pixels: not yet");
   wheel(-1);
   assert.deepEqual([b.modal.top, b.modal.at], [1, 0], "a row's worth down: the window moves, the mark stays");
   assert.equal(drawn()[0], "command-1");
-  assert.equal(thumb().with.top[0], "5.56%");
-  assert.deepEqual(texts(byId(b.render(), "commands-below")), ["↓ 7 weitere"]);
+  assert.equal(thumb().with.top[0], "5.26%");
+  assert.deepEqual(texts(byId(b.render(), "commands-below")), ["↓ 8 weitere"]);
   wheel(-1000);
-  assert.equal(b.modal.top, 8, "no further than the last row");
+  assert.equal(b.modal.top, 9, "no further than the last row");
   assert.equal(byId(b.render(), "commands-below"), null, "nothing more below");
   wheel(56);
-  assert.equal(b.modal.top, 6, "up");
+  assert.equal(b.modal.top, 7, "up");
   host.settings = () => ({ zoom: 2 });
   wheel(56);
-  assert.equal(b.modal.top, 5, "at zoom 2 a wheel's 56 pixels are 28");
+  assert.equal(b.modal.top, 6, "at zoom 2 a wheel's 56 pixels are 28");
   await press(b, cx, "up");
   assert.deepEqual([b.modal.at, b.modal.top], [0, 0], "a key brings the window to the mark");
   for (let i = 0; i < 12; i++) await press(b, cx, "down");
@@ -15726,7 +15726,8 @@ test("UI: the assignee picker's window moves with the mouse wheel too, the mark 
 // What an action did, as far as a test can see it: the source, tab and
 // view, nur meine, the filter, the dialog, the notice, the view's
 // selection, details and folds, the details panel and its fold, the pages
-// opened, the open calls, herdr's runs and toasts.
+// opened, the open calls, herdr's runs and toasts, the settings page's
+// topic, marked knob and problem, and the files written.
 function effectOf(b, cx, host) {
   const view = b.view();
   const st = view ? b.state(view.id) : null;
@@ -15734,6 +15735,7 @@ function effectOf(b, cx, host) {
     context: b.context()?.id, tab: b.tab()?.id, view: view?.id, mine: b.mine, filtering: b.filtering, modal: b.modal?.kind ?? null, notice: b.notice?.text ?? null,
     sel: st?.sel ?? null, detail: st?.detail ?? null, folds: st?.folds ?? null, solo: st?.soloRepo ?? null, panel: b.panel, unfolded: b.relatedUi.unfolded,
     opened: cx.opened ?? [], open: host.calls.filter((c) => !c.done).map((c) => [c.tool, ...c.args].join(" ")), runs: host.runs, notes: host.notes.length,
+    settings: b.settingsPage && [b.settingsPage.topic, board.settingsSituation(b).knob?.id ?? null, b.settingsPage.problem], files: host.files,
   });
 }
 
@@ -15747,6 +15749,30 @@ function nineTabs() {
 }
 // A board on nine tabs, `shown` the one shown.
 const onNineTabs = (shown) => () => bootBoard({ config: nineTabs(), stored: { context: GITHUB_CONTEXT, [`tab:${GITHUB_CONTEXT}`]: shown === 9 ? "github:v9" : `github:project:sample-user/${shown}` } });
+// testConfig with two repo folders (and the rest of `extra`).
+function foldersConfig(extra = {}) {
+  return JSON.stringify({ ...JSON.parse(testConfig()), repoFolders: ["~/Repos", "~/Work"], ...extra });
+}
+// A Board on the settings page, opened with e on the shown context, then
+// on `topic` ("general", "start", "repos", or a context's id) with its
+// `at`th knob marked; its other options bootBoard's.
+async function openSettings({ topic = null, at = 0, ...options } = {}) {
+  const opened = await bootBoard(options);
+  opened.cx.later.splice(0);
+  await press(opened.b, opened.cx, "e");
+  assert.ok(opened.b.settingsPage, "e opens the page");
+  if (topic) {
+    board.showSettingsTopic(opened.b, ["general", "start", "repos"].includes(topic) || topic.startsWith("context:") ? topic : `context:${topic}`, opened.cx);
+    await settle();
+  }
+  for (let i = 0; i < at; i++) await press(opened.b, opened.cx, "j");
+  return opened;
+}
+const onSettingsOfNine = (shown) => async () => {
+  const opened = await bootBoard({ config: nineContexts(), stored: { context: `azure:P${shown}` } });
+  await press(opened.b, opened.cx, "e");
+  return opened;
+};
 function nineContexts() {
   const config = JSON.parse(testConfig());
   config.sources.azure.contexts = Array.from({ length: 9 }, (_, i) => ({ project: `P${i + 1}` }));
@@ -15830,6 +15856,14 @@ const KEYED = {
   filter: { open: openBoard, key: ["/"] },
   reload: { open: openBoard, key: ["r"] },
   repos: { open: openPrList, key: ["r", { char: "R", modifiers: { shift: true } }] },
+  settings: { open: openBoard, key: ["e"] },
+  ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => [`topic-${n}`, { open: onSettingsOfNine(n === 1 ? 9 : 1), key: [String(n)] }])),
+  "settings-enter": { open: () => openSettings({ topic: "general" }), key: ["enter"] },
+  "settings-add": { open: () => openSettings({ topic: "repos", config: foldersConfig() }), key: ["a"] },
+  "settings-remove": { open: () => openSettings({ topic: "repos", config: foldersConfig() }), key: ["x"] },
+  "settings-reset": { open: () => openSettings({ topic: "general", files: { [MACHINE_FILE]: JSON.stringify({ refreshMinutes: 4 }) } }), key: ["u"] },
+  "settings-move-down": { open: () => openSettings({ topic: "repos", config: foldersConfig() }), key: ["j", { char: "J", modifiers: { shift: true } }] },
+  "settings-move-up": { open: () => openSettings({ topic: "repos", config: foldersConfig(), at: 1 }), key: ["k", { char: "K", modifiers: { shift: true } }] },
 };
 
 test("UI: every action of the action table the menu lists with a key runs from the menu what its key runs, and the menu shows that key beside it", async () => {
@@ -15873,9 +15907,9 @@ test("UI: the actions without a key run from the menu: the column menu, a column
   assert.equal(host.open("gh").length, 1, "and the board refreshes");
 });
 
-test("UI: q, x, X and e are no keys any more, and Shift+S, N and O are no s, n and o: on a card, in its details and in the details panel they do nothing and are not taken", async () => {
+test("UI: q, x and X are no keys any more, and Shift+S, N and O are no s, n and o: on a card, in its details and in the details panel they do nothing and are not taken", async () => {
   const shift = (k) => [k, { char: k.toUpperCase(), modifiers: { shift: true } }];
-  const removed = [["q"], ["x"], shift("x"), ["e"], shift("q"), shift("s"), shift("n"), shift("o")];
+  const removed = [["q"], ["x"], shift("x"), shift("q"), shift("s"), shift("n"), shift("o")];
   const places = {
     onCard: openBoard,
     inDetails: async () => {
@@ -15989,7 +16023,7 @@ test("UI: the command menu keeps groups apart by what they act on, also where a 
   assert.deepEqual(menuHeads(b), ["Issue tender#3004 · feat(api): page through long lists", "Board", "Board"], "the view's heading and the board's");
   b.modal.input.type("n");
   assert.deepEqual(menuEntries(b).map(([name]) => name), [
-    "Neu laden", "Nur meine an", "Nächster Tab", "Nächster Kontext", "Vorheriger Kontext", "Kontext 2: Example Project",
+    "Neu laden", "Nur meine an", "Nächster Tab", "Nächster Kontext", "Einstellungen", "Vorheriger Kontext", "Kontext 2: Example Project",
     "Nach links verschieben", "Nach rechts verschieben", "Zuweisen…", "Details zeigen", "Status ändern…", "Im Browser öffnen",
     "Spalten…", "Spalte ausblenden: Ready",
   ]);
@@ -16002,7 +16036,7 @@ test("the action table's couplings: a listed action has a name, a group, when an
   sizeDescription(onLine.b, onLine.cx, 500);
   const sprint = await openSprint();
   const situations = [onLine.b.situation(), sprint.b.situation()];
-  const without = { item: { item: null }, details: { details: null }, view: { view: null }, board: {} };
+  const without = { item: { item: null }, details: { details: null }, view: { view: null }, board: {}, settings: { settingsPage: null, topic: null, knob: null, add: null } };
   for (const a of board.ACTIONS) {
     if (a.menu != null) {
       assert.deepEqual([["string", "function"].includes(typeof a.name), a.group in without, typeof a.when, typeof a.run], [true, true, "function", "function"], a.id);
@@ -19455,16 +19489,16 @@ test("an Issues tab has the views Offen and Geschlossen, its switch named „Off
 });
 
 test("an Issues tab's repos are the owner's own with issues on, archived ones left out, by name, in pages of 100; its search names the owner by user: or org:, the state shown, archived repos and those turned off left out where the owner's repos have them, newest updated first", () => {
-  const reposDoc = board.githubIssueReposArgs("sample-user")[3];
+  const reposDoc = board.githubOwnerReposArgs("sample-user", { query: board.ISSUE_REPOS_QUERY })[3];
   assert.match(reposDoc, /repositories\(first: 100, after: \$after, ownerAffiliations: \[OWNER\], hasIssuesEnabled: true, isArchived: false, orderBy: \{ field: NAME, direction: ASC \}\)/);
-  assert.deepEqual([board.githubIssueReposArgs("sample-user").slice(-2), board.githubIssueReposArgs("sample-user", "c1").slice(-2)], [["-f", "login=sample-user"], ["-f", "after=c1"]]);
+  assert.deepEqual([board.githubOwnerReposArgs("sample-user", { query: board.ISSUE_REPOS_QUERY }).slice(-2), board.githubOwnerReposArgs("sample-user", { query: board.ISSUE_REPOS_QUERY, after: "c1" }).slice(-2)], [["-f", "login=sample-user"], ["-f", "after=c1"]]);
   assert.deepEqual(ISSUE_REPOS(), { org: false, repos: ["sample-user/atlas", "sample-user/quiet", "sample-user/tender"], after: null });
   const org = json("github-issue-repos.json");
   org.data.repositoryOwner.__typename = "Organization";
   org.data.repositoryOwner.repositories.pageInfo.hasNextPage = true;
-  assert.deepEqual([board.parseIssueRepos(org, "sample-org").org, board.parseIssueRepos(org, "sample-org").after], [true, "Y3Vyc29yOjM="]);
-  assert.throws(() => board.parseIssueRepos({ data: { repositoryOwner: null } }, "nobody"), /GitHub kennt „nobody“ nicht/);
-  assert.throws(() => board.parseIssueRepos({ data: { repositoryOwner: null } }, "nobody", [{ path: ["repositoryOwner"], message: "Could not resolve to a User\nmore" }]), { message: "GitHub: Could not resolve to a User" });
+  assert.deepEqual([board.parseOwnerRepos(org, "sample-org").org, board.parseOwnerRepos(org, "sample-org").after], [true, "Y3Vyc29yOjM="]);
+  assert.throws(() => board.parseOwnerRepos({ data: { repositoryOwner: null } }, "nobody"), /GitHub kennt „nobody“ nicht/);
+  assert.throws(() => board.parseOwnerRepos({ data: { repositoryOwner: null } }, "nobody", [{ path: ["repositoryOwner"], message: "Could not resolve to a User\nmore" }]), { message: "GitHub: Could not resolve to a User" });
   const view = issuesView("closed");
   const repos = ISSUE_REPOS().repos;
   assert.equal(board.issuesQuery(view, false, ["sample-user/quiet", "sample-user/atlas"], repos), "is:issue user:sample-user archived:false is:closed sort:updated-desc -repo:sample-user/quiet -repo:sample-user/atlas");
@@ -20008,15 +20042,17 @@ test("UI: an Issues tab of 1000 issues draws whole only the lines about where it
   }
 });
 
-test("UI: an Issues tab reads the owner's repos page after page, from the cursor of the one before, and an organisation's search names it by org:", async () => {
+test("UI: an Issues tab reads the owner's repos with issues page after page, from the cursor of the one before, and an organisation's search names it by org:", async () => {
   const { b, cx, host } = await bootBoard({ config: issuesConfig(), stored: { context: GITHUB_CONTEXT, [`tab:${GITHUB_CONTEXT}`]: ISSUES_TAB } });
   const st = () => b.state(OPEN_ISSUES);
+  const withIssues = (call) => call.args.some((a) => String(a).includes("hasIssuesEnabled: true"));
+  assert.deepEqual(host.open("gh").filter((c) => isReposCall(c.args)).map(withIssues), [true]);
   const first = json("github-issue-repos.json");
   Object.assign(first.data.repositoryOwner, { __typename: "Organization" });
   first.data.repositoryOwner.repositories.pageInfo = { hasNextPage: true, endCursor: "r1" };
   await host.answer("gh", ok(JSON.stringify(first)), isReposCall);
   const second = host.open("gh");
-  assert.deepEqual([second.length, isReposCall(second[0].args), second[0].args.includes("after=r1")], [1, true, true]);
+  assert.deepEqual([second.length, isReposCall(second[0].args), withIssues(second[0]), second[0].args.includes("after=r1")], [1, true, true, true]);
   const more = json("github-issue-repos.json");
   more.data.repositoryOwner.__typename = "Organization";
   more.data.repositoryOwner.repositories.nodes = [{ nameWithOwner: "sample-user/zebra" }];
@@ -20093,4 +20129,1522 @@ test("UI: a on an Issues tab's row assigns at once, gh's answer settles it, and 
   assert.equal(b.notice.text, "tender#12 → niemand: Ergebnis unklar: GitHub hat die Zuweisung nicht bestätigt; lädt neu");
   await host.answer("gh", ok(fixture("github-issues.json")), isIssuesCall);
   assert.equal(b.notice.text, "tender#12 ist nach dem Neuladen Sample User zugewiesen, nicht niemandem");
+});
+
+// ---- The settings page ----
+
+// The settings page's rows as drawn: [id of the knob or add, its texts].
+const settingsKnobs = (b) => chainTo(b.render(), hasId("settings-pane")).at(-1).kids.flatMap((k) => (k.kids ?? []).map((el) => (el.kind === "popup" ? el.kids[0] : el)).filter((el) => /^(knob-|add-)/.test(el?.with?.id?.[0] ?? "")).map((el) => [el.with.id[0], texts(el)]));
+const settingsTexts = (b) => texts(byId(b.render(), "settings-pane"));
+const knobTexts = (b, id) => texts(byId(b.render(), `knob-${id}`)).filter(Boolean);
+const hintPairs = (b) => {
+  const root = b.render();
+  const line = root.kids[root.kids.findIndex((k) => k.with.id?.[0] === "settings") + 1];
+  return line.kids.map((h) => texts(h));
+};
+const machineSettings = (host) => JSON.parse(host.files[MACHINE_FILE] ?? "null");
+const valueOfPath = (node, path) => path.reduce((at, key) => at?.[key], node);
+// The ids of the rows of the page that take keys, in their order, and j/k
+// onto the one with the id `id`.
+const navOf = (b) => board.navRows(board.topicRows(b, board.shownTopic(b))).map((r) => (r.row === "knob" ? `knob-${r.knob.id}` : r.add.id));
+// The row marked now, by that id.
+const markedNav = (b) => {
+  const id = board.settingsSituation(b).knob?.id;
+  return navOf(b).find((n) => n === `knob-${id}` || n === id) ?? null;
+};
+async function markOn(b, cx, id) {
+  const to = navOf(b).indexOf(id);
+  assert.ok(to >= 0, `${id} takes keys`);
+  for (let i = 0; i < 100 && markedNav(b) !== id; i++) await press(b, cx, navOf(b).indexOf(markedNav(b)) < to ? "j" : "k");
+  assert.equal(markedNav(b), id, `j/k reach ${id}`);
+}
+// The repo scan's answer (REPOS_SCRIPT) for `folders`: per folder its
+// repos as [name, origin], null for one that is not there.
+const scanAnswer = (folders) => ok(folders.flatMap((repos, i) => (repos === null ? [`${i}\t`] : repos.map(([name, origin = "", upstream = ""]) => `${i}\t\t${origin}\t${upstream}\t/home/sample/${i}/${name}`))).join("\n"));
+const isScanCall = (args) => args[1] === board.REPOS_SCRIPT;
+// The owner's repos read for an Issues tab, with issues on, and all of them,
+// as the PR tab's list reads them; ALL_REPOS: the fixture's and one without
+// issues.
+const isIssueReposCall = (args) => isReposCall(args) && args.some((a) => String(a).includes("hasIssuesEnabled: true"));
+const isAllReposCall = (args) => isReposCall(args) && !isIssueReposCall(args);
+const ALL_REPOS = () => {
+  const all = json("github-issue-repos.json");
+  all.data.repositoryOwner.repositories.nodes.push({ nameWithOwner: "sample-user/wiki" });
+  return ok(JSON.stringify(all));
+};
+
+test("UI: e opens the settings page in place of the board, on the shown context: its topics on the left under their platform, the rest below a rule; Esc goes back", async () => {
+  const { b, cx } = await openBoard();
+  await press(b, cx, "e");
+  assert.equal(b.settingsPage?.topic, `context:${GITHUB_CONTEXT}`);
+  const root = b.render();
+  assert.deepEqual(texts(byId(root, "top-bar")), ["Einstellungen", "views.json, darüber dieser Rechner: /fake-home/board/settings.json"]);
+  assert.equal(byId(root, "tabs"), null, "no tabs, no filter");
+  assert.deepEqual(byId(root, "topics").kids.map((k) => texts(k)), [
+    ["GitHub"], ["1", "sample-user", "Mine · Other · PRs"],
+    ["Azure · example-org"], ["2", "Example Project", "Example Team · PRs"],
+    ["a", "Kontext hinzufügen …", "· folgt"], [],
+    ["3", "Repos auf diesem Rechner", "kein Ordner"], ["4", "Start", "claude · /work {number}"], ["5", "Allgemein", "alle 3 min · Deutsch"],
+  ]);
+  assert.ok(byId(root, "topic-context:github:sample-user").styles.includes("bg"), "the shown topic marked");
+  await press(b, cx, "escape");
+  assert.equal(b.settingsPage, null);
+  assert.ok(byId(b.render(), "tabs"), "the board again");
+});
+
+test("UI: on the page's Allgemein j/k mark a knob; Enter edits its value in place, Enter saves it into this machine's file at once, where config.js's check takes it, and says why not where it does not; Esc drops the edit", async () => {
+  const { b, cx, host } = await openSettings({ topic: "general" });
+  assert.deepEqual(hintPairs(b), [["j k", "Eintrag"], ["1–5", board.TOPIC_WORD], ["Enter", "ändern"], ["u", "zurücksetzen"], [":", "Befehle"], ["Esc", "zum Board"]]);
+  assert.equal(board.TOPIC_WORD, "Kategorie");
+  assert.deepEqual(knobTexts(b, "refreshMinutes"), ["Neu laden alle", "refreshMinutes", "3 min", "eine gezeigte Ansicht liest so oft neu, und eine, die man wieder zeigt, wenn ihr letztes Lesen länger her ist", "views.json"]);
+  assert.ok(byId(b.render(), "knob-refreshMinutes").styles.includes("bg"), "the first knob marked");
+  await press(b, cx, "j");
+  assert.equal(host.scrolled.at(-1).row, board.topicRows(b, board.shownTopic(b)).findIndex((r) => r.knob?.id === "language"), "scrolled to the marked one's row");
+  await press(b, cx, "k");
+  await press(b, cx, "enter");
+  assert.deepEqual([b.modal?.kind, b.modal.inputs.value.value()], ["setting", "3"]);
+  assert.ok(byId(byId(b.render(), "knob-refreshMinutes"), "setting-editor"), "the field in the knob");
+  assert.deepEqual(hintPairs(b), [["Enter", "speichert"], ["Esc", "verwirft"]]);
+  for (const typed of ["0", "drei"]) {
+    b.modal.inputs.value.type(typed);
+    cx.call((own) => b.modal.inputs.value.submit(own));
+    await settle();
+    assert.deepEqual([b.modal?.kind, host.files[MACHINE_FILE]], ["setting", undefined], `${typed}: not written`);
+    assert.ok(knobTexts(b, "refreshMinutes").includes("„refreshMinutes“ ist eine Zahl ab 1"), "config.js's words under the field");
+  }
+  await press(b, cx, "escape");
+  assert.deepEqual([b.modal, b.settingsPage?.topic, host.files[MACHINE_FILE]], [null, "general", undefined], "Esc drops the edit, the page stays");
+  await press(b, cx, "enter");
+  b.modal.inputs.value.type(" 5 ");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.equal(b.modal, null);
+  assert.deepEqual(machineSettings(host), { refreshMinutes: 5 });
+  assert.equal(b.config.refreshMinutes, 5);
+  assert.deepEqual(knobTexts(b, "refreshMinutes"), ["Neu laden alle", "refreshMinutes", "5 min", "views.json: 3 min · u setzt auf 3 min zurück", "dieser Rechner"]);
+  host.theme = () => ({ ansi6: "#teal", muted: "#muted", dim: "#dim" });
+  const originColor = (id) => chainTo(byId(b.render(), `knob-${id}`), (el) => ["dieser Rechner", "views.json", "Standard"].includes(texts(el).join("")) && el.kind === "div").at(-1).with.text_color[0];
+  assert.deepEqual([originColor("refreshMinutes"), originColor("org"), originColor("language")], ["#teal", "#muted", "#dim"], "this machine's in teal, views.json's muted, the default dim");
+  host.theme = () => ({});
+  assert.deepEqual(texts(byId(b.render(), "topic-general")), ["5", "Allgemein", "alle 5 min · Deutsch"]);
+  await press(b, cx, "enter");
+  assert.ok(knobTexts(b, "refreshMinutes").includes("gilt: 5 min (dieser Rechner) · views.json: 3 min · u setzt auf 3 min zurück"));
+  await press(b, cx, "escape");
+  await press(b, cx, "u");
+  assert.deepEqual([machineSettings(host), b.config.refreshMinutes, b.origin(["refreshMinutes"])], [{}, 3, "views.json"], "u: back to views.json's");
+  await press(b, cx, "u");
+  assert.deepEqual([machineSettings(host), b.notice?.text], [{}, "„Neu laden alle“ steht nicht in der Datei dieses Rechners"]);
+});
+
+test("UI: the page's Sprache: Deutsch, the only language yet, from its list or with ← →; views.json's „language“ takes \"de\" and names anything else", async () => {
+  const { b, cx, host } = await openSettings({ topic: "general", at: 1 });
+  assert.deepEqual(knobTexts(b, "language"), ["Sprache", "language", "Deutsch", "▾", "die Sprache des Boards: Tabs, Hinweise, Meldungen · Englisch folgt später", "Standard"]);
+  assert.deepEqual(hintPairs(b).slice(0, 3), [["j k", "Eintrag"], ["← →", "wählt"], ["Leertaste", "öffnet die Liste"]]);
+  await press(b, cx, "space");
+  assert.deepEqual([b.modal?.kind, shownRows(b)], ["settingChoice", ["Deutsch"]]);
+  assert.equal(texts(byId(b.render(), "choice-list")).includes("Englisch folgt später"), false, "the knob says it, not the list");
+  await pickRow(b, cx);
+  await settle();
+  await press(b, cx, "right");
+  assert.deepEqual([b.modal, host.files[MACHINE_FILE]], [null, undefined], "the language it has: nothing written");
+  const config = (language) => JSON.stringify({ ...JSON.parse(testConfig()), language });
+  assert.deepEqual([board.readConfig(config("de")).errors, board.readConfig(config("de")).config.language, board.readConfig(testConfig()).config.language], [[], "de", "de"]);
+  assert.deepEqual(board.readConfig(config("en")).errors, ["„language“ ist \"de\" (Deutsch); Englisch folgt später"]);
+  assert.equal(board.readConfig(config("en")).config.language, "de");
+});
+
+test("UI: the page's Plattformen: the Azure organisation, changed as views.json takes it; the account gh is signed in as, once the board read it", async () => {
+  const unread = await openSettings({ topic: "general" });
+  assert.ok(settingsTexts(unread.b).includes("das Konto, mit dem gh angemeldet ist; das Board hat es noch nicht gelesen"));
+  const { b, cx, host } = await openBoard();
+  await press(b, cx, "e");
+  board.showSettingsTopic(b, "general", cx);
+  assert.ok(settingsTexts(b).includes("das Konto, mit dem gh angemeldet ist: sample-user"));
+  assert.deepEqual(settingsKnobs(b).map(([id]) => id), ["knob-refreshMinutes", "knob-language", "knob-org", "knob-github"]);
+  await press(b, cx, "j");
+  await press(b, cx, "j");
+  await press(b, cx, "j");
+  assert.ok(byId(b.render(), "knob-org").styles.includes("bg"), "the account takes no keys: the organisation stays marked");
+  assert.deepEqual(knobTexts(b, "org"), ["Azure-Organisation", "sources.azure.org", "https://dev.azure.com/example-org", "für alle Azure-Kontexte; ihre Projekte liest „Kontext hinzufügen“", "views.json"]);
+  await press(b, cx, "enter");
+  b.modal.inputs.value.type("dev.azure.com/other-org");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.ok(knobTexts(b, "org").includes("„sources.azure.org“ ist die Adresse der Organisation, etwa https://dev.azure.com/<Organisation>"));
+  b.modal.inputs.value.type("https://dev.azure.com/other-org");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.deepEqual(machineSettings(host), { sources: { azure: { org: "https://dev.azure.com/other-org" } } });
+  assert.equal(b.config.azure.org, "https://dev.azure.com/other-org");
+  assert.ok(texts(byId(b.render(), "topics")).includes("Azure · other-org"));
+});
+
+test("UI: a write of the page that herdr refuses is said in the banner over the page, in changeSettings' words", async () => {
+  const { b, cx, host } = await openSettings({ topic: "general" });
+  host.failWrite = new Error("Permission denied");
+  await press(b, cx, "enter");
+  b.modal.inputs.value.type("4");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.deepEqual(b.notice, { text: `${MACHINE_FILE} nicht gespeichert: Permission denied`, level: "error" });
+  assert.ok(texts(b.render()).includes(`${MACHINE_FILE} nicht gespeichert: Permission denied`));
+  assert.ok(b.settingsPage, "on the page still");
+  assert.equal(b.config.refreshMinutes, 3, "the file as it is");
+});
+
+test("UI: the page's Start: the agent from this machine's installed ones and the machine, each with ← → or from its list, at once; the messages edited in place, each with what it gives for an item the board read", async () => {
+  const { b, cx, host } = await openBoard();
+  host.knownAgents = async () => [
+    { key: "claude", name: "Claude Code", run: ["claude"], installed: true }, { key: "codex", name: "Codex", run: ["codex"], installed: true },
+    { key: "gone", name: "Gone", run: ["gone"], installed: false },
+  ];
+  await press(b, cx, "e");
+  await press(b, cx, "4");
+  assert.equal(b.settingsPage.topic, "start");
+  assert.deepEqual(settingsKnobs(b).map(([id]) => id), ["knob-agent", "knob-machine", "knob-message", "knob-review"]);
+  assert.deepEqual(knobTexts(b, "agent"), ["Agent", "agent", "claude", "Claude Code", "▾", "views.json"]);
+  await press(b, cx, "space");
+  assert.deepEqual(shownRows(b), ["claudeClaude Code", "codexCodex"], "the installed ones, their names beside");
+  await press(b, cx, "escape");
+  assert.equal(b.modal, null);
+  await press(b, cx, "right");
+  assert.deepEqual(machineSettings(host), { start: { agent: "codex" } });
+  await press(b, cx, "j");
+  assert.deepEqual(knobTexts(b, "machine"), ["Rechner", "machine", "Dieser Rechner", "▾", "Standard"]);
+  await press(b, cx, "right");
+  assert.deepEqual(machineSettings(host), { start: { agent: "codex", machine: "server" } });
+  await press(b, cx, "left");
+  assert.deepEqual(machineSettings(host).start.machine, null, "back to this one, over views.json's");
+  await press(b, cx, "left");
+  assert.deepEqual(machineSettings(host).start.machine, "server", "past the first the last");
+  await press(b, cx, "left");
+  await press(b, cx, "j");
+  assert.deepEqual(knobTexts(b, "message"), ["Erste Nachricht", "message", "/work {number}", "für Issues und Work Items · tender#3004 → /work 3004", "views.json"]);
+  await press(b, cx, "enter");
+  b.modal.inputs.value.type("/fix {key}");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.equal(machineSettings(host).start.message, "/fix {key}");
+  assert.ok(knobTexts(b, "message").includes("für Issues und Work Items · tender#3004 → /fix tender#3004"));
+  assert.deepEqual(knobTexts(b, "review"), ["Review-Nachricht", "review", "/look {number}", "für Pull Requests", "views.json"], "no pull request read yet");
+  assert.ok(settingsTexts(b).includes("Platzhalter: {number} {title} {url} {owner} {repo} {key}"));
+  assert.equal(host.open("sh").length, 0, "Start reads no repos");
+});
+
+test("UI: the page's Repos auf diesem Rechner: the folders as this machine has them, one missing named in the start dialog's words; the repos found by context; reading shows the spinner, a render reads nothing", async () => {
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig() });
+  assert.equal(host.open("sh").filter((c) => isScanCall(c.args)).length, 1, "one scan as the topic shows");
+  assert.ok(turns(byId(b.render(), "knob-folder:~/Repos")), "the spinner while it reads");
+  const pane = byId(b.render(), "settings-pane").kids;
+  const found = pane[pane.findIndex((k) => texts(k).join("") === "GEFUNDEN") + 1];
+  assert.ok(turns(found) && texts(found).includes("lädt …"), "the found repos' spinner too");
+  b.render();
+  b.render();
+  assert.equal(host.open("sh").length, 1, "renders read nothing");
+  await host.answer("sh", scanAnswer([[
+    ["tender", "git@github.com:sample-user/tender.git"], ["atlas", "https://github.com/sample-user/atlas"], ["lib", "https://github.com/someone/lib"],
+    ["home", "ssh://git@git.example.com/me/home.git"], ["plain"],
+  ], null]), isScanCall);
+  assert.deepEqual(knobTexts(b, "folder:~/Repos"), ["~/Repos", "5 Git-Repos", "x nimmt ihn für diesen Rechner heraus; eine Änderung schreibt die ganze Liste in die Datei dieses Rechners", "views.json"]);
+  assert.deepEqual(knobTexts(b, "folder:~/Work"), ["~/Work", "Den Repo-Ordner ~/Work gibt es auf diesem Rechner nicht", "views.json"]);
+  assert.deepEqual(texts(byId(b.render(), "topic-repos")), ["3", "Repos auf diesem Rechner", "2 Ordner · 1 fehlt hier"]);
+  assert.deepEqual(knobTexts(b, "exception-sample-user/tender"), ["sample-user/tender", "checkout", "~/src/tender", "views.json"]);
+  assert.ok(settingsTexts(b).includes("GEFUNDEN · 5 Ordner, 5 Repos, nach Kontext"));
+  assert.deepEqual(knobTexts(b, `found-${GITHUB_CONTEXT}`), ["GitHub", "sample-user", "atlas", "tender", "Kontext 1 · 2 Repos"]);
+  assert.deepEqual(knobTexts(b, `found-${AZURE_CONTEXT}`), ["Azure", "Example Project", "keins auf diesem Rechner"]);
+  assert.deepEqual(knobTexts(b, "found-other-github"), ["GitHub", "ohne Kontext", "someone/lib", "1 Repo · der Startdialog bietet sie an, kein Tab zeigt ihre Issues oder PRs"]);
+  assert.deepEqual(knobTexts(b, "found-git.example.com"), ["git.example.com", "ohne Kontext", "me/home", "1 Repo · der Startdialog bietet sie an, kein Tab zeigt ihre Issues oder PRs"]);
+  assert.deepEqual(knobTexts(b, "found-bare"), ["ohne Remote", "plain", "nur über die Namen ihrer Ordner"]);
+});
+
+test("UI: the page's folders: x takes one out for this machine, writing the whole list, and the folders are read again; not the last one, config.js says why; J/K move one; a adds one", async () => {
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig() });
+  await host.answer("sh", scanAnswer([[], []]), isScanCall);
+  await press(b, cx, "j", { char: "J", modifiers: { shift: true } });
+  assert.deepEqual(machineSettings(host), { repoFolders: ["~/Work", "~/Repos"] });
+  assert.equal(host.open("sh").filter((c) => isScanCall(c.args)).length, 1, "read again");
+  assert.equal(markedNav(b), "knob-folder:~/Repos", "the mark goes with it");
+  await host.answer("sh", scanAnswer([[], []]), isScanCall);
+  await press(b, cx, "k", { char: "K", modifiers: { shift: true } });
+  assert.deepEqual(machineSettings(host), { repoFolders: ["~/Repos", "~/Work"] }, "K: back up");
+  assert.equal(markedNav(b), "knob-folder:~/Repos");
+  await press(b, cx, "k", { char: "K", modifiers: { shift: true } });
+  assert.equal(host.open("sh").filter((c) => isScanCall(c.args)).length, 1, "the first has nowhere to go up: nothing written, nothing read but the one after the last move");
+  await host.answer("sh", scanAnswer([[], []]), isScanCall);
+  assert.deepEqual(knobTexts(b, "folder:~/Repos").slice(0, 2), ["~/Repos", "0 Git-Repos"]);
+  assert.equal(knobTexts(b, "folder:~/Repos").includes("x nimmt ihn heraus · u setzt die Liste auf views.json zurück"), true, "set on this machine now");
+  await press(b, cx, "x");
+  assert.deepEqual(machineSettings(host), { repoFolders: ["~/Work"] });
+  await host.answer("sh", scanAnswer([[]]), isScanCall);
+  await press(b, cx, "x");
+  assert.deepEqual(machineSettings(host), { repoFolders: ["~/Work"] }, "not the last");
+  assert.ok(knobTexts(b, "folder:~/Work").includes("„repoFolders“ ist eine Liste aus mindestens einem Ordner (Text), jeder höchstens einmal, etwa [\"~/Repos\"]"));
+  await press(b, cx, "a");
+  assert.deepEqual([b.modal?.kind, b.modal?.row], ["setting", "add-folder"]);
+  b.modal.inputs.value.type("~/Work/");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.ok(texts(byId(b.render(), "add-folder")).includes("„repoFolders“ ist eine Liste aus mindestens einem Ordner (Text), jeder höchstens einmal, etwa [\"~/Repos\"]"), "a folder twice");
+  b.modal.inputs.value.type("~/More");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.deepEqual(machineSettings(host), { repoFolders: ["~/Work", "~/More"] });
+  assert.equal(host.open("sh").filter((c) => isScanCall(c.args)).length, 1, "read again");
+  await press(b, cx, "u");
+  assert.deepEqual(machineSettings(host), {}, "u: views.json's folders again");
+  assert.deepEqual(b.config.repoFolders, ["~/Repos", "~/Work"]);
+});
+
+test("UI: the page's exceptions: x takes views.json's for this machine and u gives it back; a adds one, its repo, then its folder; a on a repo in two folders makes one of them its folder", async () => {
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig() });
+  await host.answer("sh", scanAnswer([[["atlas", "https://github.com/sample-user/atlas"]], [["atlas2", "git@github.com:sample-user/atlas.git"]]]), isScanCall);
+  const marks = navOf(b);
+  assert.deepEqual(marks, ["knob-folder:~/Repos", "knob-folder:~/Work", "add-folder", "knob-exception-sample-user/tender", "add-exception", "knob-same-sample-user/atlas"]);
+  assert.deepEqual(knobTexts(b, "same-sample-user/atlas"), [
+    "doppelt", "sample-user/atlas · ~/Repos/atlas", "sample-user/atlas · ~/Work/atlas2",
+    "„sample-user/atlas“ liegt auf diesem Rechner in ~/Repos/atlas und ~/Work/atlas2; bitte eines davon wählen", "a legt eine Ausnahme an: das Repo bekommt seinen Ordner fest zugewiesen",
+  ]);
+  await markOn(b, cx, "knob-exception-sample-user/tender");
+  await press(b, cx, "x");
+  assert.deepEqual(machineSettings(host), { repos: { "sample-user/tender": { checkout: null } } });
+  assert.deepEqual(knobTexts(b, "exception-sample-user/tender"), ["sample-user/tender", "checkout", "auf diesem Rechner keine", "dieser Rechner"]);
+  await press(b, cx, "u");
+  assert.deepEqual(machineSettings(host), {});
+  await press(b, cx, "a");
+  b.modal.inputs.value.type("atlas");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.ok(texts(byId(b.render(), "add-exception")).includes("ein Repo mit Besitzer, etwa owner/repo"));
+  b.modal.inputs.value.type("sample-user/quiet");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.equal(b.modal.inputs.value.placeholder, "Ordner von sample-user/quiet, etwa ~/Repos/quiet", "then its folder");
+  b.modal.inputs.value.type("~/src/quiet");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.deepEqual(machineSettings(host), { repos: { "sample-user/quiet": { checkout: "~/src/quiet" } } });
+  await markOn(b, cx, "knob-same-sample-user/atlas");
+  assert.ok(hintPairs(b).some(([k, w]) => k === "a" && w === "neu"));
+  await press(b, cx, "a");
+  assert.deepEqual(shownRows(b), ["~/Repos/atlas", "~/Work/atlas2"]);
+  await press(b, cx, "down");
+  await pickRow(b, cx);
+  await settle();
+  assert.deepEqual(machineSettings(host).repos["sample-user/atlas"], { checkout: "~/Work/atlas2" });
+  assert.equal(b.modal, null);
+  assert.doesNotMatch(b.notice?.text ?? "", /verworfen|steht nicht mehr/, "the pick took its own row away, and says nothing of it");
+});
+
+// Project 7 with a second view, a table, as GitHub names them and as the
+// board knows them before the test.
+const TWO_VIEWS = projectJson({ number: 7, views: [{}, { number: 2, name: "All", layout: "table", column: null, filter: "" }] });
+async function openTwoViews(options = {}) {
+  const known = { ...KNOWN_PROJECTS(), [board.projectKey(MINE_TAB)]: knownOf(TWO_VIEWS) };
+  return openBoard({ known, projectAnswer: (n) => ok(JSON.stringify(n === 7 ? TWO_VIEWS : defaultProject(n))), ...options });
+}
+
+test("a project's switchOrder (the page's view order): GitHub's order by default or with \"github\", else its views' numbers first in their order, the rest after them in GitHub's; anything else is named", () => {
+  const config = (switchOrder) => JSON.stringify({ ...JSON.parse(testConfig()), sources: { github: { prs: SHARED_PRS, contexts: [{ owner: "sample-user", projects: [{ number: 7, switchOrder }], prs: SAMPLE_PRS }] } } });
+  const meta = knownOf(projectJson({ number: 7, views: [{ number: 1 }, { number: 2, name: "B" }, { number: 3, name: "C" }] }));
+  const order = (switchOrder) => board.contextsOf(board.readConfig(config(switchOrder)).config, knownGet({ [board.projectKey(MINE_TAB)]: meta }))[0].tabs[0].views;
+  assert.deepEqual([order(undefined), order("github"), order([]), order([3, 1]), order([9, 2])], [[1, 2, 3], [1, 2, 3], [1, 2, 3], [3, 1, 2], [2, 1, 3]], "a number GitHub has no view for is passed over");
+  const text = "GitHub-Kontext 1 („sample-user“), Project 1 (7): „switchOrder“ ist \"github\" (wie auf GitHub) oder eine Liste von Nummern der Ansichten, jede höchstens einmal, etwa [4, 1]";
+  for (const bad of ["own", [1, 1], [0], ["1"], 2]) assert.deepEqual(board.readConfig(config(bad)).errors, [text], JSON.stringify(bad));
+});
+
+test("readConfig gives the page views.json as read (base) and with the settings over it (merged), and where the settings do not apply, why, without the file's name (refused)", () => {
+  const read = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 9 }));
+  assert.deepEqual([read.base.refreshMinutes, read.merged.refreshMinutes, read.refused], [3, 9, undefined]);
+  const refused = board.readConfig(testConfig(), settingsRead({ refreshMinutes: 0 }));
+  assert.deepEqual([refused.settings, refused.refused, refused.merged.refreshMinutes], [null, ["„refreshMinutes“ ist eine Zahl ab 1"], 3]);
+  assert.ok(refused.errors.includes("settings.json: „refreshMinutes“ ist eine Zahl ab 1"));
+  assert.deepEqual([board.readConfig(null).merged, board.readConfig(null).base], [null, null]);
+});
+
+test("UI: the page's GitHub context: its head, its projects, each project's views in the switch's order with their hidden columns as switches; a switch hides or shows its column on this machine at once", async () => {
+  const { b, cx, host, st } = await openTwoViews();
+  await press(b, cx, "e");
+  assert.ok(turns(byId(b.render(), `knob-repos-github:prs`)), "the PR tab's repos are read: the spinner");
+  await host.answer("gh", ok(fixture("github-issue-repos.json")), isReposCall);
+  assert.deepEqual(texts(byId(b.render(), "settings-head")), ["GitHub › sample-user", "sample-user", "GitHub-Benutzer · Kontext 1 der Kopfzeile · Tabs: Mine, Other, PRs"]);
+  assert.deepEqual(knobTexts(b, `project-${MINE_TAB}`), ["1", "Mine", "projects.7", "Project 7", "2 Ansichten, Name und Filter von GitHub"]);
+  assert.ok(settingsTexts(b).includes("Project hinzufügen … (liest die Projects von sample-user aus GitHub)") && !navOf(b).includes("add-project"), "adding a project comes later: no keys");
+  assert.deepEqual(knobTexts(b, `order-${MINE_TAB}`), ["Reihenfolge", "switchOrder", "wie auf GitHub", "▾", "„eigene“: J/K schiebt die markierte Ansicht; eine neue Ansicht von GitHub kommt ans Ende", "Standard"]);
+  assert.deepEqual(knobTexts(b, `view-${MINE_TAB}-1`), ["1", "Mine", "views.1.hide", "Board", "Filter", "assignee:@me", "Backlog", "Ready", "In progress", "In review", "Done", "Backlog, Done ausgeblendet", "views.json"]);
+  assert.deepEqual(knobTexts(b, `view-${MINE_TAB}-2`), ["2", "All", "views.2.hide", "Tabelle", "eine Tabelle blendet keine Spalten aus"]);
+  const on = () => byId(b.render(), `view-${MINE_TAB}-1-switches`).kids.map((k) => k.with.border_color[0]);
+  await markOn(b, cx, `knob-view-${MINE_TAB}-1`);
+  assert.deepEqual(hintPairs(b).slice(0, 3), [["j k", "Eintrag"], ["← →", "Spalte"], ["Leertaste", "ein/aus"]]);
+  await press(b, cx, "left");
+  assert.equal(b.settingsPage.side, 4, "before the first the last");
+  await press(b, cx, "right");
+  await press(b, cx, "right");
+  assert.equal(b.settingsPage.side, 1);
+  await press(b, cx, "space");
+  assert.deepEqual(machineSettings(host), mineHidden(["Backlog", "Done", "Ready"]));
+  assert.deepEqual([...st().hidden], ["Backlog", "Done", "Ready"], "the board's view follows");
+  assert.ok(host.open("gh").some((c) => isBoardCall(c.args)), "and reads again");
+  assert.ok(knobTexts(b, `view-${MINE_TAB}-1`).includes("Backlog, Done, Ready ausgeblendet auf diesem Rechner · views.json: Backlog, Done · u setzt zurück"));
+  host.theme = () => ({ foreground: "#fg", accent: "#accent", border: "#border" });
+  assert.deepEqual(on(), ["#border", "#fg", "#accent", "#accent", "#border"], "off, the one ← → is on, on");
+  await press(b, cx, "u");
+  assert.deepEqual(machineSettings(host), {});
+  assert.deepEqual([...st().hidden], ["Backlog", "Done"]);
+});
+
+test("UI: the page's order of a project's views: „eigene“ writes the order the switch has, J/K move a view and the mark with it, a new view of GitHub's comes last; „wie auf GitHub“ again", async () => {
+  const { b, cx, host } = await openTwoViews();
+  await press(b, cx, "e");
+  await host.answer("gh", ok(fixture("github-issue-repos.json")), isReposCall);
+  const order = ["sources", "github", "contexts", "sample-user", "projects", "7", "switchOrder"];
+  await markOn(b, cx, `knob-order-${MINE_TAB}`);
+  await press(b, cx, "right");
+  assert.deepEqual(machineSettings(host), projectsHere({ 7: { switchOrder: [1, 2] } }));
+  assert.equal(b.origin(order), "dieser Rechner");
+  await markOn(b, cx, `knob-view-${MINE_TAB}-2`);
+  await press(b, cx, "k", { char: "K", modifiers: { shift: true } });
+  assert.deepEqual(machineSettings(host), projectsHere({ 7: { switchOrder: [2, 1] } }));
+  assert.deepEqual(b.tabById(MINE_TAB).views, [2, 1], "the tab's switch in that order");
+  assert.equal(markedNav(b), `knob-view-${MINE_TAB}-2`, "the mark goes with it");
+  assert.deepEqual(settingsKnobs(b).filter(([id]) => id.startsWith("knob-view-")).map(([id]) => id), [`knob-view-${MINE_TAB}-2`, `knob-view-${MINE_TAB}-1`, `knob-view-${OTHER_TAB}-1`]);
+  host.projectAnswer = (n) => ok(JSON.stringify(n === 7 ? projectJson({ number: 7, views: [{}, { number: 2, name: "All", layout: "table", column: null }, { number: 3, name: "New" }] }) : defaultProject(n)));
+  await press(b, cx, "escape");
+  await press(b, cx, "r");
+  assert.deepEqual(b.tabById(MINE_TAB).views, [2, 1, 3]);
+  await press(b, cx, "e");
+  await markOn(b, cx, `knob-order-${MINE_TAB}`);
+  await press(b, cx, "left");
+  assert.deepEqual(machineSettings(host), projectsHere({ 7: { switchOrder: "github" } }));
+  assert.deepEqual(b.tabById(MINE_TAB).views, [1, 2, 3]);
+  await markOn(b, cx, `knob-view-${MINE_TAB}-2`);
+  assert.equal(hintPairs(b).some(([k]) => k === "J/K"), false, "GitHub's order: nothing to move");
+});
+
+test("UI: the page's Issues tab: its name, its repos as switches, the owner's with issues as its tab reads them, and its limit; the PR tab's repos in a list like R's, all the owner's", async () => {
+  const { b, cx, host } = await bootBoard({ config: issuesConfig() });
+  await press(b, cx, "e");
+  await host.answer("gh", ok(fixture("github-issue-repos.json")), isIssueReposCall);
+  await host.answer("gh", ALL_REPOS(), isAllReposCall);
+  const issues = ["sources", "github", "contexts", "sample-user", "issues"];
+  assert.deepEqual(knobTexts(b, `repos-${ISSUES_TAB}`), ["Repos", "hideRepos", "atlas", "quiet", "tender", "3 Repos von sample-user mit Issues, aus GitHub gelesen · ein ausgeschaltetes fehlt in der Suche · auch über R", "Standard"]);
+  await markOn(b, cx, `knob-repos-${ISSUES_TAB}`);
+  await press(b, cx, "right");
+  await press(b, cx, "space");
+  assert.deepEqual(machineSettings(host), { sources: { github: { contexts: { "sample-user": { issues: { hideRepos: ["sample-user/quiet"] } } } } } });
+  await press(b, cx, "space");
+  assert.deepEqual(valueOfPath(machineSettings(host), [...issues, "hideRepos"]), []);
+  await markOn(b, cx, `knob-name-${ISSUES_TAB}`);
+  await press(b, cx, "enter");
+  b.modal.inputs.value.type("Aufgaben");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.equal(b.tabById(ISSUES_TAB).name, "Aufgaben");
+  await markOn(b, cx, `knob-limit-${ISSUES_TAB}`);
+  await press(b, cx, "enter");
+  b.modal.inputs.value.type("1001");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.ok(knobTexts(b, `limit-${ISSUES_TAB}`).includes("GitHub-Kontext 1 („sample-user“), Issues-Tab: „limit“ ist eine ganze Zahl von 1 bis 1000"));
+  b.modal.inputs.value.type("200");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.deepEqual(knobTexts(b, `limit-${ISSUES_TAB}`), ["Höchstens", "limit", "200 Issues je Ansicht", "dieser Rechner"]);
+  assert.deepEqual(knobTexts(b, "repos-github:prs"), ["Repos", "hideRepos", "alle 4 Repos von sample-user an", "Enter öffnet die Liste wie R: ✓, gezeigt / ausgeblendet", "Standard", "›"]);
+  await markOn(b, cx, "knob-repos-github:prs");
+  await press(b, cx, "enter");
+  assert.equal(b.modal?.kind, "settingRepos");
+  const repoRows = () => byId(b.render(), "setting-repos-rows").kids.map((k) => k.kids.map((el) => texts(el).join("")));
+  assert.deepEqual(repoRows(), [["✓", "atlas", "gezeigt"], ["✓", "quiet", "gezeigt"], ["✓", "tender", "gezeigt"], ["✓", "wiki", "gezeigt"]], "one without issues too");
+  b.modal.input.type("ten");
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual(machineSettings(host).sources.github.contexts["sample-user"].prs, { hideRepos: ["sample-user/tender"] });
+  assert.deepEqual(repoRows(), [["", "tender", "ausgeblendet"]], "the list stays");
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual([machineSettings(host).sources.github.contexts["sample-user"].prs, repoRows()], [{ hideRepos: [] }, [["✓", "tender", "gezeigt"]]], "and turns it on again");
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  await press(b, cx, "escape");
+  assert.deepEqual(knobTexts(b, "repos-github:prs").slice(0, 3), ["Repos", "hideRepos", "3 von 4 Repos von sample-user an"]);
+});
+
+test("UI: the page's PR sections, the PR tabs' together: added from a preset or written by hand, edited, given another tone, moved and taken out, each as the whole list; the last one stays; the searches' limit", async () => {
+  const { b, cx, host } = await bootBoard();
+  await press(b, cx, "e");
+  await host.answer("gh", ok(fixture("github-issue-repos.json")), isReposCall);
+  const sections = () => machineSettings(host).sources.github.prs.sections;
+  assert.deepEqual(knobTexts(b, "section-0"), ["1", "Review", "name · query · tone", "is:pr review-requested:@me", "blue", "views.json"]);
+  await markOn(b, cx, "knob-section-0");
+  assert.ok(knobTexts(b, "section-0").includes("eine Änderung schreibt die ganze Liste in die Datei dieses Rechners"), "said where it is marked");
+  await press(b, cx, "a");
+  assert.deepEqual(shownRows(b), ["Alle offenenis:pr is:open archived:false", "Mir zugewiesenis:pr is:open archived:false assignee:@me", "Niemandem zugewiesenis:pr is:open archived:false no:assignee", "eigene Suche"]);
+  await press(b, cx, "down");
+  await pickRow(b, cx);
+  await settle();
+  assert.deepEqual(sections(), [{ name: "Review", query: "is:pr review-requested:@me" }, { name: "Mine", query: "is:pr author:@me" }, { name: "Mir zugewiesen", query: "is:pr is:open archived:false assignee:@me" }]);
+  await press(b, cx, "a");
+  for (let i = 0; i < 3; i++) await press(b, cx, "down");
+  await pickRow(b, cx);
+  assert.deepEqual([b.modal?.kind, b.modal?.fields], ["setting", ["name", "query"]], "eigene Suche: its name and its search");
+  cx.call((own) => b.modal.inputs.name.submit(own));
+  await settle();
+  assert.ok(texts(byId(b.render(), "add-section")).includes("„sources.github.prs“: „sections“ braucht Einträge mit „name“ und „query“"));
+  b.modal.inputs.name.type("Offen");
+  await press(b, cx, "tab");
+  assert.equal(b.modal.field, "query");
+  b.modal.inputs.query.type("is:pr is:open");
+  cx.call((own) => b.modal.inputs.query.submit(own));
+  await settle();
+  assert.deepEqual(sections().at(-1), { name: "Offen", query: "is:pr is:open" });
+  await press(b, cx, "enter");
+  b.modal.inputs.name.type("Prüfen");
+  cx.call((own) => b.modal.inputs.name.submit(own));
+  await settle();
+  assert.equal(sections()[0].name, "Prüfen");
+  await press(b, cx, "right");
+  assert.deepEqual(sections()[0], { name: "Prüfen", query: "is:pr review-requested:@me", tone: "violet" }, "the tone after blue");
+  await press(b, cx, "j", { char: "J", modifiers: { shift: true } });
+  assert.deepEqual(sections().map((s) => s.name), ["Mine", "Prüfen", "Mir zugewiesen", "Offen"]);
+  for (let i = 0; i < 3; i++) await press(b, cx, "x");
+  assert.deepEqual(sections().map((s) => s.name), ["Mine"]);
+  assert.equal(markedNav(b), "add-section", "the mark where it was, on the add below them now");
+  await markOn(b, cx, "knob-section-0");
+  await press(b, cx, "x");
+  assert.deepEqual(sections().map((s) => s.name), ["Mine"], "the last stays");
+  assert.ok(knobTexts(b, "section-0").includes("„sources.github.prs“: „sections“ braucht Einträge mit „name“ und „query“"));
+  await press(b, cx, "u");
+  assert.equal(machineSettings(host).sources, undefined, "u: views.json's sections");
+  await markOn(b, cx, "knob-prs-limit");
+  assert.deepEqual(knobTexts(b, "prs-limit"), ["Je Suche höchstens", "sources.github.prs.limit", "50 PRs", "Standard"]);
+  await press(b, cx, "enter");
+  b.modal.inputs.value.type("101");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.ok(knobTexts(b, "prs-limit").includes("„sources.github.prs.limit“ ist eine ganze Zahl von 1 bis 100"));
+  b.modal.inputs.value.type("20");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.deepEqual(machineSettings(host), { sources: { github: { prs: { limit: 20 } } } });
+});
+
+test("UI: the page's Azure context: a team's Sprint and Backlog as switches, written as the context's whole list of teams; none at all is not taken; the PR tab as it comes with the project", async () => {
+  const { b, cx, host } = await openSettings({ topic: AZURE_CONTEXT });
+  const teams = () => machineSettings(host).sources.azure.contexts["Example Project"].teams;
+  assert.deepEqual(texts(byId(b.render(), "settings-head")), ["Azure · example-org › Example Project", "Example Project", "Azure-Projekt in example-org · Kontext 2 der Kopfzeile · Tabs: Example Team, PRs"]);
+  assert.deepEqual(navOf(b), ["knob-team-azure:team:Example Project/Example Team"]);
+  const team = "team-azure:team:Example Project/Example Team";
+  assert.deepEqual(knobTexts(b, team), ["1", "Example Team", "views", "Sprint", "Backlog",
+    "Leertaste schaltet die Ansicht unter ← → · dieser Rechner setzt die Teams nur als ganze Liste: eine Änderung schreibt alle Teams von Example Project", "views.json"]);
+  assert.ok(settingsTexts(b).includes("Team hinzufügen … (liest die Teams von Example Project aus Azure)"));
+  assert.ok(settingsTexts(b).includes("PR-Ansicht folgt"));
+  await press(b, cx, "space");
+  assert.deepEqual(teams(), [{ team: "Example Team", views: ["backlog"] }]);
+  assert.deepEqual(b.contexts()[1].tabs[0].views, ["backlog"]);
+  await press(b, cx, "right");
+  await press(b, cx, "space");
+  assert.deepEqual(teams(), [{ team: "Example Team", views: ["backlog"] }], "not both off");
+  assert.ok(knobTexts(b, team).includes("Azure-Kontext 1 („Example Project“), Team 1 („Example Team“): „views“ ist eine Liste aus \"sprint\" und \"backlog\", jede höchstens einmal"));
+  await press(b, cx, "u");
+  assert.deepEqual(machineSettings(host), {});
+  await press(b, cx, "x");
+  assert.deepEqual(teams(), []);
+  assert.deepEqual(b.contexts()[1].tabs.map((t) => t.kind), ["prs"]);
+});
+
+test("UI: `:` on the page offers the page's actions alone, on the marked knob, and runs them as their keys do", async () => {
+  const { b, cx } = await openSettings({ topic: "general" });
+  const topic = (n, name) => [`${board.TOPIC_WORD} ${n}: ${name}`, String(n)];
+  assert.deepEqual(await openMenu(b, cx), [["Ändern…", "Enter"], ["Zum Board", null], topic(1, "sample-user"), topic(2, "Example Project"), topic(3, "Repos auf diesem Rechner"), topic(4, "Start")]);
+  assert.deepEqual(menuHeads(b), ["Einstellungen · Neu laden alle"]);
+  b.modal.input.type("Zum Board");
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual([b.settingsPage, b.modal], [null, null]);
+  for (const k of ["m", "r", "/", "v", "]"]) {
+    const { b: on, cx: oncx, host } = await openSettings({ topic: "general" });
+    const calls = host.open("gh").length;
+    await press(on, oncx, k);
+    assert.deepEqual([on.mine, on.filtering, host.open("gh").length, on.tab().id, Boolean(on.settingsPage)], [false, false, calls, MINE_TAB, true], `${k}: the board's key does nothing on the page`);
+  }
+});
+
+test("UI: the page draws each topic well within herdr's 50 ms, a hundred repos and the PR sections included, and its renders read nothing", async () => {
+  const { b, cx, host } = await bootBoard({ config: issuesConfig() });
+  await press(b, cx, "e");
+  const many = json("github-issue-repos.json");
+  many.data.repositoryOwner.repositories.nodes = Array.from({ length: 100 }, (_, i) => ({ nameWithOwner: `sample-user/repo-${i}` }));
+  await host.answer("gh", ok(JSON.stringify(many)), isIssueReposCall);
+  await host.answer("gh", ok(JSON.stringify(many)), isAllReposCall);
+  for (const topic of board.settingsTopics(b)) {
+    board.showSettingsTopic(b, topic.id, cx);
+    await settle();
+    const calls = host.calls.length;
+    const best = Math.min(...[0, 1, 2].map(() => {
+      const start = performance.now();
+      b.render();
+      return performance.now() - start;
+    }));
+    assert.ok(best < 50, `${topic.name}: ${best.toFixed(1)} ms`);
+    assert.equal(host.calls.length, calls, `${topic.name}: no call in a render`);
+  }
+});
+
+test("UI: the page's Start names an agent views.json sets that this machine does not have, or why it read none; ← → from a machine herdr does not list go to the first or the last", async () => {
+  const { b, cx, host } = await openSettings({ topic: "general", config: testConfig({ start: { machine: "laptop" } }) });
+  host.knownAgents = async () => [{ key: "codex", name: "Codex", run: ["codex"], installed: true }];
+  board.showSettingsTopic(b, "start", cx);
+  await settle();
+  assert.ok(knobTexts(b, "agent").includes("Agent „claude“ ist auf diesem Rechner nicht installiert"));
+  await press(b, cx, "j");
+  assert.deepEqual(knobTexts(b, "machine").slice(0, 3), ["Rechner", "machine", "laptop"]);
+  await press(b, cx, "right");
+  assert.equal(machineSettings(host).start.machine, null, "right: the first");
+  host.files[MACHINE_FILE] = null;
+  b.reload(cx);
+  await settle();
+  await press(b, cx, "left");
+  assert.equal(machineSettings(host).start.machine, "server", "left: the last");
+  const failed = await openSettings({ topic: "general" });
+  failed.host.knownAgents = async () => {
+    throw new Error("agents.json unreadable\nmore");
+  };
+  board.showSettingsTopic(failed.b, "start", failed.cx);
+  await settle();
+  assert.ok(knobTexts(failed.b, "agent").includes("Agents auf diesem Rechner nicht lesbar: agents.json unreadable"));
+});
+
+test("UI: the page's repos: without folders nothing is read; a scan that fails says why in the start dialog's words, one whose remotes git could not read names them; a change of the folders made before the scan came shows no count", async () => {
+  const none = await openSettings({ topic: "repos" });
+  assert.equal(none.host.open("sh").length, 0, "no folders: no scan");
+  assert.ok(settingsTexts(none.b).includes("GEFUNDEN · 0 Ordner, 1 Repo, nach Kontext"), "the exception alone");
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig() });
+  await host.answer("sh", { code: 2, stdout: "", stderr: "sh: boom\nmore" }, isScanCall);
+  assert.ok(settingsTexts(b).includes("Repos auf diesem Rechner nicht lesbar: sh: boom"));
+  const unread = await openSettings({ topic: "repos", config: foldersConfig() });
+  await unread.host.answer("sh", ok("0\t128\t\t\t/home/sample/0/odd\n1\t\t\t\t/home/sample/1/tender"), isScanCall);
+  assert.ok(settingsTexts(unread.b).includes("Die Remotes von ~/Repos/odd sind auf diesem Rechner nicht lesbar"));
+  const nogit = await openSettings({ topic: "repos", config: foldersConfig() });
+  await nogit.host.answer("sh", ok("0\t127\t\t\t/home/sample/0/odd"), isScanCall);
+  assert.ok(settingsTexts(nogit.b).includes("git ist auf diesem Rechner nicht installiert"));
+});
+
+test("UI: on the page an exception this machine alone has goes with x; one in two folders that differ only in case of their owner is one repo", async () => {
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig(), files: { [MACHINE_FILE]: JSON.stringify({ repos: { "sample-user/quiet": { checkout: "~/q" } } }) } });
+  await host.answer("sh", scanAnswer([[["atlas", "https://github.com/Sample-User/atlas"]], []]), isScanCall);
+  assert.deepEqual(knobTexts(b, `found-${GITHUB_CONTEXT}`).slice(2), ["atlas", "quiet · ~/q", "tender", "Kontext 1 · 3 Repos"], "its owner in any case; a folder named otherwise beside its repo");
+  await markOn(b, cx, "knob-exception-sample-user/quiet");
+  await press(b, cx, "x");
+  assert.deepEqual(machineSettings(host), {});
+});
+
+test("UI: the page's view switches: a hidden column the view's columns no longer have stands last, off; a view not read yet says when its columns come; a failed read of the owner's repos is said at their knob", async () => {
+  const { b, cx, host } = await openTwoViews({ files: { [MACHINE_FILE]: JSON.stringify(mineHidden(["Backlog", "Done", "Gone"])) } });
+  await press(b, cx, "e");
+  await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, isReposCall);
+  assert.deepEqual(knobTexts(b, `view-${MINE_TAB}-1`).slice(6, 12), ["Backlog", "Ready", "In progress", "In review", "Done", "Gone"]);
+  host.theme = () => ({ accent: "#accent", border: "#border", foreground: "#fg" });
+  assert.equal(byId(b.render(), `view-${MINE_TAB}-1-switches`).kids.at(-1).with.border_color[0], "#border");
+  assert.ok(knobTexts(b, `view-${OTHER_TAB}-1`).includes("die Spalten zeigt das Board, sobald es die Ansicht gelesen hat"));
+  assert.ok(knobTexts(b, "repos-github:prs").some((t) => t.includes("HTTP 502")));
+  assert.equal(texts(byId(b.render(), "settings-head"))[2].startsWith("GitHub-Konto · "), true, "user or organisation unknown");
+});
+
+test("UI: the page's Issues tab offers a repo it turns off that is no longer the owner's; the owner's repos the page read are the Issues tab's too; a name is taken without spaces around it", async () => {
+  const { b, cx, host } = await bootBoard({ config: issuesConfig({ id: "issues", hideRepos: ["other-user/gone"] }) });
+  await press(b, cx, "e");
+  await host.answer("gh", ok(fixture("github-issue-repos.json")), isIssueReposCall);
+  await host.answer("gh", ALL_REPOS(), isAllReposCall);
+  assert.deepEqual(knobTexts(b, `repos-${ISSUES_TAB}`).slice(2, 6), ["atlas", "quiet", "tender", "other-user/gone"]);
+  await markOn(b, cx, `knob-name-${ISSUES_TAB}`);
+  await press(b, cx, "enter");
+  b.modal.inputs.value.type("  Aufgaben  ");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.equal(b.tabById(ISSUES_TAB).name, "Aufgaben");
+  await press(b, cx, "escape");
+  await press(b, cx, "3");
+  assert.equal(host.open("gh").filter((c) => isReposCall(c.args)).length, 0, "read once");
+  assert.ok(host.open("gh").some((c) => isIssuesCall(c.args)));
+});
+
+test("UI: the page's teams move with J/K, the context's whole list written", async () => {
+  const config = JSON.parse(testConfig());
+  config.sources.azure.contexts[0].teams = [{ team: "Example Team" }, { team: "Other Team", views: ["backlog"] }];
+  const { b, cx, host } = await openSettings({ topic: AZURE_CONTEXT, config: JSON.stringify(config) });
+  await press(b, cx, "j", { char: "J", modifiers: { shift: true } });
+  assert.deepEqual(machineSettings(host).sources.azure.contexts["Example Project"].teams, [{ team: "Other Team", views: ["backlog"] }, { team: "Example Team" }]);
+  assert.deepEqual(b.contexts()[1].tabs.map((t) => t.name), ["Other Team", "Example Team", "PRs"]);
+});
+
+test("UI: the page where this machine's file is no JSON: a change is not made, and the field says why; views.json made invalid closes the page; Tab stays herdr's on the page", async () => {
+  const { b, cx, host } = await openSettings({ topic: "general", files: { [MACHINE_FILE]: "{ hide" } });
+  await press(b, cx, "enter");
+  b.modal.inputs.value.type("4");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  await settle();
+  assert.equal(host.files[MACHINE_FILE], "{ hide");
+  assert.ok(knobTexts(b, "refreshMinutes").some((t) => /^\/fake-home\/board\/settings\.json ist kein gültiges JSON/.test(t)));
+  await press(b, cx, "escape");
+  const stopped = cx.stopped;
+  await press(b, cx, "tab");
+  assert.equal(cx.stopped, stopped, "Tab not taken");
+  host.config = "{";
+  b.reload(cx);
+  await settle();
+  assert.equal(b.settingsPage, null, "no valid views.json: the board, which says why");
+  const shown = await openBoard();
+  await press(shown.b, shown.cx, "enter");
+  assert.equal(shown.b.takesTab(), true, "the board's details take Tab");
+  await press(shown.b, shown.cx, "e");
+  assert.equal(shown.b.takesTab(), false, "not on the page");
+});
+
+test("UI: on the page refreshMinutes this machine sets where views.json sets none: u goes back to the default", async () => {
+  const config = JSON.parse(testConfig());
+  delete config.refreshMinutes;
+  const { b } = await openSettings({ topic: "general", config: JSON.stringify(config), files: { [MACHINE_FILE]: JSON.stringify({ refreshMinutes: 4 }) } });
+  assert.ok(knobTexts(b, "refreshMinutes").includes("views.json: keiner · u setzt auf den Standard zurück"));
+});
+
+test("UI: on the page a machine views.json leaves unset stays unset where the list picks this one; the owner's repos read once show at once when the topic shows again; a view not read yet shows the columns of its saved state", async () => {
+  const { b, cx, host } = await openSettings({ topic: "start" });
+  await press(b, cx, "j");
+  await press(b, cx, "space");
+  await pickRow(b, cx);
+  await settle();
+  assert.deepEqual([b.modal, host.files[MACHINE_FILE]], [null, undefined], "Dieser Rechner, as it is");
+  const raw = { [board.savedKey(OTHER)]: savedFor(OTHER, githubBoard(), Date.now()) };
+  const saved = await bootBoard({ raw });
+  await press(saved.b, saved.cx, "e");
+  await saved.host.answer("gh", ok(fixture("github-issue-repos.json")), isReposCall);
+  assert.deepEqual(knobTexts(saved.b, `view-${OTHER_TAB}-1`).slice(4, 9), ["Backlog", "Ready", "In progress", "In review", "Done"], "its saved state's columns");
+  board.showSettingsTopic(saved.b, "general", saved.cx);
+  board.showSettingsTopic(saved.b, `context:${GITHUB_CONTEXT}`, saved.cx);
+  assert.equal(turns(byId(saved.b.render(), "knob-repos-github:prs")), false, "read once: no spinner again");
+});
+
+const shiftJ = { char: "J", modifiers: { shift: true } };
+const typeAndSave = async (b, cx, text, field = "value") => {
+  b.modal.inputs[field].type(text);
+  cx.call((own) => b.modal.inputs[field].submit(own));
+  await settle();
+};
+const openScans = (host) => host.open("sh").filter((c) => isScanCall(c.args));
+
+test("UI: the page builds a list it writes whole only from one config.js takes as it stands: repoFolders in views.json that is no list refuses the add at its row, in config.js's words, and writes nothing", async () => {
+  for (const repoFolders of ["~/Repos", 3, { a: 1 }]) {
+    const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig({ repoFolders }) });
+    await markOn(b, cx, "add-folder");
+    await press(b, cx, "a");
+    assert.deepEqual([b.modal, host.files[MACHINE_FILE]], [null, undefined], JSON.stringify(repoFolders));
+    assert.ok(texts(byId(b.render(), "add-folder")).includes("„repoFolders“ ist eine Liste aus mindestens einem Ordner (Text), jeder höchstens einmal, etwa [\"~/Repos\"]"));
+  }
+  const at = (merged) => ({ configState: { merged } });
+  const sections = ["sources", "github", "prs", "sections"];
+  assert.deepEqual(board.wholeListChange(at({ sources: { github: { prs: { sections: "x" } } } }), sections, board.sharedSectionsProblems, (l) => [...l, 1]), { refused: ["„sources.github.prs“: „sections“ braucht Einträge mit „name“ und „query“"] });
+  const teams = ["sources", "azure", "contexts", "P", "teams"];
+  const teamsAt = (v) => board.teamsProblems(v, "Azure-Kontext 1 („P“)");
+  assert.deepEqual(board.wholeListChange(at({ sources: { azure: { contexts: [{ project: "P", teams: { team: "T" } }] } } }), teams, teamsAt, (l) => [...l, 1]), { refused: ["Azure-Kontext 1 („P“): „teams“ ist eine Liste von Teams"] });
+  assert.deepEqual(board.wholeListChange(at({ sources: { azure: { contexts: [{ project: "P" }] } } }), teams, teamsAt, (l) => [...l, 1]), { changes: [[teams, [1]]] }, "none: empty");
+});
+
+test("UI: on the page a preset section whose add this machine's file refuses says why at the add", async () => {
+  const { b, cx, host } = await openSettings({ files: { [MACHINE_FILE]: "{ hide" } });
+  await markOn(b, cx, "add-section");
+  await press(b, cx, "a");
+  await pickRow(b, cx);
+  await settle();
+  assert.deepEqual([b.modal, host.files[MACHINE_FILE]], [null, "{ hide"]);
+  assert.ok(texts(byId(b.render(), "add-section")).some((t) => /^\/fake-home\/board\/settings\.json ist kein gültiges JSON/.test(t)));
+});
+
+test("UI: the page's list of the PR tab's repos says while they are read that they load, then why the read failed; „Kein Repo passt zum Filter“ only where a filter leaves none; the agent list loads with the spinner and says why it has none", async () => {
+  const { b, cx, host } = await openSettings();
+  await markOn(b, cx, "knob-repos-github:prs");
+  await press(b, cx, "enter");
+  const list = () => texts(byId(b.render(), "setting-repos-menu"));
+  assert.ok(turns(byId(b.render(), "setting-repos-menu")), "the spinner");
+  assert.equal(list().includes("Kein Repo passt zum Filter"), false);
+  await host.answer("gh", { code: 1, stdout: "", stderr: "HTTP 502: Bad Gateway" }, isReposCall);
+  assert.ok(list().some((t) => t.includes("HTTP 502")));
+  const none = json("github-issue-repos.json");
+  none.data.repositoryOwner.repositories.nodes = [];
+  const empty = await openSettings();
+  await empty.host.answer("gh", ok(JSON.stringify(none)), isReposCall);
+  await markOn(empty.b, empty.cx, "knob-repos-github:prs");
+  await press(empty.b, empty.cx, "enter");
+  assert.ok(texts(byId(empty.b.render(), "setting-repos-menu")).includes("Keine Repos von sample-user"));
+  const read = await openSettings();
+  await read.host.answer("gh", ok(fixture("github-issue-repos.json")), isReposCall);
+  await markOn(read.b, read.cx, "knob-repos-github:prs");
+  await press(read.b, read.cx, "enter");
+  read.b.modal.input.type("zzz");
+  assert.ok(texts(byId(read.b.render(), "setting-repos-menu")).includes("Kein Repo passt zum Filter"));
+  const agents = await openSettings({ topic: "general" });
+  agents.host.knownAgents = () => new Promise(() => {});
+  board.showSettingsTopic(agents.b, "start", agents.cx);
+  await press(agents.b, agents.cx, "space");
+  assert.ok(turns(byId(agents.b.render(), "choice-list")) && !texts(byId(agents.b.render(), "choice-list")).includes("Nichts passt zum Filter"), "the spinner while they load");
+  const failed = await openSettings({ topic: "general" });
+  failed.host.knownAgents = async () => {
+    throw new Error("agents.json unreadable");
+  };
+  board.showSettingsTopic(failed.b, "start", failed.cx);
+  await settle();
+  await press(failed.b, failed.cx, "space");
+  assert.ok(texts(byId(failed.b.render(), "choice-list")).includes("Agents auf diesem Rechner nicht lesbar: agents.json unreadable"));
+});
+
+test("UI: on the page a change while this machine's file does not apply is not made: the banner says why, nothing is written, a move keeps the mark, an edit closes", async () => {
+  const file = JSON.stringify({ refreshMinutes: 0 });
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig(), files: { [MACHINE_FILE]: file } });
+  await host.answer("sh", scanAnswer([[], []]), isScanCall);
+  await press(b, cx, "j", shiftJ);
+  const refused = "Nicht geändert: /fake-home/board/settings.json gilt nicht: das Board zeigt views.json allein";
+  assert.deepEqual([host.files[MACHINE_FILE], board.settingsSituation(b).knob.id, b.notice?.text, openScans(host).length], [file, "folder:~/Repos", refused, 0], "the mark stays, nothing read again");
+  board.showSettingsTopic(b, "general", cx);
+  await press(b, cx, "enter");
+  await typeAndSave(b, cx, "4");
+  assert.deepEqual([b.modal, host.files[MACHINE_FILE], b.notice?.text], [null, file, refused]);
+});
+
+test("UI: the page's choice lists are a dialog of their own: the list's hint, and a press beside the list or Esc ends the dialog with it", async () => {
+  const { b, cx } = await openSettings({ topic: "general", at: 1 });
+  await press(b, cx, "space");
+  assert.deepEqual([b.modal?.kind, hintPairs(b)], ["settingChoice", [[board.LIST_HINT]]]);
+  await press(b, cx, "escape");
+  assert.equal(b.modal, null);
+  const presets = await openSettings();
+  await markOn(presets.b, presets.cx, "add-section");
+  await press(presets.b, presets.cx, "a");
+  presets.cx.call((own) => byId(presets.b.render(), "choice-list-shield").with.on_mouse_down[1]({}, own));
+  assert.equal(presets.b.modal, null, "the presets' too");
+  assert.ok(presets.b.render());
+});
+
+test("UI: the page's mark stays on its row where rows come before it; where its row goes, on the row now in its place", async () => {
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig() });
+  await host.answer("sh", scanAnswer([[], []]), isScanCall);
+  await markOn(b, cx, "add-exception");
+  host.files[MACHINE_FILE] = JSON.stringify({ repoFolders: ["~/Repos", "~/Work", "~/More"] });
+  b.reload(cx);
+  await settle();
+  assert.equal(board.settingsSituation(b).knob.id, "add-exception");
+  assert.equal(settingsTexts(b).some((t) => t.includes("Git-Repo")), false, "a scan of other folders counts none");
+  host.files[MACHINE_FILE] = JSON.stringify({ repos: { "sample-user/tender": { checkout: null } } });
+  await markOn(b, cx, "knob-exception-sample-user/tender");
+  await press(b, cx, "u");
+  assert.equal(board.settingsSituation(b).knob.id, "exception-sample-user/tender");
+});
+
+test("a project's first read reads the first view of its switch: views.json's switchOrder before GitHub's order", async () => {
+  const config = JSON.parse(testConfig());
+  ghContext(config).projects[0].switchOrder = [7, 4];
+  const { b, host } = await bootBoard({ config: JSON.stringify(config), known: {}, projectAnswer: withViews(SWITCH_VIEWS) });
+  assert.deepEqual([b.view().id, itemCalls(host).map(filterOf)], [`${MINE_TAB}:7`, ["iteration:@current"]]);
+});
+
+test("UI: the page's PR tab: its name edited in place, written to this machine's file, the tab named so", async () => {
+  const { b, cx, host } = await openSettings();
+  await markOn(b, cx, "knob-name-github:prs");
+  await press(b, cx, "enter");
+  await typeAndSave(b, cx, "Reviews");
+  assert.deepEqual([machineSettings(host).sources.github.contexts["sample-user"].prs, b.tabs().at(-1).name], [{ name: "Reviews" }, "Reviews"]);
+});
+
+test("UI: the page's searches' limit stands in the PR sections' block, after its add line, as its end; a there adds a section", async () => {
+  const { b, cx } = await openSettings();
+  const rows = board.topicRows(b, board.shownTopic(b));
+  const add = rows.findIndex((r) => r.add?.id === "add-section");
+  const limit = rows.findIndex((r) => r.knob?.id === "prs-limit");
+  assert.deepEqual([limit, rows[limit].end, rows[add].end], [add + 1, true, undefined]);
+  assert.equal(settingsTexts(b).some((t) => t.includes("PR-SUCHEN")), false);
+  await markOn(b, cx, "knob-prs-limit");
+  assert.ok(hintPairs(b).some(([k, w]) => k === "a" && w === "neu"));
+});
+
+test("UI: on the page u on a folder reads the folders again, and a scan read over by another shows nothing", async () => {
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig() });
+  await host.answer("sh", scanAnswer([[["tender"]], []]), isScanCall);
+  assert.deepEqual(knobTexts(b, "folder:~/Repos").slice(0, 2), ["~/Repos", "1 Git-Repo"]);
+  await press(b, cx, "j", shiftJ);
+  await press(b, cx, "u");
+  assert.deepEqual([machineSettings(host), openScans(host).map((c) => c.args.slice(3))], [{}, [["~/Work", "~/Repos"], ["~/Repos", "~/Work"]]], "read after J and after u");
+  await host.answer("sh", scanAnswer([[], [["tender"]]]), (args) => isScanCall(args) && args[3] === "~/Work");
+  assert.equal(settingsTexts(b).some((t) => t.includes("Git-Repo")), false, "the scan after J, read over");
+  await host.answer("sh", scanAnswer([[["tender"]], []]), isScanCall);
+  assert.deepEqual(knobTexts(b, "folder:~/Repos").slice(0, 2), ["~/Repos", "1 Git-Repo"]);
+});
+
+test("UI: the page reads the repo folders as it opens and this machine's agents as Start shows, each once while it shows", async () => {
+  let asks = 0;
+  const { b, cx, host } = await openSettings({ config: foldersConfig() });
+  host.knownAgents = async () => (asks++, [{ key: "claude", name: "Claude Code", run: ["claude"], installed: true }]);
+  assert.equal(openScans(host).length, 1, "read as the page opens");
+  await host.answer("sh", scanAnswer([[], null]), isScanCall);
+  assert.deepEqual(texts(byId(b.render(), "topic-repos")), ["3", "Repos auf diesem Rechner", "2 Ordner · 1 fehlt hier"], "the left side's note at once");
+  for (const topic of ["repos", "start", "general", "repos", "start"]) {
+    board.showSettingsTopic(b, topic, cx);
+    await settle();
+  }
+  assert.deepEqual([host.calls.filter((c) => isScanCall(c.args)).length, asks], [1, 1]);
+});
+
+test("UI: on the page a refusal said at a knob goes with its next change that is made, or with another mark", async () => {
+  const why = "„sources.github.prs“: „sections“ braucht Einträge mit „name“ und „query“";
+  const refused = async () => {
+    const opened = await openSettings();
+    await markOn(opened.b, opened.cx, "knob-section-0");
+    await press(opened.b, opened.cx, "x");
+    await press(opened.b, opened.cx, "x");
+    assert.ok(knobTexts(opened.b, "section-0").includes(why));
+    return opened;
+  };
+  const { b, cx, host } = await refused();
+  await press(b, cx, "right");
+  assert.deepEqual([machineSettings(host).sources.github.prs.sections, knobTexts(b, "section-0").includes(why)], [[{ name: "Mine", query: "is:pr author:@me", tone: "violet" }], false]);
+  const moved = await refused();
+  await press(moved.b, moved.cx, "j");
+  await press(moved.b, moved.cx, "k");
+  assert.equal(knobTexts(moved.b, "section-0").includes(why), false);
+});
+
+test("a list's entry moved one place on or back, none past its ends or from outside it", () => {
+  assert.deepEqual([board.movedIn([1, 2, 3], 0, 1), board.movedIn([1, 2, 3], 2, -1)], [[2, 1, 3], [1, 3, 2]]);
+  for (const [at, by] of [[2, 1], [0, -1], [-1, 1], [3, -1]]) assert.equal(board.movedIn([1, 2, 3], at, by), null, `${at} by ${by}`);
+});
+
+test("UI: on the page j/k start a knob's switches at its first", async () => {
+  const { b, cx } = await openTwoViews();
+  await press(b, cx, "e");
+  await markOn(b, cx, `knob-view-${MINE_TAB}-1`);
+  await press(b, cx, "right");
+  await press(b, cx, "right");
+  assert.equal(b.settingsPage.side, 2);
+  await press(b, cx, "j");
+  await press(b, cx, "k");
+  assert.equal(b.settingsPage.side, 0);
+});
+
+test("UI: the page's view order: picking the order it has writes nothing; „eigene“ before the board read the project's views writes nothing and says when it goes", async () => {
+  const { b, cx, host } = await openTwoViews();
+  await press(b, cx, "e");
+  await markOn(b, cx, `knob-order-${MINE_TAB}`);
+  await press(b, cx, "space");
+  await pickRow(b, cx);
+  await settle();
+  assert.deepEqual([b.modal, host.files[MACHINE_FILE]], [null, undefined]);
+  const unread = await bootBoard({ known: {}, projectAnswer: null });
+  await press(unread.b, unread.cx, "e");
+  await markOn(unread.b, unread.cx, `knob-order-${MINE_TAB}`);
+  await press(unread.b, unread.cx, "right");
+  assert.equal(unread.host.files[MACHINE_FILE], undefined);
+  assert.ok(knobTexts(unread.b, `order-${MINE_TAB}`).includes("„eigene“ geht, sobald das Board die Ansichten des Projects gelesen hat"));
+});
+
+test("readConfig's refused, for settings of the form before the contexts, names no file", () => {
+  const read = board.readConfig(testConfig(), settingsRead({ sources: { github: { views: { prs: { name: "R" } } } } }));
+  assert.deepEqual(read.refused, ["die Datei hat noch die Form vor den Kontexten und ist nicht umgestellt; das nächste Lesen (r) versucht es noch einmal"]);
+  assert.ok(read.errors.includes("settings.json hat noch die Form vor den Kontexten und ist nicht umgestellt; das nächste Lesen (r) versucht es noch einmal"));
+});
+
+test("UI: the page's folder edited in place: the whole list written and the folders read again; one twice, config.js says why", async () => {
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig() });
+  await host.answer("sh", scanAnswer([[], []]), isScanCall);
+  await press(b, cx, "enter");
+  assert.equal(b.modal.inputs.value.value(), "~/Repos");
+  await typeAndSave(b, cx, "~/Work");
+  assert.ok(knobTexts(b, "folder:~/Repos").includes("„repoFolders“ ist eine Liste aus mindestens einem Ordner (Text), jeder höchstens einmal, etwa [\"~/Repos\"]"));
+  await typeAndSave(b, cx, " ~/Code ");
+  assert.deepEqual([machineSettings(host), openScans(host).length], [{ repoFolders: ["~/Code", "~/Work"] }, 1]);
+});
+
+test("UI: the page by mouse: a topic, a knob, a switch and a choice field each take a click", async () => {
+  const { b, cx, host } = await openTwoViews();
+  await press(b, cx, "e");
+  await host.answer("gh", ok(fixture("github-issue-repos.json")), isReposCall);
+  await click(b, cx, `view-${MINE_TAB}-1-switch-2`);
+  assert.deepEqual([board.settingsSituation(b).knob.id, b.settingsPage.side, machineSettings(host)], [`view-${MINE_TAB}-1`, 2, mineHidden(["Backlog", "Done", "In progress"])], "a switch: its knob marked on it, turned");
+  await click(b, cx, "topic-general");
+  assert.equal(b.settingsPage.topic, "general");
+  await click(b, cx, "knob-language");
+  assert.equal(board.settingsSituation(b).knob.id, "language");
+  await click(b, cx, "knob-refreshMinutes");
+  await click(b, cx, "choice-setting-language");
+  assert.deepEqual([b.modal?.kind, board.settingsSituation(b).knob.id], ["settingChoice", "language"], "a choice field: its knob marked, its list open");
+});
+
+test("UI: `:` on the page says where the knob it was opened on is no longer marked, and runs nothing", async () => {
+  const { b, cx, host } = await openSettings({ topic: "general" });
+  await press(b, cx, "j");
+  await press(b, cx, "j");
+  assert.equal(board.settingsSituation(b).knob.id, "org");
+  await openMenu(b, cx);
+  const config = JSON.parse(testConfig());
+  delete config.sources.azure;
+  host.config = JSON.stringify(config);
+  b.reload(cx);
+  await settle();
+  b.modal.input.type("Ändern");
+  cx.call((own) => b.modal.input.submit(own));
+  await settle();
+  assert.deepEqual([b.notice?.text, b.modal, host.files[MACHINE_FILE]], ["„Azure-Organisation“ ist nicht mehr markiert", null, undefined]);
+});
+
+test("UI: the page's found repos: a context's by their names, a folder named otherwise or carrying an upstream as well said beside them; those of no context by platform, an Azure key never a GitHub context's", async () => {
+  const { b, host } = await openSettings({ topic: "repos", config: foldersConfig() });
+  await host.answer("sh", scanAnswer([[
+    ["atlas", "https://github.com/sample-user/atlas", "https://github.com/upstream-org/atlas"],
+    ["widget", "https://github.com/Other-User/Widget"],
+    ["docs", "https://dev.azure.com/example-org/Other%20Project/_git/docs"],
+    ["core", "https://dev.azure.com/example-org/Example%20Project/_git/core"],
+    ["thing", "https://dev.azure.com/example-org/sample-user/_git/thing"],
+    ["tools", "https://dev.azure.com/example-org/Ops.Tools/_git/tools"],
+  ], []]), isScanCall);
+  assert.deepEqual(knobTexts(b, `found-${GITHUB_CONTEXT}`), ["GitHub", "sample-user", "atlas", "tender", "Kontext 1 · 2 Repos · ~/Repos/atlas trägt auch upstream-org/atlas"]);
+  assert.deepEqual(knobTexts(b, `found-${AZURE_CONTEXT}`), ["Azure", "Example Project", "core", "Kontext 2 · 1 Repo"]);
+  assert.deepEqual(knobTexts(b, "found-other-github"), ["GitHub", "ohne Kontext", "Other-User/Widget · ~/Repos/widget", "upstream-org/atlas · upstream von ~/Repos/atlas", "2 Repos · der Startdialog bietet sie an, kein Tab zeigt ihre Issues oder PRs"]);
+  assert.deepEqual(knobTexts(b, "found-other-azure"), ["Azure", "ohne Kontext", "Ops.Tools/tools", "Other Project/docs", "sample-user/thing", "3 Repos · der Startdialog bietet sie an, kein Tab zeigt ihre Issues oder PRs"]);
+});
+
+test("UI: on the page J moves the mark with its section at once, before the file is written, so a second J at once moves the same section on; where herdr refuses the write the mark goes back with it", async () => {
+  const three = { sources: { github: { prs: { sections: [{ name: "A", query: "is:pr a" }, { name: "B", query: "is:pr b" }, { name: "C", query: "is:pr c" }] } } } };
+  const { b, cx, host } = await openSettings({ files: { [MACHINE_FILE]: JSON.stringify(three) } });
+  const names = () => machineSettings(host).sources.github.prs.sections.map((s) => s.name);
+  await markOn(b, cx, "knob-section-0");
+  cx.call((own) => b.key(key("j", shiftJ), own));
+  assert.equal(markedNav(b), "knob-section-1", "at once");
+  cx.call((own) => b.key(key("j", shiftJ), own));
+  await settle();
+  assert.deepEqual([names(), markedNav(b)], [["B", "C", "A"], "knob-section-2"]);
+  host.failWrite = new Error("Permission denied");
+  await press(b, cx, "k", { char: "K", modifiers: { shift: true } });
+  assert.deepEqual([names(), markedNav(b), b.notice?.text], [["B", "C", "A"], "knob-section-2", `${MACHINE_FILE} nicht gespeichert: Permission denied`]);
+});
+
+test("UI: on the page two J at once that herdr refuses: the banner keeps the first cause, the mark goes back to its section's row as the file holds it; a J refused while j marked another row meanwhile leaves the mark there", async () => {
+  const three = { sources: { github: { prs: { sections: [{ name: "A", query: "is:pr a" }, { name: "B", query: "is:pr b" }, { name: "C", query: "is:pr c" }] } } } };
+  const { b, cx, host } = await openSettings({ files: { [MACHINE_FILE]: JSON.stringify(three) } });
+  const names = () => machineSettings(host).sources.github.prs.sections.map((s) => s.name);
+  await markOn(b, cx, "knob-section-0");
+  host.failWrite = new Error("Permission denied");
+  cx.call((own) => b.key(key("j", shiftJ), own));
+  cx.call((own) => b.key(key("j", shiftJ), own));
+  assert.equal(markedNav(b), "knob-section-2", "at once");
+  await settle();
+  assert.deepEqual([names(), markedNav(b), b.notice?.text], [["A", "B", "C"], "knob-section-0", `${MACHINE_FILE} nicht gespeichert: Permission denied`]);
+  cx.call((own) => b.key(key("j", shiftJ), own));
+  cx.call((own) => b.key(key("j"), own));
+  assert.equal(markedNav(b), "knob-section-2");
+  await settle();
+  assert.deepEqual([names(), markedNav(b)], [["A", "B", "C"], "knob-section-2"]);
+  await press(b, cx, "k");
+  await press(b, cx, "j", shiftJ);
+  assert.deepEqual([names(), markedNav(b)], [["A", "B", "C"], "knob-section-1"], "a J from a row an earlier refused J put the mark on moves from there");
+});
+
+test("UI: on the page two J at once, the first written and the second refused: the mark goes back to where the first put its section", async () => {
+  const three = { sources: { github: { prs: { sections: [{ name: "A", query: "is:pr a" }, { name: "B", query: "is:pr b" }, { name: "C", query: "is:pr c" }] } } } };
+  const { b, cx, host } = await openSettings({ files: { [MACHINE_FILE]: JSON.stringify(three) } });
+  const names = () => machineSettings(host).sources.github.prs.sections.map((s) => s.name);
+  await markOn(b, cx, "knob-section-0");
+  const write = host.writeTextFile;
+  let calls = 0;
+  host.writeTextFile = async (...args) => {
+    calls += 1;
+    if (calls === 2) throw new Error("Permission denied");
+    return write(...args);
+  };
+  cx.call((own) => b.key(key("j", shiftJ), own));
+  cx.call((own) => b.key(key("j", shiftJ), own));
+  await settle();
+  assert.deepEqual([names(), markedNav(b), b.notice?.text], [["B", "A", "C"], "knob-section-1", `${MACHINE_FILE} nicht gespeichert: Permission denied`]);
+});
+
+test("UI: on the page J where this machine's file does not apply moves nothing and keeps the mark on its section; the banner says why", async () => {
+  const { b, cx, host } = await openSettings({ files: { [MACHINE_FILE]: JSON.stringify({ refreshMinutes: 0 }) } });
+  await markOn(b, cx, "knob-section-0");
+  cx.call((own) => b.key(key("j", shiftJ), own));
+  assert.equal(markedNav(b), "knob-section-0", "at once");
+  await settle();
+  assert.deepEqual([machineSettings(host), markedNav(b)], [{ refreshMinutes: 0 }, "knob-section-0"]);
+  assert.equal(b.notice?.text, `Nicht geändert: ${MACHINE_FILE} gilt nicht: das Board zeigt views.json allein`);
+});
+
+test("UI: on the page an edit saves at the entry it opened on: a folder by its name where the list changed meanwhile; where its row is gone the edit closes and the banner says so; a section refused where another stands in its place now", async () => {
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig() });
+  await host.answer("sh", scanAnswer([[], []]), isScanCall);
+  const changeFile = async (settings) => {
+    host.files[MACHINE_FILE] = JSON.stringify(settings);
+    b.reload(cx);
+    await settle();
+  };
+  await markOn(b, cx, "knob-folder:~/Work");
+  await press(b, cx, "enter");
+  await changeFile({ repoFolders: ["~/Work", "~/Repos"] });
+  await typeAndSave(b, cx, "~/Code");
+  assert.deepEqual(machineSettings(host), { repoFolders: ["~/Code", "~/Repos"] });
+  await markOn(b, cx, "knob-folder:~/Repos");
+  await press(b, cx, "enter");
+  await changeFile({ repoFolders: ["~/Code"] });
+  const gone = "„~/Repos“ steht nicht mehr auf der Seite; die Änderung ist verworfen";
+  assert.deepEqual([b.modal, machineSettings(host), texts(b.render()).includes(gone)], [null, { repoFolders: ["~/Code"] }, true]);
+  const sections = await openSettings();
+  await markOn(sections.b, sections.cx, "knob-section-0");
+  await press(sections.b, sections.cx, "enter");
+  const swapped = { sources: { github: { prs: { sections: [{ name: "Mine", query: "is:pr author:@me" }, { name: "Review", query: "is:pr review-requested:@me" }] } } } };
+  sections.host.files[MACHINE_FILE] = JSON.stringify(swapped);
+  sections.b.reload(sections.cx);
+  await settle();
+  await typeAndSave(sections.b, sections.cx, "Prüfen", "name");
+  assert.deepEqual([machineSettings(sections.host), sections.b.modal?.error], [swapped, ["„Review“ steht nicht mehr so in der Liste; Esc verwirft die Änderung"]]);
+});
+
+test("UI: on the page an edit its row left before the page followed: a refused save closes it, the banner saying so, and writes nothing", async () => {
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig() });
+  await host.answer("sh", scanAnswer([[], []]), isScanCall);
+  await markOn(b, cx, "knob-folder:~/Repos");
+  await press(b, cx, "enter");
+  host.files[MACHINE_FILE] = JSON.stringify({ repoFolders: ["~/Code"] });
+  await b.readSettingsFile();
+  b.takeConfig();
+  await typeAndSave(b, cx, "~/Else");
+  assert.deepEqual([b.modal, machineSettings(host), texts(b.render()).includes("„~/Repos“ steht nicht mehr auf der Seite; die Änderung ist verworfen")], [null, { repoFolders: ["~/Code"] }, true]);
+});
+
+test("UI: on the page an edit closes where a write the board made before it brings in a file that no longer has its row", async () => {
+  const atlas = { repos: { "sample-user/atlas": { checkout: "~/x" } } };
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig(), files: { [MACHINE_FILE]: JSON.stringify(atlas) } });
+  await host.answer("sh", scanAnswer([[], []]), isScanCall);
+  const read = host.readTextFile;
+  let release;
+  host.readTextFile = async (path) => {
+    if (path === MACHINE_FILE) {
+      host.readTextFile = read;
+      await new Promise((resolve) => (release = resolve));
+    }
+    return read(path);
+  };
+  await markOn(b, cx, "knob-exception-sample-user/tender");
+  await press(b, cx, "x");
+  await markOn(b, cx, "knob-exception-sample-user/atlas");
+  await press(b, cx, "enter");
+  assert.equal(b.modal?.kind, "setting");
+  host.files[MACHINE_FILE] = "{}";
+  release();
+  await settle();
+  assert.deepEqual([machineSettings(host), b.modal, b.notice], [{ repos: { "sample-user/tender": { checkout: null } } }, null, { text: "„sample-user/atlas“ steht nicht mehr auf der Seite; die Änderung ist verworfen", level: "warning" }]);
+});
+
+test("UI: on the page a section written by hand, its edit open, closes where the config takes the PR tab away; the banner names it", async () => {
+  const { b, cx, host } = await openSettings();
+  await markOn(b, cx, "add-section");
+  await press(b, cx, "a");
+  for (let i = 0; i < 3; i++) await press(b, cx, "down");
+  await pickRow(b, cx);
+  assert.equal(b.modal?.kind, "setting");
+  const config = JSON.parse(testConfig());
+  delete ghContext(config).prs;
+  host.config = JSON.stringify(config);
+  b.reload(cx);
+  await settle();
+  assert.deepEqual([b.modal, b.notice], [null, { text: "„eigene Suche“ steht nicht mehr auf der Seite; die Änderung ist verworfen", level: "warning" }]);
+});
+
+// The `nth` read of this machine's file from now on waits until release(),
+// the function this gives.
+function holdMachineRead(host, nth = 1) {
+  const read = host.readTextFile;
+  let release = null;
+  let reads = 0;
+  const held = new Promise((resolve) => (release = resolve));
+  host.readTextFile = async (path) => {
+    if (path === MACHINE_FILE && ++reads === nth) {
+      host.readTextFile = read;
+      await held;
+    }
+    return read(path);
+  };
+  return () => release();
+}
+const goneFromPage = (name) => ({ text: `„${name}“ steht nicht mehr auf der Seite`, level: "warning" });
+// The next write of a file herdr refuses.
+function refuseOnce(host) {
+  const write = host.writeTextFile;
+  host.writeTextFile = async () => {
+    host.writeTextFile = write;
+    throw new Error("Permission denied");
+  };
+}
+
+test("UI: on the page a choice list closes where its row leaves the page, the banner naming it, and nothing is written: a view order, the add of a section, the folders of a repo found twice once the folders are read again", async () => {
+  const order = await openSettings();
+  await markOn(order.b, order.cx, `knob-order-${MINE_TAB}`);
+  await press(order.b, order.cx, "space");
+  assert.equal(order.b.modal?.kind, "settingChoice");
+  order.host.config = withoutMine();
+  order.b.reload(order.cx);
+  await settle();
+  assert.deepEqual([order.b.modal, order.b.notice, order.host.files[MACHINE_FILE]], [null, goneFromPage("Reihenfolge"), undefined], "a view order");
+  const add = await openSettings();
+  await markOn(add.b, add.cx, "add-section");
+  await press(add.b, add.cx, "a");
+  assert.equal(add.b.modal?.kind, "settingChoice");
+  const config = JSON.parse(testConfig());
+  delete ghContext(config).prs;
+  add.host.config = JSON.stringify(config);
+  add.b.reload(add.cx);
+  await settle();
+  assert.deepEqual([add.b.modal, add.b.notice, add.host.files[MACHINE_FILE]], [null, goneFromPage("Abschnitt hinzufügen"), undefined], "the add of a section");
+  const twice = await openSettings({ topic: "repos", config: foldersConfig() });
+  await twice.host.answer("sh", scanAnswer([[["atlas", "https://github.com/sample-user/atlas"]], [["atlas2", "git@github.com:sample-user/atlas.git"]]]), isScanCall);
+  const release = holdMachineRead(twice.host);
+  await markOn(twice.b, twice.cx, "knob-folder:~/Work");
+  await press(twice.b, twice.cx, "x");
+  await markOn(twice.b, twice.cx, "knob-same-sample-user/atlas");
+  await press(twice.b, twice.cx, "a");
+  assert.equal(twice.b.modal?.kind, "settingChoice");
+  release();
+  await settle();
+  assert.equal(twice.b.modal?.kind, "settingChoice", "while the folders are read again");
+  await twice.host.answer("sh", scanAnswer([[["atlas", "https://github.com/sample-user/atlas"]]]), isScanCall);
+  assert.deepEqual([twice.b.modal, twice.b.notice, machineSettings(twice.host)], [null, goneFromPage("sample-user/atlas"), { repoFolders: ["~/Repos"] }], "a repo found twice");
+});
+
+test("UI: on the page the list of a PR tab's repos closes where the config takes the tab away, the banner naming it, and nothing is written", async () => {
+  const { b, cx, host } = await openSettings();
+  await host.answer("gh", ALL_REPOS(), isAllReposCall);
+  await markOn(b, cx, "knob-repos-github:prs");
+  await press(b, cx, "enter");
+  assert.equal(b.modal?.kind, "settingRepos");
+  const config = JSON.parse(testConfig());
+  delete ghContext(config).prs;
+  host.config = JSON.stringify(config);
+  b.reload(cx);
+  await settle();
+  assert.deepEqual([b.modal, b.notice, host.files[MACHINE_FILE]], [null, goneFromPage("Repos"), undefined]);
+});
+
+test("UI: on the page an edit on a row that a write herdr refuses takes away closes; one banner says the refusal, then that the edit is dropped", async () => {
+  const { b, cx, host } = await openSettings();
+  const release = holdMachineRead(host);
+  host.failWrite = new Error("Permission denied");
+  await markOn(b, cx, "add-section");
+  await press(b, cx, "a");
+  await pickRow(b, cx);
+  await markOn(b, cx, "knob-section-2");
+  await press(b, cx, "enter");
+  assert.deepEqual([b.modal?.kind, b.modal?.row], ["setting", "section-2"]);
+  release();
+  await settle();
+  const said = `${MACHINE_FILE} nicht gespeichert: Permission denied; „Alle offenen“ steht nicht mehr auf der Seite; die Änderung ist verworfen`;
+  assert.deepEqual([b.modal, b.notice, host.files[MACHINE_FILE]], [null, { text: said, level: "error" }, undefined]);
+  assert.ok(texts(b.render()).includes(said));
+});
+
+test("UI: on the page an edit whose row a write refused after the one it was made over takes away closes; the banner keeps the first cause, then says the edit is dropped", async () => {
+  const { b, cx, host } = await openSettings();
+  const first = holdMachineRead(host);
+  host.failWrite = new Error("Permission denied");
+  await markOn(b, cx, "knob-section-0");
+  await press(b, cx, "right");
+  await press(b, cx, "right");
+  await markOn(b, cx, "knob-section-1");
+  await press(b, cx, "enter");
+  const second = holdMachineRead(host, 2);
+  first();
+  await settle();
+  const cause = `${MACHINE_FILE} nicht gespeichert: Permission denied`;
+  assert.deepEqual([b.modal?.row, b.notice], ["section-1", { text: cause, level: "error" }], "the first refused: the section still in the file");
+  host.files[MACHINE_FILE] = JSON.stringify({ sources: { github: { prs: { sections: [{ name: "Review", query: "is:pr review-requested:@me" }] } } } });
+  second();
+  await settle();
+  assert.deepEqual([b.modal, b.notice], [null, { text: `${cause}; „Mine“ steht nicht mehr auf der Seite; die Änderung ist verworfen`, level: "error" }]);
+});
+
+test("UI: on the page a change made over a write herdr refuses is written where it still applies, and the page shows it", async () => {
+  const { b, cx, host } = await openSettings();
+  const release = holdMachineRead(host);
+  refuseOnce(host);
+  await markOn(b, cx, "knob-section-0");
+  await press(b, cx, "right");
+  await markOn(b, cx, "knob-prs-limit");
+  await press(b, cx, "enter");
+  b.modal.inputs.value.type("40");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  release();
+  await settle();
+  assert.deepEqual([machineSettings(host), knobTexts(b, "prs-limit").slice(2, 3)], [{ sources: { github: { prs: { limit: 40 } } } }, ["40 PRs"]]);
+});
+
+test("UI: on the page an edit open over a write herdr refuses, a change made over that write still to come, is checked as that change lands: on a row the change adds it stays open, the banner saying the refusal; on a row the refused write added it closes then, the refusal first", async () => {
+  const setLimit = async (b, cx) => {
+    await markOn(b, cx, "knob-prs-limit");
+    await press(b, cx, "enter");
+    b.modal.inputs.value.type("40");
+    cx.call((own) => b.modal.inputs.value.submit(own));
+  };
+  const addSection = async (b, cx) => {
+    await markOn(b, cx, "add-section");
+    await press(b, cx, "a");
+    await pickRow(b, cx);
+  };
+  const editAdded = async (b, cx) => {
+    await markOn(b, cx, "knob-section-2");
+    await press(b, cx, "enter");
+    assert.deepEqual([b.modal?.kind, b.modal?.row], ["setting", "section-2"]);
+  };
+  const refusal = { text: `${MACHINE_FILE} nicht gespeichert: Permission denied`, level: "error" };
+  const sectionNames = (host) => machineSettings(host)?.sources?.github?.prs?.sections?.map((s) => s.name) ?? null;
+
+  const adds = await openSettings();
+  const release = holdMachineRead(adds.host);
+  refuseOnce(adds.host);
+  await setLimit(adds.b, adds.cx);
+  await addSection(adds.b, adds.cx);
+  await editAdded(adds.b, adds.cx);
+  release();
+  await settle();
+  assert.deepEqual([adds.b.modal?.kind, adds.b.modal?.row, adds.b.notice], ["setting", "section-2", refusal], "the change adds the row");
+  assert.deepEqual([sectionNames(adds.host), machineSettings(adds.host).sources.github.prs.limit], [["Review", "Mine", "Alle offenen"], undefined]);
+
+  const refused = await openSettings();
+  const first = holdMachineRead(refused.host);
+  refuseOnce(refused.host);
+  await addSection(refused.b, refused.cx);
+  await setLimit(refused.b, refused.cx);
+  await editAdded(refused.b, refused.cx);
+  const second = holdMachineRead(refused.host, 2);
+  first();
+  await settle();
+  assert.deepEqual([refused.b.modal?.row, refused.b.notice], ["section-2", refusal], "the refusal is said at once; the change made over it is still to come");
+  second();
+  await settle();
+  assert.deepEqual([refused.b.modal, refused.b.notice], [null, { text: `${refusal.text}; „Alle offenen“ steht nicht mehr auf der Seite; die Änderung ist verworfen`, level: "error" }]);
+  assert.deepEqual([machineSettings(refused.host), sectionNames(refused.host)], [{ sources: { github: { prs: { limit: 40 } } } }, null]);
+});
+
+test("UI: on the page an edit on a row a queued change adds stays open while the write before it lands; both changes are written", async () => {
+  const { b, cx, host } = await openSettings();
+  const release = holdMachineRead(host);
+  await markOn(b, cx, "knob-section-0");
+  await press(b, cx, "right");
+  await markOn(b, cx, "add-section");
+  await press(b, cx, "a");
+  await pickRow(b, cx);
+  await markOn(b, cx, "knob-section-2");
+  await press(b, cx, "enter");
+  const notice = b.notice;
+  release();
+  await settle();
+  assert.deepEqual([b.modal?.kind, b.modal?.row, b.notice], ["setting", "section-2", notice]);
+  assert.deepEqual(machineSettings(host).sources.github.prs.sections.map((s) => [s.name, s.tone ?? null]), [["Review", "violet"], ["Mine", null], ["Alle offenen", null]]);
+});
+
+test("UI: on the page an edit on a row the second of two changes made over a write herdr refuses adds stays open while the first of them lands; both are written", async () => {
+  const { b, cx, host } = await openSettings();
+  const release = holdMachineRead(host);
+  refuseOnce(host);
+  await markOn(b, cx, "knob-prs-limit");
+  await press(b, cx, "enter");
+  b.modal.inputs.value.type("40");
+  cx.call((own) => b.modal.inputs.value.submit(own));
+  for (const preset of ["Alle offenen", "Mir zugewiesen"]) {
+    await markOn(b, cx, "add-section");
+    await press(b, cx, "a");
+    b.modal.list.input.type(preset);
+    await pickRow(b, cx);
+  }
+  await markOn(b, cx, "knob-section-3");
+  await press(b, cx, "enter");
+  release();
+  await settle();
+  assert.deepEqual([b.modal?.kind, b.modal?.row, b.notice], ["setting", "section-3", { text: `${MACHINE_FILE} nicht gespeichert: Permission denied`, level: "error" }]);
+  assert.deepEqual(knobTexts(b, "section-3").slice(1, 2), ["Mir zugewiesen"]);
+  assert.deepEqual(machineSettings(host), { sources: { github: { prs: { sections: [
+    { name: "Review", query: "is:pr review-requested:@me" },
+    { name: "Mine", query: "is:pr author:@me" },
+    { name: "Alle offenen", query: "is:pr is:open archived:false" },
+    { name: "Mir zugewiesen", query: "is:pr is:open archived:false assignee:@me" },
+  ] } } } });
+});
+
+test("UI: on the page an edit on a row a write herdr refuses added closes as the last of two changes made over that write lands, the refusal first; both changes are written", async () => {
+  const setLimit = async (b, cx, value) => {
+    await markOn(b, cx, "knob-prs-limit");
+    await press(b, cx, "enter");
+    b.modal.inputs.value.type(value);
+    cx.call((own) => b.modal.inputs.value.submit(own));
+  };
+  const { b, cx, host } = await openSettings();
+  const release = holdMachineRead(host);
+  refuseOnce(host);
+  await markOn(b, cx, "add-section");
+  await press(b, cx, "a");
+  await pickRow(b, cx);
+  await setLimit(b, cx, "40");
+  await setLimit(b, cx, "5");
+  await markOn(b, cx, "knob-section-2");
+  await press(b, cx, "enter");
+  assert.deepEqual([b.modal?.kind, b.modal?.row], ["setting", "section-2"]);
+  release();
+  await settle();
+  assert.deepEqual([b.modal, b.notice], [null, { text: `${MACHINE_FILE} nicht gespeichert: Permission denied; „Alle offenen“ steht nicht mehr auf der Seite; die Änderung ist verworfen`, level: "error" }]);
+  assert.deepEqual(machineSettings(host), { sources: { github: { prs: { limit: 5 } } } });
+});
+
+test("UI: on the page an edit on a row a write herdr refuses added, left open by a second refused write, closes as the change made over that one lands; the banner keeps the first refusal", async () => {
+  const setValue = async (b, cx, knob, value) => {
+    await markOn(b, cx, knob);
+    await press(b, cx, "enter");
+    b.modal.inputs.value.type(value);
+    cx.call((own) => b.modal.inputs.value.submit(own));
+  };
+  const { b, cx, host } = await openSettings();
+  const release = holdMachineRead(host);
+  const write = host.writeTextFile;
+  let writes = 0;
+  host.writeTextFile = async (path, ...rest) => {
+    const why = path === MACHINE_FILE && { 1: "Permission denied", 3: "No space left on device" }[++writes];
+    if (why) throw new Error(why);
+    return write(path, ...rest);
+  };
+  await markOn(b, cx, "add-section");
+  await press(b, cx, "a");
+  await pickRow(b, cx);
+  await setValue(b, cx, "knob-prs-limit", "40");
+  await setValue(b, cx, "knob-name-github:prs", "Reviews");
+  await setValue(b, cx, "knob-prs-limit", "5");
+  await markOn(b, cx, "knob-section-2");
+  await press(b, cx, "enter");
+  assert.deepEqual([b.modal?.kind, b.modal?.row], ["setting", "section-2"]);
+  release();
+  await settle();
+  assert.deepEqual([b.modal, b.notice], [null, { text: `${MACHINE_FILE} nicht gespeichert: Permission denied; „Alle offenen“ steht nicht mehr auf der Seite; die Änderung ist verworfen`, level: "error" }]);
+  assert.deepEqual([writes, machineSettings(host)], [4, { sources: { github: { prs: { limit: 5 } } } }]);
+});
+
+test("UI: a J herdr refuses after the page was left and opened again at once leaves the mark on the new page's first row", async () => {
+  const three = { sources: { github: { prs: { sections: [{ name: "A", query: "is:pr a" }, { name: "B", query: "is:pr b" }, { name: "C", query: "is:pr c" }] } } } };
+  const { b, cx, host } = await openSettings({ files: { [MACHINE_FILE]: JSON.stringify(three) } });
+  await markOn(b, cx, "knob-section-0");
+  host.failWrite = new Error("Permission denied");
+  cx.call((own) => b.key(key("j", shiftJ), own));
+  cx.call((own) => b.key(key("escape"), own));
+  cx.call((own) => b.key(key("e"), own));
+  await settle();
+  assert.deepEqual([markedNav(b), b.notice?.text], [navOf(b)[0], `${MACHINE_FILE} nicht gespeichert: Permission denied`]);
+});
+
+test("UI: a tab the config adds while its topic shows is read for the page: the PR tab's repos, with the spinner while they load and none for a read not started", async () => {
+  const config = JSON.parse(testConfig());
+  delete ghContext(config).prs;
+  const { b, cx, host } = await openSettings({ config: JSON.stringify(config) });
+  assert.deepEqual(host.open("gh").filter((c) => isReposCall(c.args)), []);
+  host.config = testConfig();
+  b.reload(cx);
+  await settle();
+  assert.deepEqual(host.open("gh").filter((c) => isReposCall(c.args)).map((c) => isAllReposCall(c.args)), [true]);
+  assert.equal(turns(byId(b.render(), "knob-repos-github:prs")), true);
+  await host.answer("gh", ALL_REPOS(), isAllReposCall);
+  assert.deepEqual(knobTexts(b, "repos-github:prs").slice(2, 3), ["alle 4 Repos von sample-user an"]);
+  b.settingsPage.owners.clear();
+  assert.equal(turns(byId(b.render(), "knob-repos-github:prs")), false);
+});
+
+test("UI: on the page a section's edit is refused where only its search changed since it opened", async () => {
+  const { b, cx, host } = await openSettings();
+  await markOn(b, cx, "knob-section-0");
+  await press(b, cx, "enter");
+  const changed = { sources: { github: { prs: { sections: [{ name: "Review", query: "is:pr review-requested:@me -author:@me" }, { name: "Mine", query: "is:pr author:@me" }] } } } };
+  host.files[MACHINE_FILE] = JSON.stringify(changed);
+  b.reload(cx);
+  await settle();
+  await typeAndSave(b, cx, "Prüfen", "name");
+  assert.deepEqual([machineSettings(host), b.modal?.error], [changed, ["„Review“ steht nicht mehr so in der Liste; Esc verwirft die Änderung"]]);
+});
+
+test("UI: on the page a folder this machine's file writes with a trailing / is edited in place", async () => {
+  const { b, cx, host } = await openSettings({ topic: "repos", config: foldersConfig(), files: { [MACHINE_FILE]: JSON.stringify({ repoFolders: ["~/Repos", "~/Work/"] }) } });
+  await host.answer("sh", scanAnswer([[], []]), isScanCall);
+  await markOn(b, cx, "knob-folder:~/Work");
+  await press(b, cx, "enter");
+  await typeAndSave(b, cx, "~/Code");
+  assert.deepEqual([machineSettings(host), b.modal], [{ repoFolders: ["~/Repos", "~/Code"] }, null]);
+});
+
+test("changeSettings makes no change from a check that gives no file's text: the banner says why", async () => {
+  const { b, cx, host } = await openBoard();
+  const { started, done } = cx.call((own) => b.changeSettings([[["refreshMinutes"], 5]], own, null, { refused: ["„refreshMinutes“ ist eine Zahl ab 1"] }));
+  assert.deepEqual([started, await done], [false, false]);
+  assert.deepEqual([host.files[MACHINE_FILE], b.config.refreshMinutes, b.notice?.text], [undefined, 3, "Nicht geändert: „refreshMinutes“ ist eine Zahl ab 1"]);
+});
+
+test("UI: the page's edit, choice list and list of a PR tab's repos close with the page where views.json turns invalid; a board's dialog stays", async () => {
+  for (const [topic, row, k, kind] of [["general", "knob-refreshMinutes", "enter", "setting"], ["general", "knob-language", "space", "settingChoice"], [GITHUB_CONTEXT, "knob-repos-github:prs", "enter", "settingRepos"]]) {
+    const { b, cx, host } = await openSettings({ topic });
+    await markOn(b, cx, row);
+    await press(b, cx, k);
+    assert.equal(b.modal?.kind, kind);
+    host.config = "{";
+    b.reload(cx);
+    await settle();
+    assert.deepEqual([b.settingsPage, b.modal], [null, null], kind);
+    assert.ok(b.render());
+  }
+  const { b, cx, host } = await openBoard();
+  await openMenu(b, cx);
+  host.config = "{";
+  b.reload(cx);
+  await settle();
+  assert.equal(b.modal?.kind, "commands");
+});
+
+test("UI: the page's Azure teams are written whole only where each team is one config.js takes: a team with problems or one named twice refuses the change at the knob, in config.js's words, and nothing is written", async () => {
+  const at = "Azure-Kontext 1 („Example Project“)";
+  for (const [teams, why] of [
+    [[{ team: "Example Team" }, { team: "Other", views: ["bogus"] }, "junk"], [`${at}, Team 2 („Other“): „views“ ist eine Liste aus "sprint" und "backlog", jede höchstens einmal`, `${at}, Team 3: muss ein Objekt sein`]],
+    [[{ team: "Example Team" }, { team: "Example Team" }], [`${at}, Team 2 („Example Team“): gibt es schon`]],
+  ]) {
+    const config = JSON.parse(testConfig());
+    config.sources.azure.contexts[0].teams = teams;
+    assert.deepEqual(board.readConfig(JSON.stringify(config)).errors, why, "views.json's read says the same");
+    const { b, cx, host } = await openSettings({ topic: AZURE_CONTEXT, config: JSON.stringify(config) });
+    await press(b, cx, "space");
+    assert.equal(host.files[MACHINE_FILE], undefined);
+    const shown = knobTexts(b, "team-azure:team:Example Project/Example Team");
+    assert.ok(why.every((w) => shown.includes(w)), JSON.stringify(shown));
+  }
+});
+
+test("UI: the page names an Azure context's team with problems by the context's place among the contexts, as views.json's read does", async () => {
+  const config = JSON.parse(testConfig());
+  config.sources.azure.contexts.push({ project: "Other Project", teams: [{ team: "Other Team" }, { team: "Odd", views: ["bogus"] }] });
+  const why = "Azure-Kontext 2 („Other Project“), Team 2 („Odd“): „views“ ist eine Liste aus \"sprint\" und \"backlog\", jede höchstens einmal";
+  assert.deepEqual(board.readConfig(JSON.stringify(config)).errors, [why]);
+  const { b, cx, host } = await openSettings({ topic: "azure:Other Project", config: JSON.stringify(config) });
+  await press(b, cx, "space");
+  assert.deepEqual([host.files[MACHINE_FILE], knobTexts(b, "team-azure:team:Other Project/Other Team").includes(why)], [undefined, true]);
+});
+
+test("UI: the page's left side says where the repo folders could not be read", async () => {
+  const { b, host } = await openSettings({ topic: "repos", config: foldersConfig() });
+  await host.answer("sh", { code: 2, stdout: "", stderr: "sh: boom" }, isScanCall);
+  assert.deepEqual(texts(byId(b.render(), "topic-repos")), ["3", "Repos auf diesem Rechner", "2 Ordner · nicht lesbar"]);
+});
+
+test("UI: the page's list of a PR tab's repos reads all the owner's own repos, archived ones left out, without the Issues tab's filter, and reads them again each time the page opens", async () => {
+  assert.match(board.githubOwnerReposArgs("sample-user", { query: board.OWNER_REPOS_QUERY })[3], /repositories\(first: 100, after: \$after, ownerAffiliations: \[OWNER\], isArchived: false, orderBy: \{ field: NAME, direction: ASC \}\)/);
+  const { b, cx, host } = await openSettings();
+  assert.deepEqual(host.open("gh").filter((c) => isReposCall(c.args)).map((c) => isAllReposCall(c.args)), [true]);
+  await host.answer("gh", ALL_REPOS(), isAllReposCall);
+  board.showSettingsTopic(b, "general", cx);
+  board.showSettingsTopic(b, `context:${GITHUB_CONTEXT}`, cx);
+  assert.equal(host.open("gh").filter((c) => isReposCall(c.args)).length, 0, "once while the page shows");
+  await press(b, cx, "escape");
+  await press(b, cx, "e");
+  assert.deepEqual(host.open("gh").filter((c) => isReposCall(c.args)).map((c) => isAllReposCall(c.args)), [true], "again as it opens");
+  await host.answer("gh", ok(fixture("github-issue-repos.json")), isAllReposCall);
+  assert.deepEqual(knobTexts(b, "repos-github:prs").slice(2, 3), ["alle 3 Repos von sample-user an"]);
 });

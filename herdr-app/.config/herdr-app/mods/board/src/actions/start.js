@@ -1,4 +1,5 @@
-import { foldedName, itemKey } from "../shared.js";
+import { BoardError, firstLine, foldedName, itemKey } from "../shared.js";
+import { SH_TIMEOUT, call, what } from "../tools.js";
 
 const NAME_MAX = 60;
 
@@ -112,10 +113,11 @@ function azureParts(host, parts) {
   return [git === org ? parts[git + 1] : parts[git - 1], parts[git + 1]];
 }
 
-// A remote's URL → the key of its repo: "owner/repo" on GitHub,
-// "project/repo" on Azure DevOps (azureParts), "host/path" anywhere else;
-// null for a URL of no host, a local path.
-export function remoteKey(url) {
+// A remote's URL → its repo, { key, source }: "owner/repo" on GitHub
+// (source "github"), "project/repo" on Azure DevOps (azureParts; "azure"),
+// "host/path" anywhere else (null); null for a URL of no host, a local
+// path.
+export function remoteRepo(url) {
   const text = String(url ?? "").trim();
   const [, host, rest] = text.match(WITH_SCHEME) ?? text.match(SCP_LIKE) ?? [];
   if (!host) return null;
@@ -123,24 +125,28 @@ export function remoteKey(url) {
   const at = host.toLowerCase();
   if (at === AZURE_HOST || AZURE_SSH_HOSTS.includes(at) || OLD_AZURE_HOST.test(at)) {
     const [project, repo] = azureParts(at, parts);
-    return project && repo ? azureRepoKey(unescaped(project), unescaped(repo)) : null;
+    return project && repo ? { key: azureRepoKey(unescaped(project), unescaped(repo)), source: "azure" } : null;
   }
   if (parts.length < 2) return null;
-  return at === GITHUB_HOST ? `${parts[0]}/${parts[1]}` : `${at}/${parts.join("/")}`;
+  return at === GITHUB_HOST ? { key: `${parts[0]}/${parts[1]}`, source: "github" } : { key: `${at}/${parts.join("/")}`, source: null };
 }
+
+export const remoteKey = (url) => remoteRepo(url)?.key ?? null;
 
 const sameRepoKey = (a, b) => foldedName(a) === foldedName(b);
 const NO_GIT = 127;
 
 // REPOS_SCRIPT's answer for `folders` → { repos, missing, unreadable,
 // remotesUnread, gitMissing, withLineBreak }: repos [{ key, folder,
-// written }] by key, once per key of its origin and its upstream
-// (remoteKey), or by its folder's name where neither has one; folder where
-// it is on that machine, written that folder as views.json writes its repo
-// folder. remotesUnread: [{ written, status }] for each repo whose remotes
-// git did not read, with git's exit status; gitMissing where that is NO_GIT
-// for every repo found; withLineBreak the repos left out for a line break
-// in their path, as written.
+// written, source?, upstream? }] by key, once per key of its origin and its
+// upstream (remoteRepo, whose source a GitHub or Azure key has; upstream:
+// true where the key is the upstream's alone), or by its folder's name
+// where neither has one; folder where it is on that machine, written that
+// folder as views.json writes its repo folder. remotesUnread: [{ written,
+// status }] for each repo whose remotes git did not read, with git's exit
+// status; gitMissing where that is NO_GIT for every repo found;
+// withLineBreak the repos left out for a line break in their path, as
+// written.
 export function parseRepos(stdout, folders) {
   const repos = [];
   const missing = [];
@@ -161,15 +167,27 @@ export function parseRepos(stdout, folders) {
       const written = writtenIn(parent, folder);
       found++;
       if (git) remotesUnread.push({ written, status: Number(git) });
-      const keys = [origin, upstream].map(remoteKey).filter(Boolean);
-      for (const key of keys.length ? keys : [name]) {
-        if (!repos.some((r) => r.folder === folder && sameRepoKey(r.key, key))) repos.push({ key, folder, written });
+      const remotes = [origin, upstream].map((url, i) => ({ ...remoteRepo(url), upstream: i === 1 })).filter((x) => x.key);
+      for (const { key, source = null, upstream: up = false } of remotes.length ? remotes : [{ key: name }]) {
+        if (!repos.some((r) => r.folder === folder && sameRepoKey(r.key, key))) repos.push({ key, folder, written, ...(source && { source }), ...(up && { upstream: true }) });
       }
     } else if (fields[4]) withLineBreak.push(writtenIn(parent, fields.slice(4).join("\t")));
   }
   const gitMissing = found > 0 && remotesUnread.length === found && remotesUnread.every((u) => u.status === NO_GIT);
   return { repos: sortedByKey(repos), missing, unreadable, remotesUnread, gitMissing, withLineBreak };
 }
+
+// sh's output for `args` on the machine `on`, for the view `view` (null for
+// none) in the board's log as `kind`; a failure throws what said(code)
+// gives, else sh's first line of stderr.
+export async function shRun(args, on, view, kind, said = () => null) {
+  const r = await call("sh", args, on, SH_TIMEOUT, what(view, kind));
+  if (r.code !== 0) throw new BoardError(said(r.code) ?? (firstLine(r.stderr) || `sh endete mit ${r.code}`));
+  return r.stdout;
+}
+
+// The repos the folders hold on the machine `on` (REPOS_SCRIPT, parseRepos).
+export const reposScan = async (folders, on, view) => parseRepos(await shRun(reposArgs(folders), on, view, "repos"), folders);
 
 const writtenIn = (parent, folder) => `${parent.endsWith("/") ? parent : `${parent}/`}${folder.split("/").pop()}`;
 
